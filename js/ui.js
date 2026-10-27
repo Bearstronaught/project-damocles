@@ -32,12 +32,26 @@ export function setupUI(state, actions) {
   // The Sell button
   byId("sell-ore").addEventListener("click", () => actions.sellOre());
 
-  // The Reset button (asks first - it can't be undone!)
-  byId("reset-game").addEventListener("click", () => {
-    const sure = confirm("Wipe your save and start again? This can't be undone.");
-    if (sure) {
-      actions.resetGame();
+  // The Reset button. It can't be undone, so it needs two clicks:
+  // the first click "arms" it, the second (within 4 seconds)
+  // actually wipes the save. We don't use the browser's confirm()
+  // pop-up because some places (like embedded previews) block it.
+  const resetButton = byId("reset-game");
+  let resetArmed = false;
+  resetButton.addEventListener("click", () => {
+    if (!resetArmed) {
+      resetArmed = true;
+      resetButton.textContent = "Click again to wipe your save";
+      // If they don't click again in time, put the button back.
+      setTimeout(() => {
+        resetArmed = false;
+        resetButton.textContent = "Reset save";
+      }, 4000);
+      return;
     }
+    resetArmed = false;
+    resetButton.textContent = "Reset save";
+    actions.resetGame();
   });
 
   // Build one "ship card" per ship in the fleet.

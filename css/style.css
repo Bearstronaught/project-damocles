@@ -18,6 +18,10 @@
   --teal: #46d6c8;            /* navigation / movement data */
   --red: #ff5a4a;             /* danger */
   --glow: 0 0 6px rgba(255, 180, 58, 0.45);   /* the soft text glow */
+
+  /* Tells the browser this is a dark page, so scrollbars and
+     built-in controls are drawn dark too. */
+  color-scheme: dark;
 }
 
 
