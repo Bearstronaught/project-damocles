@@ -1,9 +1,9 @@
 <!DOCTYPE html>
 <!--
   index.html
-  The page itself. It holds the layout (the panels and the
-  empty spaces where numbers go). The numbers are filled in by
-  the JavaScript in js/ui.js.
+  The page itself. It holds the layout (the screens, panels and
+  the empty spaces where numbers go). The numbers are filled in
+  by the JavaScript in js/ui.js.
 -->
 <html lang="en">
 <head>
@@ -31,36 +31,66 @@
     </div>
   </header>
 
-  <main class="layout">
+  <!-- ===== Navigation: one button per screen =====
+       data-screen says which screen each button opens. -->
+  <nav class="nav">
+    <button class="nav-btn" data-screen="command">Command</button>
+    <button class="nav-btn" data-screen="ships">Ships</button>
+    <button class="nav-btn" data-screen="skills">Skills</button>
+  </nav>
 
-    <!-- ===== Fleet panel: one card per ship (built by ui.js) ===== -->
-    <section class="panel">
-      <h2 class="panel-title">FLEET</h2>
-      <div id="fleet-list"></div>
+  <main>
+
+    <!-- ===================== COMMAND SCREEN ===================== -->
+    <section class="screen layout" data-screen="command">
+
+      <!-- Fleet: one card per ship (built by ui.js) -->
+      <div class="panel">
+        <h2 class="panel-title">FLEET</h2>
+        <div id="fleet-list"></div>
+      </div>
+
+      <!-- Cargo: what's in storage, and selling -->
+      <div class="panel">
+        <h2 class="panel-title">CARGO HOLD</h2>
+        <table class="cargo-table">
+          <tr>
+            <th>Item</th>
+            <th>Units</th>
+            <th>Value</th>
+          </tr>
+          <tr>
+            <td>Iron ore</td>
+            <td id="ore-amount">0</td>
+            <td id="ore-value">0 cr</td>
+          </tr>
+        </table>
+        <button id="sell-ore" class="btn">Sell all ore</button>
+      </div>
+
+      <!-- Log: messages about what happened -->
+      <div class="panel panel-wide">
+        <h2 class="panel-title">SHIP'S LOG</h2>
+        <ul id="log" class="log"></ul>
+      </div>
     </section>
 
-    <!-- ===== Cargo panel: what's in storage, and selling ===== -->
-    <section class="panel">
-      <h2 class="panel-title">CARGO HOLD</h2>
-      <table class="cargo-table">
-        <tr>
-          <th>Item</th>
-          <th>Units</th>
-          <th>Value</th>
-        </tr>
-        <tr>
-          <td>Iron ore</td>
-          <td id="ore-amount">0</td>
-          <td id="ore-value">0 cr</td>
-        </tr>
-      </table>
-      <button id="sell-ore" class="btn">Sell all ore</button>
+    <!-- ===================== SHIPS SCREEN ===================== -->
+    <section class="screen layout" data-screen="ships" hidden>
+      <div class="panel panel-wide">
+        <h2 class="panel-title">SHIPYARD</h2>
+        <!-- One card per ship type (built by ui.js) -->
+        <div id="shipyard-list" class="card-grid"></div>
+      </div>
     </section>
 
-    <!-- ===== Log panel: messages about what happened ===== -->
-    <section class="panel panel-wide">
-      <h2 class="panel-title">SHIP'S LOG</h2>
-      <ul id="log" class="log"></ul>
+    <!-- ===================== SKILLS SCREEN ===================== -->
+    <section class="screen layout" data-screen="skills" hidden>
+      <div class="panel panel-wide">
+        <h2 class="panel-title">SKILLS</h2>
+        <!-- One card per skill (built by ui.js) -->
+        <div id="skills-list" class="card-grid"></div>
+      </div>
     </section>
 
   </main>

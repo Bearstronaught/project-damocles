@@ -102,27 +102,212 @@ body {
 }
 
 
-/* ----- Ship cards ----- */
-.ship-card {
+/* ----- Hiding things -----
+   The "hidden" switch hides screens and buttons. Our own
+   "display: grid" rules would otherwise win and show them
+   anyway, so this rule insists. */
+[hidden] {
+  display: none !important;
+}
+
+
+/* ----- Navigation bar ----- */
+.nav {
+  display: flex;
+  gap: 8px;
+  padding: 10px 16px 0;
+  max-width: 900px;
+  margin: 0 auto;
+}
+
+.nav-btn {
+  font: inherit;
+  font-size: 13px;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: var(--amber-dim);
+  background: transparent;
+  border: 1px solid var(--amber-faint);
+  padding: 6px 14px;
+  cursor: pointer;
+  position: relative;         /* so the alert dot can sit on it */
+  text-shadow: var(--glow);
+}
+
+.nav-btn:hover {
+  color: var(--amber);
+}
+
+/* The screen you're on */
+.nav-btn.active {
+  color: var(--amber);
+  border-color: var(--amber);
+  background: rgba(255, 180, 58, 0.08);
+}
+
+/* A teal dot when there's something to do on that screen */
+.nav-btn.has-alert::after {
+  content: "";
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--teal);
+  box-shadow: 0 0 6px var(--teal);
+}
+
+
+/* ----- Cards (ships, shipyard, skills) ----- */
+.ship-card,
+.yard-card,
+.skill-card {
   border: 1px solid var(--amber-faint);
   padding: 12px;
+}
+
+.ship-card {
   margin-bottom: 10px;
 }
 
-.ship-header {
+/* Shipyard and skills lay their cards out in a grid */
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 12px;
+}
+
+.card-header {
   display: flex;
   justify-content: space-between;
+  align-items: baseline;
   flex-wrap: wrap;
   gap: 6px;
 }
 
-.ship-name {
+.card-name {
   font-weight: 600;
 }
 
-.ship-class {
+.card-sub {
   color: var(--amber-dim);
   font-size: 13px;
+}
+
+/* Small label in a card's corner: STARTER / LOCKED / AVAILABLE */
+.card-tag {
+  font-size: 11px;
+  letter-spacing: 0.15em;
+  color: var(--teal);
+}
+
+.yard-card.locked .card-tag {
+  color: var(--amber-dim);
+}
+
+/* Locked ship types are dimmed */
+.yard-card.locked .card-name,
+.yard-card.locked .stats {
+  opacity: 0.6;
+}
+
+
+/* ----- Stat lists (label on the left, value on the right) ----- */
+.stats {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 12px;
+  margin: 10px 0;
+  font-size: 13px;
+}
+
+.stats dt {
+  color: var(--amber-dim);
+}
+
+.stats dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.yard-note {
+  font-size: 13px;
+  color: var(--amber-dim);
+  margin-bottom: 10px;
+  min-height: 1.5em;
+}
+
+
+/* ----- Skill cards ----- */
+.skill-level {
+  font-weight: 600;
+  color: var(--teal);
+  text-shadow: 0 0 6px rgba(70, 214, 200, 0.4);
+}
+
+.skill-desc {
+  margin: 6px 0 10px;
+  font-size: 13px;
+  color: var(--amber-dim);
+}
+
+.skill-xp {
+  font-size: 13px;
+  margin-top: -4px;
+  font-variant-numeric: tabular-nums;
+}
+
+.sub-title {
+  margin: 14px 0 6px;
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0.2em;
+  color: var(--amber-dim);
+}
+
+.unlock-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: 13px;
+}
+
+.unlock-list li {
+  display: flex;
+  gap: 10px;
+  padding: 3px 0;
+  border-bottom: 1px dashed var(--amber-faint);
+  color: var(--amber-dim);
+}
+
+/* Skill cards hold longer lines, so give them wider columns.
+   min(360px, 100%) means "360px, unless the screen is narrower
+   than that" - so phones still fit. */
+#skills-list {
+  grid-template-columns: repeat(auto-fill, minmax(min(360px, 100%), 1fr));
+}
+
+.unlock-level {
+  min-width: 3.5em;
+}
+
+.unlock-name {
+  flex: 1;                    /* take the spare room in the line */
+}
+
+.unlock-state {
+  margin-left: auto;          /* push it to the right */
+  font-size: 11px;
+  letter-spacing: 0.15em;
+}
+
+.unlock-list li.unlocked {
+  color: var(--amber);
+}
+
+.unlock-list li.unlocked .unlock-state {
+  color: var(--teal);
 }
 
 .ship-status {
@@ -150,6 +335,19 @@ body {
   width: 0%;                  /* ui.js changes this */
   background: var(--teal);
   box-shadow: 0 0 8px var(--teal);
+}
+
+/* XP bars are amber: teal means "moving", amber means "you". */
+.progress-fill.xp-fill {
+  background: var(--amber);
+  box-shadow: var(--glow);
+}
+
+/* Visible keyboard focus for anyone using Tab to move around */
+.btn:focus-visible,
+.nav-btn:focus-visible {
+  outline: 2px solid var(--teal);
+  outline-offset: 2px;
 }
 
 

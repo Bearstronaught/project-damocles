@@ -14,7 +14,9 @@
 // If we ever change the shape of the state (rename something,
 // add a new section), we bump this number. save.js then knows
 // an old save needs upgrading before it's used.
-export const SAVE_VERSION = 1;
+//   Version 1: credits, cargo, ships, jobs
+//   Version 2: added skills (XP) and a ship-number counter
+export const SAVE_VERSION = 2;
 
 
 // -------------------------------------------------------------
@@ -43,6 +45,14 @@ export function createNewGame() {
         type: "prospector",
       },
     ],
+
+    // The number the NEXT ship bought will get ("ship-2").
+    nextShipNumber: 2,
+
+    // XP in each skill. Levels are worked out from XP (skills.js).
+    skills: {
+      mining: { xp: 0 },
+    },
 
     // Jobs that are currently running (empty at the start).
     // See jobs.js for what a job looks like.

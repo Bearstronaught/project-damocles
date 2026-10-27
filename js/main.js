@@ -13,12 +13,14 @@
 //   5. Start autosaving.
 // =============================================================
 
-import { RULES, ITEMS, FIELDS } from "../data/content.js";
+import { RULES, ITEMS, FIELDS, SHIP_TYPES, SKILLS } from "../data/content.js";
 import { createNewGame, findShip } from "./state.js";
 import { startMiningJob, cancelJob, getJobForShip, processJobs } from "./jobs.js";
 import { sellAll } from "./trade.js";
+import { buyShip } from "./shipyard.js";
+import { getUnlocksAtLevel } from "./skills.js";
 import { saveGame, loadGame, deleteSave, applyOfflineProgress } from "./save.js";
-import { setupUI, render, addLog, formatNumber, formatDuration } from "./ui.js";
+import { setupUI, buildFleetCards, render, addLog, formatNumber, formatDuration } from "./ui.js";
 
 
 // -------------------------------------------------------------
@@ -30,15 +32,6 @@ const isNewGame = state === null;
 
 if (isNewGame) {
   state = createNewGame();
-}
-
-
-// -------------------------------------------------------------
-// 2. Offline progress (only for a returning player).
-// -------------------------------------------------------------
-if (!isNewGame) {
-  const report = applyOfflineProgress(state, Date.now());
-  reportOfflineProgress(report);
 }
 
 
@@ -76,10 +69,20 @@ const actions = {
     refresh();
   },
 
+  buyShip(shipTypeId) {
+    const ship = buyShip(state, shipTypeId);
+    if (ship) {
+      // The fleet changed, so rebuild the ship cards.
+      buildFleetCards(state, actions);
+      addLog(`${ship.name} (${SHIP_TYPES[ship.type].name}) joins the fleet. Docked at home, awaiting orders.`);
+    }
+    refresh();
+  },
+
   resetGame() {
     deleteSave();
     state = createNewGame();
-    setupUI(state, actions);    // rebuild ship cards for the new fleet
+    buildFleetCards(state, actions);    // rebuild ship cards for the new fleet
     addLog("Save wiped. A new contract begins.");
     refresh();
   },
@@ -98,7 +101,8 @@ function tick() {
     if (!result.itemId) continue;   // skip anything that produced nothing
     const ship = findShip(state, result.shipId);
     const itemName = ITEMS[result.itemId].name.toLowerCase();
-    addLog(`${ship.name} returned with ${result.amount} ${itemName}.`);
+    addLog(`${ship.name} returned with ${result.amount} ${itemName} (+${result.xpGained} ${SKILLS[result.skillId].name} XP).`);
+    logLevelUps(result.skillId, result.newLevels);
   }
 
   render(state, now);
@@ -109,6 +113,21 @@ function tick() {
 function refresh() {
   render(state, Date.now());
   saveGame(state);
+}
+
+
+// -------------------------------------------------------------
+// logLevelUps(skillId, levels)
+// Announces each new level, and any ships it unlocked.
+// -------------------------------------------------------------
+function logLevelUps(skillId, levels) {
+  for (const level of levels) {
+    addLog(`${SKILLS[skillId].name} reached level ${level}.`);
+
+    for (const typeId of getUnlocksAtLevel(skillId, level)) {
+      addLog(`New ship unlocked: ${SHIP_TYPES[typeId].name}. See the Ships screen.`);
+    }
+  }
 }
 
 
@@ -129,23 +148,26 @@ function reportOfflineProgress(report) {
 
   // Add up everything gained while away.
   let totalOre = 0;
+  let totalXp = 0;
   for (const result of report.results) {
     totalOre += result.amount;
+    totalXp += result.xpGained;
   }
 
   if (totalOre > 0) {
-    message += ` Your fleet brought back ${formatNumber(totalOre)} iron ore.`;
+    message += ` Your fleet brought back ${formatNumber(totalOre)} iron ore and earned ${formatNumber(totalXp)} Mining XP.`;
   }
-
-  // The log doesn't exist on the page until the page has
-  // loaded, which it has by the time modules run - so this
-  // is safe.
   addLog(message);
+
+  // Any level-ups while away get their own lines after it.
+  for (const result of report.results) {
+    logLevelUps(result.skillId, result.newLevels);
+  }
 }
 
 
 // -------------------------------------------------------------
-// 3, 4 and 5: set up the screen, start the loop, autosave.
+// 3. Set up the screen.
 // -------------------------------------------------------------
 setupUI(state, actions);
 
@@ -153,6 +175,20 @@ if (isNewGame) {
   addLog("Contract signed. One barge, one belt, no prospects. Time to dig.");
 }
 
+
+// -------------------------------------------------------------
+// 2. Offline progress (only for a returning player).
+// This runs after set-up so its messages have a log to go in.
+// -------------------------------------------------------------
+if (!isNewGame) {
+  const report = applyOfflineProgress(state, Date.now());
+  reportOfflineProgress(report);
+}
+
+
+// -------------------------------------------------------------
+// 4 and 5: start the loop, and autosave.
+// -------------------------------------------------------------
 // Run tick() every 250 milliseconds (4 times a second).
 setInterval(tick, 250);
 tick();   // and once right now, so the screen isn't blank

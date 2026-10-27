@@ -25,6 +25,7 @@
 
 import { FIELDS, SHIP_TYPES } from "../data/content.js";
 import { addItem, findShip } from "./state.js";
+import { addXp } from "./skills.js";
 
 
 // -------------------------------------------------------------
@@ -102,7 +103,7 @@ export function getJobProgress(job, now) {
 // to catch up on time away. Same function either way.
 //
 // Returns a list of what happened, so the screen can report it:
-//   [ { shipId, itemId, amount, trips }, ... ]
+//   [ { shipId, itemId, amount, trips, skillId, xpGained, newLevels }, ... ]
 // -------------------------------------------------------------
 export function processJobs(state, now) {
   const results = [];
@@ -166,9 +167,21 @@ function completeTrips(state, job, trips) {
     const amount = shipType.cargoCapacity * trips;
     addItem(state, field.yields, amount);
 
-    return { shipId: job.shipId, itemId: field.yields, amount: amount, trips: trips };
+    // ...and earns Mining XP. addXp tells us about any level-ups.
+    const xpGained = field.xpPerTrip * trips;
+    const newLevels = addXp(state, "mining", xpGained);
+
+    return {
+      shipId: job.shipId,
+      itemId: field.yields,
+      amount: amount,
+      trips: trips,
+      skillId: "mining",
+      xpGained: xpGained,
+      newLevels: newLevels,
+    };
   }
 
   // Any job type we don't recognise gives nothing (safety net).
-  return { shipId: job.shipId, itemId: null, amount: 0, trips: trips };
+  return { shipId: job.shipId, itemId: null, amount: 0, trips: trips, xpGained: 0, newLevels: [] };
 }

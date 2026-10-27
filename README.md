@@ -2,7 +2,7 @@
 
 A space-based idle game. Grow from one mining barge into a galaxy-spanning empire through mining, trade, industry and exploration.
 
-**Current state:** walking skeleton. One ship mines one asteroid field on a timer, ore sells for credits, and progress continues while the game is closed (up to 24 hours).
+**Current state:** early prototype. Ships mine an asteroid field on a timer, ore sells for credits, and progress continues while the game is closed (up to 24 hours). Mining earns XP; Mining level 2 unlocks the Excavator-class barge in the shipyard. Three screens: Command, Ships and Skills.
 
 ## Running the game
 
@@ -33,9 +33,11 @@ data/content.js     game content: items, ship types, fields, rules (numbers live
 js/main.js          starting point: loads the save, runs the game loop, autosaves
 js/state.js         what the player owns: credits, cargo, ships, jobs
 js/jobs.js          timed work (mining trips) and finishing jobs that are due
+js/skills.js        XP, levels, and which ships each level unlocks
+js/shipyard.js      buying new ships
 js/trade.js         selling goods for credits
 js/save.js          save, load, version upgrades, offline progress
-js/ui.js            drawing the screen and handling button clicks
+js/ui.js            drawing the screens and handling button clicks
 tests/              automated checks for the game rules
 ```
 

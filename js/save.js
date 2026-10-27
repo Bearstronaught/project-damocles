@@ -93,18 +93,25 @@ export function parseSave(text) {
 // -------------------------------------------------------------
 // upgradeSave(state)
 // Brings an old save up to the current format.
-// There's only version 1 so far, so nothing to do yet. When we
-// change the format, a step like this goes here:
 //
-//   if (state.version === 1) {
-//     state.newThing = 0;   // add whatever v2 needs
-//     state.version = 2;
-//   }
-//
-// Each step upgrades one version, so a very old save climbs
-// through them all in order.
+// Each step upgrades ONE version, so a very old save climbs
+// through them all in order: 1 -> 2 -> 3 and so on. When we
+// change the save format again, add the next step at the bottom.
 // -------------------------------------------------------------
 function upgradeSave(state) {
+  // --- Version 1 -> 2: skills and the ship-number counter ---
+  if (state.version === 1) {
+    // Players from version 1 start Mining at 0 XP.
+    state.skills = { mining: { xp: 0 } };
+
+    // The next ship's number comes after the ships they own.
+    state.nextShipNumber = state.ships.length + 1;
+
+    state.version = 2;
+  }
+
+  // (Future: if (state.version === 2) { ...; state.version = 3; })
+
   if (state.version > SAVE_VERSION) {
     // A save from a NEWER version of the game than this one.
     console.warn("Save is from a newer version of the game.");
