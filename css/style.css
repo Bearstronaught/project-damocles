@@ -1,0 +1,227 @@
+/* =============================================================
+   css/style.css
+   -------------------------------------------------------------
+   THE LOOK: a ship's tactical computer. Amber text and lines on
+   near-black panels, with teal for navigation data.
+   ============================================================= */
+
+
+/* ----- Colours, kept in one place -------------------------------
+   These are "CSS variables". Change a colour here and it changes
+   everywhere it's used. */
+:root {
+  --bg: #07090b;              /* the space behind everything */
+  --panel: #0d1114;           /* panel background */
+  --amber: #ffb43a;           /* main text and lines */
+  --amber-dim: #a8752a;       /* labels, less important text */
+  --amber-faint: #3a2a12;     /* thin borders */
+  --teal: #46d6c8;            /* navigation / movement data */
+  --red: #ff5a4a;             /* danger */
+  --glow: 0 0 6px rgba(255, 180, 58, 0.45);   /* the soft text glow */
+}
+
+
+/* ----- Page basics ----- */
+* {
+  box-sizing: border-box;     /* widths include padding - easier maths */
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--amber);
+  font-family: "IBM Plex Mono", "Consolas", "Courier New", monospace;
+  font-size: 15px;
+  line-height: 1.5;
+  text-shadow: var(--glow);
+}
+
+
+/* ----- Top bar ----- */
+.top-bar {
+  display: flex;                    /* lay children out in a row */
+  justify-content: space-between;   /* title left, credits right */
+  align-items: center;
+  flex-wrap: wrap;                  /* allow wrapping on small phones */
+  gap: 8px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--amber-faint);
+}
+
+.title {
+  font-weight: 600;
+  letter-spacing: 0.12em;
+}
+
+.subtitle,
+.label {
+  color: var(--amber-dim);
+}
+
+.credits-readout .value {
+  font-size: 20px;
+  font-weight: 600;
+  margin-left: 8px;
+}
+
+
+/* ----- Layout: panels in a grid ----- */
+.layout {
+  display: grid;
+  /* As many 320px+ columns as fit; on a phone that's just one.
+     The max-width below keeps it to two columns for now - we'll
+     widen it when there are more panels to show. */
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 16px;
+  padding: 16px;
+  max-width: 900px;
+  margin: 0 auto;
+}
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--amber-faint);
+  padding: 14px;
+}
+
+.panel-wide {
+  grid-column: 1 / -1;        /* stretch across every column */
+}
+
+.panel-title {
+  margin: 0 0 12px;
+  font-size: 13px;
+  letter-spacing: 0.2em;
+  color: var(--amber-dim);
+  border-bottom: 1px dashed var(--amber-faint);
+  padding-bottom: 6px;
+}
+
+
+/* ----- Ship cards ----- */
+.ship-card {
+  border: 1px solid var(--amber-faint);
+  padding: 12px;
+  margin-bottom: 10px;
+}
+
+.ship-header {
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.ship-name {
+  font-weight: 600;
+}
+
+.ship-class {
+  color: var(--amber-dim);
+  font-size: 13px;
+}
+
+.ship-status {
+  margin: 6px 0;
+  font-size: 13px;
+  color: var(--amber-dim);
+}
+
+/* A busy ship shows its status in teal (it's moving). */
+.ship-card.busy .ship-status {
+  color: var(--teal);
+  text-shadow: 0 0 6px rgba(70, 214, 200, 0.4);
+}
+
+
+/* ----- Progress bar ----- */
+.progress {
+  height: 6px;
+  border: 1px solid var(--amber-faint);
+  margin-bottom: 10px;
+}
+
+.progress-fill {
+  height: 100%;
+  width: 0%;                  /* ui.js changes this */
+  background: var(--teal);
+  box-shadow: 0 0 8px var(--teal);
+}
+
+
+/* ----- Cargo table ----- */
+.cargo-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 12px;
+}
+
+.cargo-table th {
+  text-align: left;
+  font-weight: 400;
+  font-size: 13px;
+  color: var(--amber-dim);
+}
+
+.cargo-table th,
+.cargo-table td {
+  padding: 4px 0;
+  border-bottom: 1px dashed var(--amber-faint);
+}
+
+
+/* ----- Buttons ----- */
+.btn {
+  font: inherit;              /* use the same font as the page */
+  color: var(--amber);
+  background: transparent;
+  border: 1px solid var(--amber);
+  padding: 6px 14px;
+  cursor: pointer;
+  text-shadow: var(--glow);
+  width: 100%;
+}
+
+.btn:hover:not(:disabled) {
+  background: rgba(255, 180, 58, 0.1);
+}
+
+.btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.btn-danger {
+  color: var(--red);
+  border-color: var(--red);
+  width: auto;
+  font-size: 12px;
+}
+
+
+/* ----- Ship's log ----- */
+.log {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: 13px;
+  max-height: 220px;
+  overflow-y: auto;           /* scroll if it gets long */
+}
+
+.log li {
+  padding: 3px 0;
+  border-bottom: 1px dashed var(--amber-faint);
+}
+
+/* The newest message is brightest; older ones fade. */
+.log li:not(:first-child) {
+  color: var(--amber-dim);
+}
+
+
+/* ----- Footer ----- */
+.footer {
+  text-align: center;
+  padding: 8px 16px 24px;
+}

@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<!--
+  index.html
+  The page itself. It holds the layout (the panels and the
+  empty spaces where numbers go). The numbers are filled in by
+  the JavaScript in js/ui.js.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <!-- Makes the page fit phone screens properly -->
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Project Damocles</title>
+
+  <!-- The monospace "computer readout" font, from Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&display=swap" rel="stylesheet">
+
+  <!-- Our own styles: the amber tactical look -->
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+  <!-- ===== Top bar ===== -->
+  <header class="top-bar">
+    <div class="title">PROJECT DAMOCLES <span class="subtitle">// FLEET COMMAND</span></div>
+    <div class="credits-readout">
+      <span class="label">TREASURY</span>
+      <span id="credits" class="value">0 cr</span>
+    </div>
+  </header>
+
+  <main class="layout">
+
+    <!-- ===== Fleet panel: one card per ship (built by ui.js) ===== -->
+    <section class="panel">
+      <h2 class="panel-title">FLEET</h2>
+      <div id="fleet-list"></div>
+    </section>
+
+    <!-- ===== Cargo panel: what's in storage, and selling ===== -->
+    <section class="panel">
+      <h2 class="panel-title">CARGO HOLD</h2>
+      <table class="cargo-table">
+        <tr>
+          <th>Item</th>
+          <th>Units</th>
+          <th>Value</th>
+        </tr>
+        <tr>
+          <td>Iron ore</td>
+          <td id="ore-amount">0</td>
+          <td id="ore-value">0 cr</td>
+        </tr>
+      </table>
+      <button id="sell-ore" class="btn">Sell all ore</button>
+    </section>
+
+    <!-- ===== Log panel: messages about what happened ===== -->
+    <section class="panel panel-wide">
+      <h2 class="panel-title">SHIP'S LOG</h2>
+      <ul id="log" class="log"></ul>
+    </section>
+
+  </main>
+
+  <footer class="footer">
+    <button id="reset-game" class="btn btn-danger">Reset save</button>
+  </footer>
+
+  <!--
+    Start the game. type="module" lets our files use "import"
+    to share code. (This is why the game needs a small web
+    server to run - see README.md.)
+  -->
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>
