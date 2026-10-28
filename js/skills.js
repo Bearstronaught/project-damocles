@@ -4,21 +4,52 @@
 // SKILLS: XP, levels, and what each level unlocks.
 //
 // The state only stores each skill's total XP. The LEVEL is
-// always worked out from the XP using XP_TABLE (in content.js).
+// always worked out from the XP using the XP table below.
 // Storing just one number means the two can never disagree, and
-// if we change the XP table later, everyone's levels update.
+// if we change the curve later, everyone's levels update.
 // =============================================================
 
-import { XP_TABLE, SHIP_TYPES } from "../data/content.js";
+import { SHIP_TYPES, RULES } from "../data/content.js";
 
-// The highest level in the table (10 at the moment).
-export const MAX_LEVEL = XP_TABLE.length - 1;
+// The highest level (99, set in content.js).
+export const MAX_LEVEL = RULES.maxLevel;
+
+
+// -------------------------------------------------------------
+// THE XP TABLE (RuneScape's formula)
+// -------------------------------------------------------------
+// In RuneScape, the XP to go from level n to level n+1 is:
+//
+//     ( n + 300 × 2^(n / 7) ) ÷ 4      (rounded down at each step)
+//
+// The "2^(n / 7)" part doubles every 7 levels, so early levels
+// are quick and later ones take much longer. Adding the steps
+// up gives the TOTAL XP needed to reach each level:
+//
+//     level 2 = 83,  level 10 = 1,154,  level 50 = 101,333,
+//     level 92 = 6,517,253 (half of 99!),  level 99 = 13,034,431
+//
+// XP_TABLE[level] = total XP needed to reach that level.
+// Position 0 is unused, so the position matches the level.
+export const XP_TABLE = buildXpTable(MAX_LEVEL);
+
+function buildXpTable(maxLevel) {
+  const table = [null, 0];   // no level 0; level 1 needs 0 XP
+  let points = 0;            // running total, before the final ÷ 4
+
+  for (let level = 1; level < maxLevel; level++) {
+    // Math.floor rounds down; Math.pow(2, x) is 2 to the power x.
+    points += Math.floor(level + 300 * Math.pow(2, level / 7));
+    table.push(Math.floor(points / 4));
+  }
+  return table;
+}
 
 
 // -------------------------------------------------------------
 // getLevelForXp(xp)
 // Turns a total XP number into a level.
-// e.g. 0 -> 1,  99 -> 1,  100 -> 2,  260 -> 3
+// e.g. 0 -> 1,  82 -> 1,  83 -> 2,  1154 -> 10
 // -------------------------------------------------------------
 export function getLevelForXp(xp) {
   // Start at the top level and work down until we find one

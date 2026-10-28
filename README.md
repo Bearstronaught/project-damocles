@@ -2,7 +2,7 @@
 
 A space-based idle game. Grow from one mining barge into a galaxy-spanning empire through mining, trade, industry and exploration.
 
-**Current state:** early prototype. Ships mine an asteroid field on a timer, ore sells for credits, and progress continues while the game is closed (up to 24 hours). Mining earns XP; Mining level 2 unlocks the Excavator-class barge in the shipyard. Three screens: Command, Ships and Skills.
+**Current state:** early prototype. Ships fly out to an asteroid field, mine until the hold is full and fly home; trip times come from each ship's stats (cargo hold, mining rate, drive speed). Ore sells for credits, and progress continues while the game is closed (up to 24 hours). Mining levels follow RuneScape's XP curve up to 99; Mining level 2 unlocks the Excavator-class barge. Three screens: Command, Ships (your fleet and the shipyard, with full stats) and Skills.
 
 ## Running the game
 
@@ -38,10 +38,13 @@ js/shipyard.js      buying new ships
 js/trade.js         selling goods for credits
 js/save.js          save, load, version upgrades, offline progress
 js/ui.js            drawing the screens and handling button clicks
+js/art.js           code-drawn ship schematics, looked up by name
 tests/              automated checks for the game rules
 ```
 
 A good reading order for learning: `data/content.js` → `js/state.js` → `js/jobs.js` → `js/main.js`.
+
+**Changing the balance:** every number (prices, trip times, ship stats, XP per ore) lives in `data/content.js`. Most tests read those numbers rather than hard-coding them, but the first few in `tests/logic-tests.js` record today's exact pacing on purpose, so update those when you change it.
 
 **The key idea:** a job never counts down. It stores *when it started* and *how long it takes*, and the game compares that with the clock. That's why the same code handles both live play and time spent away.
 

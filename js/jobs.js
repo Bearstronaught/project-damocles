@@ -11,21 +11,56 @@
 // open the whole time or closed for 6 hours - the maths is the
 // same. Offline progress comes for free.
 //
+// A mining trip has three phases, one after the other:
+//   OUTBOUND  fly from home to the field
+//   MINING    fill the hold
+//   RETURNING fly home and unload
+//
 // A job looks like this:
 //   {
-//     id: "job-1712345678901",   unique name for this job
-//     type: "mining",            what kind of work it is
-//     shipId: "ship-1",          which ship is doing it
-//     fieldId: "inner_belt",     where it's mining
-//     startedAt: 1712345678901,  timestamp the CURRENT trip began
-//     durationMs: 20000,         how long one trip takes (ms)
-//     repeat: true,              start another trip when done?
+//     id: "job-1712345678901-ship-1",  unique name for this job
+//     type: "mining",                  what kind of work it is
+//     shipId: "ship-1",                which ship is doing it
+//     fieldId: "inner_belt",           where it's mining
+//     startedAt: 1712345678901,        when the CURRENT trip began
+//     outboundMs: 45000,               length of each phase (ms)
+//     miningMs: 60000,
+//     returnMs: 45000,
+//     durationMs: 150000,              the three added together
+//     repeat: true,                    start another trip when done?
 //   }
 // =============================================================
 
 import { FIELDS, SHIP_TYPES } from "../data/content.js";
 import { addItem, findShip } from "./state.js";
 import { addXp } from "./skills.js";
+
+
+// -------------------------------------------------------------
+// getTripPlan(shipTypeId, fieldId)
+// Works out how long each phase of a trip takes for this kind
+// of ship at this field, plus what one trip brings back.
+// Used to start jobs AND to show stats in the shipyard.
+// -------------------------------------------------------------
+export function getTripPlan(shipTypeId, fieldId) {
+  const shipType = SHIP_TYPES[shipTypeId];
+  const field = FIELDS[fieldId];
+
+  // Travel: a speed of 0.75 makes the trip take 1 ÷ 0.75 = 1.33x as long.
+  const travelMs = Math.round((field.travelSeconds / shipType.speed) * 1000);
+
+  // Mining: minutes to fill the hold = cargo ÷ (units per minute).
+  const miningMs = Math.round((shipType.cargoCapacity / shipType.miningRate) * 60 * 1000);
+
+  return {
+    outboundMs: travelMs,
+    miningMs: miningMs,
+    returnMs: travelMs,
+    durationMs: travelMs + miningMs + travelMs,
+    orePerTrip: shipType.cargoCapacity,
+    xpPerTrip: shipType.cargoCapacity * field.xpPerUnit,
+  };
+}
 
 
 // -------------------------------------------------------------
@@ -41,7 +76,8 @@ export function startMiningJob(state, shipId, fieldId, now) {
     return null;
   }
 
-  const field = FIELDS[fieldId];
+  const ship = findShip(state, shipId);
+  const plan = getTripPlan(ship.type, fieldId);
 
   const job = {
     id: "job-" + now + "-" + shipId,
@@ -49,7 +85,10 @@ export function startMiningJob(state, shipId, fieldId, now) {
     shipId: shipId,
     fieldId: fieldId,
     startedAt: now,
-    durationMs: field.tripSeconds * 1000,   // seconds -> milliseconds
+    outboundMs: plan.outboundMs,
+    miningMs: plan.miningMs,
+    returnMs: plan.returnMs,
+    durationMs: plan.durationMs,
     repeat: true,                            // keep mining until recalled
   };
 
@@ -81,15 +120,50 @@ export function getJobForShip(state, shipId) {
 // -------------------------------------------------------------
 // getJobProgress(job, now)
 // How far through its current trip a job is, from 0 to 1.
-// (0 = just left, 0.5 = halfway, 1 = done.) Used for the
-// progress bar.
+// (0 = just left, 0.5 = halfway, 1 = done.)
 // -------------------------------------------------------------
 export function getJobProgress(job, now) {
   const elapsed = now - job.startedAt;
   const progress = elapsed / job.durationMs;
 
-  // Math.min stops it going over 1 if we're a bit late checking.
-  return Math.min(progress, 1);
+  // Keep it between 0 and 1 even if the clock is a bit off.
+  return Math.min(Math.max(progress, 0), 1);
+}
+
+
+// -------------------------------------------------------------
+// getJobPhase(job, now)
+// Which phase the trip is in right now, and how full each
+// phase is, for the route tracker on screen. Returns:
+//   {
+//     phase: "outbound" | "mining" | "returning",
+//     msLeftInPhase: 12000,
+//     fills: [1, 0.4, 0],   how full each phase is, 0 to 1
+//   }
+// -------------------------------------------------------------
+export function getJobPhase(job, now) {
+  // Time into this trip, kept between 0 and the trip length.
+  const elapsed = Math.min(Math.max(now - job.startedAt, 0), job.durationMs);
+
+  const outEnd = job.outboundMs;                 // when outbound finishes
+  const mineEnd = job.outboundMs + job.miningMs; // when mining finishes
+
+  // How full each phase is: "elapsed minus where the phase
+  // starts, divided by its length", kept between 0 and 1.
+  const fill = (start, length) => Math.min(Math.max((elapsed - start) / length, 0), 1);
+  const fills = [
+    fill(0, job.outboundMs),
+    fill(outEnd, job.miningMs),
+    fill(mineEnd, job.returnMs),
+  ];
+
+  if (elapsed < outEnd) {
+    return { phase: "outbound", msLeftInPhase: outEnd - elapsed, fills };
+  }
+  if (elapsed < mineEnd) {
+    return { phase: "mining", msLeftInPhase: mineEnd - elapsed, fills };
+  }
+  return { phase: "returning", msLeftInPhase: job.durationMs - elapsed, fills };
 }
 
 
@@ -111,7 +185,7 @@ export function processJobs(state, now) {
 
   for (const job of state.jobs) {
     // How many FULL trips fit between the start and now?
-    // e.g. 65 seconds passed, 20 second trips -> 3 trips done.
+    // e.g. 400 seconds passed, 150 second trips -> 2 trips done.
     const elapsed = now - job.startedAt;
     let tripsDone = Math.floor(elapsed / job.durationMs);
 
@@ -139,7 +213,7 @@ export function processJobs(state, now) {
     } else if (job.repeat) {
       // Move the start time forward by the trips we just paid
       // out, so the leftover time counts towards the next trip.
-      // (65s passed, 3 x 20s paid -> next trip is already 5s in.)
+      // (400s passed, 2 x 150s paid -> next trip is already 100s in.)
       job.startedAt += tripsDone * job.durationMs;
       jobsStillRunning.push(job);
     }
@@ -160,15 +234,16 @@ export function processJobs(state, now) {
 function completeTrips(state, job, trips) {
   if (job.type === "mining") {
     const ship = findShip(state, job.shipId);
-    const shipType = SHIP_TYPES[ship.type];
+    const plan = getTripPlan(ship.type, job.fieldId);
     const field = FIELDS[job.fieldId];
 
     // Each trip brings back a full hold of the field's ore.
-    const amount = shipType.cargoCapacity * trips;
+    const amount = plan.orePerTrip * trips;
     addItem(state, field.yields, amount);
 
-    // ...and earns Mining XP. addXp tells us about any level-ups.
-    const xpGained = field.xpPerTrip * trips;
+    // ...and earns Mining XP for every unit brought home.
+    // addXp tells us about any level-ups.
+    const xpGained = plan.xpPerTrip * trips;
     const newLevels = addXp(state, "mining", xpGained);
 
     return {

@@ -16,7 +16,8 @@
 // an old save needs upgrading before it's used.
 //   Version 1: credits, cargo, ships, jobs
 //   Version 2: added skills (XP) and a ship-number counter
-export const SAVE_VERSION = 2;
+//   Version 3: trips have three phases, timed by ship stats
+export const SAVE_VERSION = 3;
 
 
 // -------------------------------------------------------------

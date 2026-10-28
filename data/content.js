@@ -8,7 +8,9 @@
 // reads them. That means you can change a number here (say, how
 // much ore sells for) without touching any other file.
 //
-// Later on, this will be exported from the balance spreadsheet.
+// Every number in here is a STARTING POINT for balance, and
+// yours to change. Later on, this will be exported from the
+// balance spreadsheet.
 // =============================================================
 
 
@@ -28,31 +30,14 @@ export const ITEMS = {
 // -------------------------------------------------------------
 // SKILLS: activities that level up with XP.
 // -------------------------------------------------------------
+// How much XP each level needs isn't listed here: it follows
+// RuneScape's formula, worked out in js/skills.js.
 export const SKILLS = {
   mining: {
     name: "Mining",
     description: "Send barges to asteroid fields to bring back ore. Levels unlock better mining ships.",
   },
 };
-
-// XP_TABLE: how much TOTAL XP you need to REACH each level.
-// Read it as "level 2 needs 100 XP, level 3 needs 250 XP" etc.
-// The first entry (position 0) is unused, so the position in
-// the list matches the level number. The last level listed is
-// the highest you can reach for now.
-export const XP_TABLE = [
-  null,   // (no level 0)
-  0,      // level 1 - where everyone starts
-  100,    // level 2
-  250,    // level 3
-  450,    // level 4
-  700,    // level 5
-  1000,   // level 6
-  1400,   // level 7
-  1900,   // level 8
-  2500,   // level 9
-  3200,   // level 10
-];
 
 
 // -------------------------------------------------------------
@@ -61,23 +46,41 @@ export const XP_TABLE = [
 // A ship TYPE is like a blueprint. Each actual ship the player
 // owns (in state.js) points at one of these by its ID.
 //
-//   skill        which skill this ship belongs to
-//   unlockLevel  the skill level needed to buy one
-//   cost         price in credits (null = not for sale)
+// The three working stats decide how long a mining trip takes:
+//   cargoCapacity  units of ore the hold carries home per trip
+//   miningRate     units mined per minute at the field
+//                  (mining time = cargo / rate, so a big hold
+//                  with a slow drill spends longer at the rock)
+//   speed          how fast the drive is, as a multiplier:
+//                  1.0 = normal, 0.75 = takes a third longer
+//
+// And the shipyard details:
+//   skill          which skill this ship belongs to
+//   unlockLevel    the skill level needed to buy one
+//   cost           price in credits (null = not for sale)
+//   art            which drawing to use (see js/art.js)
 export const SHIP_TYPES = {
   prospector: {
     name: "Prospector-class barge",
-    cargoCapacity: 10,        // units of ore brought back per trip
+    description: "Small, quick and cheap to run. Your first barge.",
+    cargoCapacity: 12,
+    miningRate: 12,
+    speed: 1.0,
     skill: "mining",
     unlockLevel: 1,
     cost: null,               // your starting ship; not sold
+    art: "hull_prospector",
   },
   excavator: {
     name: "Excavator-class barge",
-    cargoCapacity: 25,
+    description: "Heavy hauler with twin drill heads. Slow to get there, but brings back over three times the ore.",
+    cargoCapacity: 40,
+    miningRate: 20,
+    speed: 0.75,
     skill: "mining",
     unlockLevel: 2,
-    cost: 750,
+    cost: 3000,
+    art: "hull_excavator",
   },
 };
 
@@ -100,8 +103,8 @@ export const FIELDS = {
   inner_belt: {
     name: "Inner Belt",
     yields: "iron_ore",       // which item (from ITEMS) it produces
-    tripSeconds: 20,          // a full round trip: fly out, mine, fly back
-    xpPerTrip: 10,            // Mining XP earned for each finished trip
+    travelSeconds: 45,        // one way, for a ship with speed 1.0
+    xpPerUnit: 2,             // Mining XP earned per unit of ore brought home
   },
 };
 
@@ -112,4 +115,5 @@ export const FIELDS = {
 export const RULES = {
   offlineCapHours: 24,        // most time away that counts (design doc: 24h)
   autosaveSeconds: 5,         // how often the game saves itself
+  maxLevel: 99,               // highest skill level, as in RuneScape
 };

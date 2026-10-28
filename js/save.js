@@ -11,7 +11,7 @@
 
 import { RULES } from "../data/content.js";
 import { SAVE_VERSION } from "./state.js";
-import { processJobs } from "./jobs.js";
+import { processJobs, getTripPlan } from "./jobs.js";
 
 // The label our save is stored under in localStorage.
 const SAVE_KEY = "project-damocles-save";
@@ -110,7 +110,26 @@ function upgradeSave(state) {
     state.version = 2;
   }
 
-  // (Future: if (state.version === 2) { ...; state.version = 3; })
+  // --- Version 2 -> 3: three-phase trips timed by ship stats ---
+  // Old jobs remember the old 20-second trip length, and a
+  // repeating job would keep it forever. Re-time them with the
+  // new rules. (The ship's current trip simply starts counting
+  // against the new, longer length.)
+  if (state.version === 2) {
+    for (const job of state.jobs) {
+      if (job.type !== "mining") continue;
+      const ship = state.ships.find((s) => s.id === job.shipId);
+      if (!ship) continue;
+      const plan = getTripPlan(ship.type, job.fieldId);
+      job.outboundMs = plan.outboundMs;
+      job.miningMs = plan.miningMs;
+      job.returnMs = plan.returnMs;
+      job.durationMs = plan.durationMs;
+    }
+    state.version = 3;
+  }
+
+  // (Future: if (state.version === 3) { ...; state.version = 4; })
 
   if (state.version > SAVE_VERSION) {
     // A save from a NEWER version of the game than this one.

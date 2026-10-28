@@ -20,7 +20,7 @@ import { sellAll } from "./trade.js";
 import { buyShip } from "./shipyard.js";
 import { getUnlocksAtLevel } from "./skills.js";
 import { saveGame, loadGame, deleteSave, applyOfflineProgress } from "./save.js";
-import { setupUI, buildFleetCards, render, addLog, formatNumber, formatDuration } from "./ui.js";
+import { setupUI, buildFleetViews, render, addLog, formatNumber, formatDuration } from "./ui.js";
 
 
 // -------------------------------------------------------------
@@ -48,7 +48,7 @@ const actions = {
 
   dispatchShip(shipId) {
     startMiningJob(state, shipId, "inner_belt", Date.now());
-    addLog(`${findShip(state, shipId).name} departs for ${FIELDS.inner_belt.name}.`);
+    addLog(`${findShip(state, shipId).name} departs for ${FIELDS.inner_belt.name}.`, "fleet");
     refresh();
   },
 
@@ -56,7 +56,7 @@ const actions = {
     const job = getJobForShip(state, shipId);
     if (job) {
       cancelJob(state, job.id);
-      addLog(`${findShip(state, shipId).name} recalled. Partial cargo dumped.`);
+      addLog(`${findShip(state, shipId).name} recalled. Partial cargo dumped.`, "fleet");
     }
     refresh();
   },
@@ -64,7 +64,7 @@ const actions = {
   sellOre() {
     const earned = sellAll(state, "iron_ore");
     if (earned > 0) {
-      addLog(`Sold iron ore for ${formatNumber(earned)} cr.`);
+      addLog(`Sold iron ore for ${formatNumber(earned)} cr.`, "trade");
     }
     refresh();
   },
@@ -73,8 +73,8 @@ const actions = {
     const ship = buyShip(state, shipTypeId);
     if (ship) {
       // The fleet changed, so rebuild the ship cards.
-      buildFleetCards(state, actions);
-      addLog(`${ship.name} (${SHIP_TYPES[ship.type].name}) joins the fleet. Docked at home, awaiting orders.`);
+      buildFleetViews(state, actions);
+      addLog(`${ship.name} (${SHIP_TYPES[ship.type].name}) joins the fleet. Docked at home, awaiting orders.`, "fleet");
     }
     refresh();
   },
@@ -82,8 +82,8 @@ const actions = {
   resetGame() {
     deleteSave();
     state = createNewGame();
-    buildFleetCards(state, actions);    // rebuild ship cards for the new fleet
-    addLog("Save wiped. A new contract begins.");
+    buildFleetViews(state, actions);    // rebuild ship cards for the new fleet
+    addLog("Save wiped. A new contract begins.", "system");
     refresh();
   },
 };
@@ -101,7 +101,7 @@ function tick() {
     if (!result.itemId) continue;   // skip anything that produced nothing
     const ship = findShip(state, result.shipId);
     const itemName = ITEMS[result.itemId].name.toLowerCase();
-    addLog(`${ship.name} returned with ${result.amount} ${itemName} (+${result.xpGained} ${SKILLS[result.skillId].name} XP).`);
+    addLog(`${ship.name} docked with ${result.amount} ${itemName} (+${result.xpGained} ${SKILLS[result.skillId].name} XP).`, "trip");
     logLevelUps(result.skillId, result.newLevels);
   }
 
@@ -122,10 +122,10 @@ function refresh() {
 // -------------------------------------------------------------
 function logLevelUps(skillId, levels) {
   for (const level of levels) {
-    addLog(`${SKILLS[skillId].name} reached level ${level}.`);
+    addLog(`${SKILLS[skillId].name} reached level ${level}.`, "level");
 
     for (const typeId of getUnlocksAtLevel(skillId, level)) {
-      addLog(`New ship unlocked: ${SHIP_TYPES[typeId].name}. See the Ships screen.`);
+      addLog(`New ship unlocked: ${SHIP_TYPES[typeId].name}. See the Ships screen.`, "level");
     }
   }
 }
@@ -157,7 +157,7 @@ function reportOfflineProgress(report) {
   if (totalOre > 0) {
     message += ` Your fleet brought back ${formatNumber(totalOre)} iron ore and earned ${formatNumber(totalXp)} Mining XP.`;
   }
-  addLog(message);
+  addLog(message, "system");
 
   // Any level-ups while away get their own lines after it.
   for (const result of report.results) {
@@ -172,7 +172,7 @@ function reportOfflineProgress(report) {
 setupUI(state, actions);
 
 if (isNewGame) {
-  addLog("Contract signed. One barge, one belt, no prospects. Time to dig.");
+  addLog("Contract signed. One barge, one belt, no prospects. Time to dig.", "system");
 }
 
 

@@ -12,24 +12,37 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Project Damocles</title>
 
-  <!-- The monospace "computer readout" font, from Google Fonts -->
+  <!-- Two fonts from Google Fonts:
+       Chakra Petch  - angular display face for titles and labels
+       IBM Plex Mono - monospace "computer readout" for data -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=IBM+Plex+Mono:wght@400;600&display=swap" rel="stylesheet">
 
-  <!-- Our own styles: the amber tactical look -->
+  <!-- Our own styles: the tactical display look -->
   <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
 
   <!-- ===== Top bar ===== -->
   <header class="top-bar">
-    <div class="title">PROJECT DAMOCLES <span class="subtitle">// FLEET COMMAND</span></div>
+    <div class="title-block">
+      <div class="title">PROJECT DAMOCLES</div>
+      <div class="subtitle">Fleet command // Home system</div>
+    </div>
     <div class="credits-readout">
-      <span class="label">TREASURY</span>
+      <span class="label">Treasury</span>
       <span id="credits" class="value">0 cr</span>
     </div>
   </header>
+
+  <!-- ===== Status strip: a few live readouts ===== -->
+  <div class="status-strip">
+    <span class="status-item">Local <b id="clock">--:--:--</b></span>
+    <span class="status-item">Fleet <b id="fleet-size">1</b></span>
+    <span class="status-item">Mining <b id="mining-level">Lv 1</b></span>
+    <span class="status-item status-save"><i class="pulse-dot"></i> Autosave on</span>
+  </div>
 
   <!-- ===== Navigation: one button per screen =====
        data-screen says which screen each button opens. -->
@@ -45,14 +58,20 @@
     <section class="screen layout" data-screen="command">
 
       <!-- Fleet: one card per ship (built by ui.js) -->
-      <div class="panel">
-        <h2 class="panel-title">FLEET</h2>
+      <div class="panel panel-fleet">
+        <div class="panel-head">
+          <h2 class="panel-title">Fleet</h2>
+          <span class="panel-tag" id="fleet-tag">1 ship</span>
+        </div>
         <div id="fleet-list"></div>
       </div>
 
       <!-- Cargo: what's in storage, and selling -->
       <div class="panel">
-        <h2 class="panel-title">CARGO HOLD</h2>
+        <div class="panel-head">
+          <h2 class="panel-title">Cargo hold</h2>
+          <span class="panel-tag">Home dock</span>
+        </div>
         <table class="cargo-table">
           <tr>
             <th>Item</th>
@@ -65,21 +84,38 @@
             <td id="ore-value">0 cr</td>
           </tr>
         </table>
-        <button id="sell-ore" class="btn">Sell all ore</button>
+        <div class="price-note">Market price: <span id="ore-price">5</span> cr per unit</div>
+        <button id="sell-ore" class="btn btn-primary">Sell all ore</button>
       </div>
 
       <!-- Log: messages about what happened -->
       <div class="panel panel-wide">
-        <h2 class="panel-title">SHIP'S LOG</h2>
+        <div class="panel-head">
+          <h2 class="panel-title">Ship's log</h2>
+          <span class="panel-tag"><i class="pulse-dot"></i> Live</span>
+        </div>
         <ul id="log" class="log"></ul>
       </div>
     </section>
 
     <!-- ===================== SHIPS SCREEN ===================== -->
     <section class="screen layout" data-screen="ships" hidden>
+
+      <!-- The ships you own, with their stats (built by ui.js) -->
       <div class="panel panel-wide">
-        <h2 class="panel-title">SHIPYARD</h2>
-        <!-- One card per ship type (built by ui.js) -->
+        <div class="panel-head">
+          <h2 class="panel-title">Your fleet</h2>
+          <span class="panel-tag" id="your-fleet-tag">1 ship</span>
+        </div>
+        <div id="owned-list" class="owned-list"></div>
+      </div>
+
+      <!-- Ships you can buy (built by ui.js) -->
+      <div class="panel panel-wide">
+        <div class="panel-head">
+          <h2 class="panel-title">Shipyard</h2>
+          <span class="panel-tag">Stats for a round trip to the Inner Belt</span>
+        </div>
         <div id="shipyard-list" class="card-grid"></div>
       </div>
     </section>
@@ -87,7 +123,10 @@
     <!-- ===================== SKILLS SCREEN ===================== -->
     <section class="screen layout" data-screen="skills" hidden>
       <div class="panel panel-wide">
-        <h2 class="panel-title">SKILLS</h2>
+        <div class="panel-head">
+          <h2 class="panel-title">Skills</h2>
+          <span class="panel-tag">Max level 99</span>
+        </div>
         <!-- One card per skill (built by ui.js) -->
         <div id="skills-list" class="card-grid"></div>
       </div>
