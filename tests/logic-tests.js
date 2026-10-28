@@ -414,9 +414,9 @@ test("Buying an Excavator takes its price and adds 'Second Wind' as ship-2", () 
   assert.equal(state.nextShipNumber, 3);
 });
 
-test("A second Prospector can be bought from the start, for 15,000 cr", () => {
+test("A second Prospector can be bought from the start, for 8,000 cr", () => {
   const state = createNewGame();
-  state.credits = 15000;
+  state.credits = 8000;
   const ship = buyShip(state, "prospector");
   assert.ok(ship);
   assert.equal(ship.type, "prospector");
@@ -426,18 +426,20 @@ test("A second Prospector can be bought from the start, for 15,000 cr", () => {
 
 test("Four Prospectors fill the 4 starting command points", () => {
   const state = createNewGame();
-  state.credits = 15000 * 4;
+  state.credits = 8000 * 4;
   buyShip(state, "prospector");
   buyShip(state, "prospector");
   buyShip(state, "prospector");
   assert.deepEqual(canBuyShip(state, "prospector"), { ok: false, reason: "Not enough command points" });
-  assert.equal(state.credits, 15000);                // the 4th wasn't charged
+  assert.equal(state.credits, 8000);                 // the 4th wasn't charged
 });
 
-test("A second Prospector takes about an hour of mining to afford", () => {
+test("A second Prospector takes about half an hour of mining to afford", () => {
+  // Dan's change (28 Oct): an hour felt too long. 8,000 cr at
+  // 14,400 cr an hour = about 33 minutes.
   const creditsPerHour = PROSPECTOR.orePerTrip * ITEMS.iron_ore.sellPrice * (HOUR / TRIP);
   const hours = SHIP_TYPES.prospector.cost / creditsPerHour;
-  assert.ok(hours > 0.75 && hours < 1.5, hours.toFixed(2) + " hours");
+  assert.ok(hours > 0.4 && hours < 0.75, hours.toFixed(2) + " hours");
 });
 
 test("Two ships with different trip lengths each pay out on their own timer", () => {
@@ -566,9 +568,9 @@ test("Expanding command makes room for the second Excavator", () => {
 // SELLING SHIPS
 // =============================================================
 
-test("Both barges sell for half their price (Excavator 15,000, Prospector 7,500)", () => {
+test("Both barges sell for half their price (Excavator 15,000, Prospector 4,000)", () => {
   assert.equal(getSellValue("excavator"), SHIP_TYPES.excavator.cost / 2);
-  assert.equal(getSellValue("prospector"), 7500);
+  assert.equal(getSellValue("prospector"), 4000);
 });
 
 test("Selling a docked ship pays out and frees its command points", () => {

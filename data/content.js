@@ -130,7 +130,7 @@ export const SHIP_TYPES = {
     size: "small",
     skill: "mining",
     unlockLevel: 1,
-    cost: 8000,              // about an hour of mining with one Prospector
+    cost: 8000,               // about half an hour of mining with one Prospector
     art: "hull_prospector",
   },
   excavator: {
