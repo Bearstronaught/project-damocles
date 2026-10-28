@@ -21,6 +21,7 @@ import { buyShip, sellShip, renameShip } from "./shipyard.js";
 import { buyUpgrade, getCommandCapacity } from "./command.js";
 import { getUnlocksAtLevel, getFieldUnlocksAtLevel, isFieldUnlocked } from "./skills.js";
 import { saveGame, loadGame, deleteSave, applyOfflineProgress, exportSave, importSave } from "./save.js";
+import { showLevelBanner } from "./banner.js";
 import { setupUI, buildFleetViews, render, addLog, formatNumber, formatXp, formatTonnes, formatDuration } from "./ui.js";
 
 
@@ -267,10 +268,33 @@ function describeCargo(cargo) {
 
 
 // -------------------------------------------------------------
-// logLevelUps(skillId, levels)
-// Announces each new level, and anything it unlocked.
+// getUnlockLines(skillId, level)
+// Short lines for everything one level unlocks, e.g.
+//   ["New ship: Excavator-class barge"]   or   [] for nothing.
+// Used by the level-up banner.
 // -------------------------------------------------------------
-function logLevelUps(skillId, levels) {
+function getUnlockLines(skillId, level) {
+  const lines = [];
+  for (const typeId of getUnlocksAtLevel(skillId, level)) {
+    lines.push("New ship: " + SHIP_TYPES[typeId].name);
+  }
+  if (skillId === "mining") {
+    for (const fieldId of getFieldUnlocksAtLevel(level)) {
+      lines.push("New field: " + FIELDS[fieldId].name);
+    }
+  }
+  return lines;
+}
+
+
+// -------------------------------------------------------------
+// logLevelUps(skillId, levels, showBanners)
+// Announces each new level, and anything it unlocked, in the
+// log. Each level also gets a banner across the top of the
+// screen, unless showBanners is false (the welcome-back report
+// shows one combined banner per skill instead - see below).
+// -------------------------------------------------------------
+function logLevelUps(skillId, levels, showBanners = true) {
   for (const level of levels) {
     addLog(`${SKILLS[skillId].name} reached level ${level}.`, "level");
 
@@ -281,6 +305,10 @@ function logLevelUps(skillId, levels) {
       for (const fieldId of getFieldUnlocksAtLevel(level)) {
         addLog(`New field unlocked: ${FIELDS[fieldId].name}. Pick it on a docked ship's card.`, "level");
       }
+    }
+
+    if (showBanners) {
+      showLevelBanner(`${SKILLS[skillId].name} level ${level}`, getUnlockLines(skillId, level));
     }
   }
 }
@@ -329,9 +357,24 @@ function reportOfflineProgress(report) {
   }
   addLog(message, "system");
 
-  // Any level-ups while away get their own lines after it.
+  // Any level-ups while away get their own log lines after it.
+  // levelsGained collects them per skill, e.g. { mining: [4, 5, 6] }.
+  const levelsGained = {};
   for (const result of report.results) {
-    logLevelUps(result.skillId, result.newLevels);
+    logLevelUps(result.skillId, result.newLevels, false);
+    if (result.newLevels.length > 0) {
+      levelsGained[result.skillId] = (levelsGained[result.skillId] || []).concat(result.newLevels);
+    }
+  }
+
+  // Coming back to five level-ups would mean 15 seconds of
+  // banners in a row, so show ONE per skill instead: the level
+  // reached, with everything unlocked along the way.
+  for (const [skillId, levels] of Object.entries(levelsGained)) {
+    const highest = Math.max(...levels);
+    // .flatMap joins each level's unlock list into one list
+    const unlocks = levels.flatMap((level) => getUnlockLines(skillId, level));
+    showLevelBanner(`${SKILLS[skillId].name} level ${highest}`, unlocks);
   }
 }
 

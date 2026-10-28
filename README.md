@@ -39,6 +39,8 @@ js/command.js       command capacity: points per hull, upgrades
 js/trade.js         selling goods for credits
 js/save.js          save, load, version upgrades, offline progress
 js/ui.js            drawing the screens and handling button clicks
+js/fleet-groups.js  sorting ships into role groups (Mining, Freight) and their summaries
+js/banner.js        the level-up banners that slide down from the top
 js/art.js           code-drawn ship schematics, looked up by name
 tests/              automated checks for the game rules
 ```

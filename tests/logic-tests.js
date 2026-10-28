@@ -29,6 +29,7 @@ import { XP_TABLE, getLevelForXp, getLevel, getLevelProgress, addXp, isShipTypeU
 import { canBuyShip, buyShip, canSellShip, sellShip, getSellValue, renameShip } from "../js/shipyard.js";
 import { getCommandCapacity, getCommandUsed, getNextUpgradeCost, buyUpgrade } from "../js/command.js";
 import { isFieldUnlocked } from "../js/skills.js";
+import { getRoleGroups, describeGroup, getShipActivity } from "../js/fleet-groups.js";
 
 const SECOND = 1000;                 // milliseconds in a second
 const MINUTE = 60 * SECOND;
@@ -1290,6 +1291,82 @@ test("A recalled ship's trip survives a save and time away", () => {
   applyOfflineProgress(loaded, START + HOUR);
   assert.equal(loaded.inventory.iron_ore, 60);       // just the part-load
   assert.equal(loaded.jobs.length, 0);
+});
+
+// =============================================================
+// ROLE GROUPS on the Command screen (js/fleet-groups.js)
+// The heading summaries must say exactly what each group's
+// ships are doing, because a collapsed group only shows that.
+// =============================================================
+
+// A game with three Prospectors and a Courier (ship-4), for
+// the group tests. Built by buying, so it uses the real rules.
+function gameWithMixedFleet() {
+  const state = gameWithCourier();          // ship-1 Prospector, ship-2 Courier
+  state.credits = 100_000;
+  buyShip(state, "prospector");             // ship-3
+  return state;
+}
+
+test("A new game has one group: Mining, 1 ship docked", () => {
+  const state = createNewGame();
+  const groups = getRoleGroups(state, START);
+  assert.equal(groups.length, 1);           // no empty Freight heading
+  assert.equal(groups[0].name, "Mining");
+  assert.equal(describeGroup(groups[0]), "1 ship · 1 docked");
+});
+
+test("Ships are sorted into Mining then Freight, in the order they were bought", () => {
+  const state = gameWithMixedFleet();
+  const groups = getRoleGroups(state, START);
+  assert.deepEqual(groups.map((g) => g.roleId), ["mining", "freight"]);
+  assert.deepEqual(groups[0].ships.map((s) => s.id), ["ship-1", "ship-3"]);
+  assert.deepEqual(groups[1].ships.map((s) => s.id), ["ship-2"]);
+});
+
+test("Summary matches the design doc example: 3 ships, 2 working, 1 docked", () => {
+  const state = createNewGame();
+  state.credits = 100_000;
+  buyShip(state, "prospector");
+  buyShip(state, "prospector");
+  startMiningJob(state, "ship-1", "inner_belt", START);
+  startMiningJob(state, "ship-2", "inner_belt", START);
+  const [mining] = getRoleGroups(state, START + SECOND);
+  assert.equal(describeGroup(mining), "3 ships · 2 working, 1 docked");
+});
+
+test("Each activity is told apart: working, heading home, waiting, docked", () => {
+  const state = gameWithMixedFleet();
+  startMiningJob(state, "ship-1", "inner_belt", START);
+  const recalled = startMiningJob(state, "ship-3", "inner_belt", START);
+  recallJob(state, recalled.id, START + 10 * SECOND);
+  startHaulJob(state, "ship-2", START);     // empty hold: waits for ore
+
+  const now = START + 20 * SECOND;
+  assert.equal(getShipActivity(state, state.ships[0], now), "working");
+  assert.equal(getShipActivity(state, state.ships[2], now), "recalled");
+  assert.equal(getShipActivity(state, state.ships[1], now), "waiting");
+
+  const [mining, freight] = getRoleGroups(state, now);
+  assert.equal(describeGroup(mining), "2 ships · 1 working, 1 heading home");
+  assert.equal(describeGroup(freight), "1 ship · 1 waiting for ore");
+});
+
+test("Mining repeats, so a ship stays 'working' until recalled and docked", () => {
+  const state = createNewGame();
+  startMiningJob(state, "ship-1", "inner_belt", START);
+  processJobs(state, START + TRIP);          // one trip done: it heads straight out again
+  assert.equal(describeGroup(getRoleGroups(state, START + TRIP)[0]), "1 ship · 1 working");
+
+  recallJob(state, state.jobs[0].id, START + TRIP + SECOND);
+  processJobs(state, START + 2 * TRIP);      // long enough to fly home
+  assert.equal(describeGroup(getRoleGroups(state, START + 2 * TRIP)[0]), "1 ship · 1 docked");
+});
+
+test("Selling the only freighter removes the Freight group", () => {
+  const state = gameWithMixedFleet();
+  sellShip(state, "ship-2");
+  assert.deepEqual(getRoleGroups(state, START).map((g) => g.roleId), ["mining"]);
 });
 
 // -------------------------------------------------------------

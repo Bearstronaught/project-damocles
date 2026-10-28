@@ -92,6 +92,18 @@ export const SELL_RATE = 0.5;
 
 
 // -------------------------------------------------------------
+// ROLES: the jobs ships do. The Command screen groups ship
+// cards under one heading per role, in the order listed here.
+// When a new kind of ship arrives (scouts, warships...), add
+// its role here and it gets its own group automatically.
+// -------------------------------------------------------------
+export const ROLES = {
+  mining: { name: "Mining" },
+  freight: { name: "Freight" },
+};
+
+
+// -------------------------------------------------------------
 // SHIP TYPES: the kinds of ship that can exist.
 // -------------------------------------------------------------
 // A ship TYPE is like a blueprint. Each actual ship the player

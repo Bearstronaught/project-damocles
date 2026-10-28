@@ -24,6 +24,7 @@ import { canBuyShip, canSellShip, getSellValue, MAX_NAME_LENGTH } from "./shipya
 import { getShipPoints, getCommandCapacity, getCommandUsed, getNextUpgradeCost, canBuyUpgrade } from "./command.js";
 import { getCargoValue, getTradeXp } from "./trade.js";
 import { getSchematic } from "./art.js";
+import { getRoleGroups, describeGroup } from "./fleet-groups.js";
 
 // The screens that exist, in nav order. The first is the default.
 const SCREENS = ["command", "fleet", "shipyard", "skills"];
@@ -514,77 +515,160 @@ export function buildFleetViews(state, actions) {
   buildOwnedList(state, actions);
 }
 
+// -------------------------------------------------------------
+// ROLE GROUPS on the Command screen
+// Ship cards sit inside one collapsible box per role (Mining,
+// Freight...). Groups start open. If the player closes one, we
+// remember that in the browser (localStorage) so it stays
+// closed after a refresh. This is a screen preference, not game
+// progress, so it lives outside the save.
+// -------------------------------------------------------------
+const CLOSED_GROUPS_KEY = "damocles-closed-groups";
+
+// Which role groups the player has closed, e.g. ["mining"].
+// "try" because some browsers block storage (private windows);
+// then we simply start with every group open.
+function loadClosedGroups() {
+  try {
+    return new Set(JSON.parse(localStorage.getItem(CLOSED_GROUPS_KEY)) || []);
+  } catch (error) {
+    return new Set();
+  }
+}
+
+function saveClosedGroups(closed) {
+  try {
+    // A Set can't be saved directly, so turn it into a list first.
+    localStorage.setItem(CLOSED_GROUPS_KEY, JSON.stringify([...closed]));
+  } catch (error) {
+    // Storage blocked: the group just won't stay closed after a refresh.
+  }
+}
+
+const closedGroups = loadClosedGroups();
+
+// -------------------------------------------------------------
+// buildRoleGroup(group)
+// Makes one group's box: a heading line (role name, summary,
+// More/Less hint) and an empty space for its ship cards.
+// Returns the box and the space, so the caller can fill it.
+// -------------------------------------------------------------
+function buildRoleGroup(group) {
+  const box = document.createElement("details");
+  box.className = "role-group expandable";
+  box.id = "group-" + group.roleId;
+  box.open = !closedGroups.has(group.roleId);
+
+  // The summary text is filled in by render(), so it stays live.
+  box.innerHTML = `
+    <summary class="role-group-head">
+      <span class="role-group-name">${group.name}</span>
+      <span class="role-group-summary" data-part="summary"></span>
+      <span class="expand-hint" aria-hidden="true"></span>
+    </summary>
+    <div class="role-group-ships" data-part="ships"></div>
+  `;
+
+  // Remember when the player opens or closes it.
+  box.addEventListener("toggle", () => {
+    if (box.open) {
+      closedGroups.delete(group.roleId);
+    } else {
+      closedGroups.add(group.roleId);
+    }
+    saveClosedGroups(closedGroups);
+  });
+
+  return { box, shipsArea: part(box, "ships") };
+}
+
 function buildFleetCards(state, actions) {
   const fleetList = byId("fleet-list");
-  fleetList.innerHTML = "";   // clear the old cards
+  fleetList.innerHTML = "";   // clear the old groups and cards
 
-  for (const ship of state.ships) {
-    const shipType = SHIP_TYPES[ship.type];
+  // One group per role that has ships; each ship's card goes
+  // inside its group.
+  for (const group of getRoleGroups(state, Date.now())) {
+    const { box, shipsArea } = buildRoleGroup(group);
+    fleetList.appendChild(box);
 
-    const isFreighter = shipType.role === "freight";
+    for (const ship of group.ships) {
+      shipsArea.appendChild(buildShipCard(ship, actions));
+    }
+  }
+}
 
-    const card = document.createElement("div");
-    card.className = "ship-card";
-    card.id = "ship-" + ship.id;
+// -------------------------------------------------------------
+// buildShipCard(ship, actions)
+// One ship's card on the Command screen. Returns the card;
+// buildFleetCards puts it in the right group.
+// -------------------------------------------------------------
+function buildShipCard(ship, actions) {
+  const shipType = SHIP_TYPES[ship.type];
 
-    // Barges pick a field; freighters pick a haul mode.
-    // (Freighters have no drill, so their specs skip it.)
-    const picker = isFreighter ? haulModePicker() : destinationPicker();
-    const drill = isFreighter ? "" : ` · Drill <b>${formatTonnes(shipType.miningRate)}/min</b>`;
+  const isFreighter = shipType.role === "freight";
 
-    // The card's layout. Parts we update later get a
-    // "data-part" label so we can find them again.
-    card.innerHTML = `
-      <div class="ship-art">${getSchematic(shipType.art)}</div>
-      <div class="ship-body">
-        <div class="card-header">
-          <span class="card-name">${escapeHtml(ship.name)}</span>
-          <span class="card-sub">${shipType.name}</span>
-        </div>
-        ${picker}
-        ${routeTracker()}
-        <div class="ship-status" data-part="status">Idle</div>
-        <div class="ship-specs">
-          Hold <b>${formatTonnes(shipType.cargoCapacity)}</b>${drill}
-          · Drive <b>${shipType.speed.toFixed(2)}×</b>
-        </div>
-        <button class="btn" data-part="button">Dispatch</button>
+  const card = document.createElement("div");
+  card.className = "ship-card";
+  card.id = "ship-" + ship.id;
+
+  // Barges pick a field; freighters pick a haul mode.
+  // (Freighters have no drill, so their specs skip it.)
+  const picker = isFreighter ? haulModePicker() : destinationPicker();
+  const drill = isFreighter ? "" : ` · Drill <b>${formatTonnes(shipType.miningRate)}/min</b>`;
+
+  // The card's layout. Parts we update later get a
+  // "data-part" label so we can find them again.
+  card.innerHTML = `
+    <div class="ship-art">${getSchematic(shipType.art)}</div>
+    <div class="ship-body">
+      <div class="card-header">
+        <span class="card-name">${escapeHtml(ship.name)}</span>
+        <span class="card-sub">${shipType.name}</span>
       </div>
-    `;
+      ${picker}
+      ${routeTracker()}
+      <div class="ship-status" data-part="status">Idle</div>
+      <div class="ship-specs">
+        Hold <b>${formatTonnes(shipType.cargoCapacity)}</b>${drill}
+        · Drive <b>${shipType.speed.toFixed(2)}×</b>
+      </div>
+      <button class="btn" data-part="button">Dispatch</button>
+    </div>
+  `;
 
-    if (isFreighter) {
-      // Choosing a haul mode (allowed any time; it's used the
-      // next time the freighter loads).
-      for (const modeButton of part(card, "modes").querySelectorAll(".dest-btn")) {
-        modeButton.addEventListener("click", () => {
-          actions.setHaulMode(ship.id, modeButton.dataset.mode);
-        });
-      }
-    } else {
-      // Choosing a destination (only while docked: a ship can't
-      // change course mid-trip). "change" fires when the player
-      // picks a different option from the dropdown.
-      const select = part(card, "dest");
-      select.addEventListener("change", () => {
-        actions.setDestination(ship.id, select.value);
+  if (isFreighter) {
+    // Choosing a haul mode (allowed any time; it's used the
+    // next time the freighter loads).
+    for (const modeButton of part(card, "modes").querySelectorAll(".dest-btn")) {
+      modeButton.addEventListener("click", () => {
+        actions.setHaulMode(ship.id, modeButton.dataset.mode);
       });
     }
-
-    // When this ship's button is clicked, either send it out
-    // call it back, or (if it's been recalled) send it back to work.
-    part(card, "button").addEventListener("click", () => {
-      const job = getJobForShip(actions.getState(), ship.id);
-      if (job && job.recall) {
-        actions.resumeShip(ship.id);
-      } else if (job) {
-        actions.recallShip(ship.id);
-      } else {
-        actions.dispatchShip(ship.id);
-      }
+  } else {
+    // Choosing a destination (only while docked: a ship can't
+    // change course mid-trip). "change" fires when the player
+    // picks a different option from the dropdown.
+    const select = part(card, "dest");
+    select.addEventListener("change", () => {
+      actions.setDestination(ship.id, select.value);
     });
-
-    fleetList.appendChild(card);
   }
+
+  // When this ship's button is clicked, either send it out
+  // call it back, or (if it's been recalled) send it back to work.
+  part(card, "button").addEventListener("click", () => {
+    const job = getJobForShip(actions.getState(), ship.id);
+    if (job && job.recall) {
+      actions.resumeShip(ship.id);
+    } else if (job) {
+      actions.recallShip(ship.id);
+    } else {
+      actions.dispatchShip(ship.id);
+    }
+  });
+
+  return card;
 }
 
 function buildOwnedList(state, actions) {
@@ -779,6 +863,7 @@ export function render(state, now) {
   renderCargo(state);
   renderStatusStrip(state, now);
   renderFleet(state, now);
+  renderRoleGroups(state, now);
   renderOwnedList(state);
   renderCommand(state);
   renderShipyard(state);
@@ -892,6 +977,29 @@ function renderFleet(state, now) {
       status.textContent = `Docked at ${HOME.name} — awaiting orders`;
       button.textContent = "Dispatch to " + fieldName;
     }
+  }
+}
+
+
+// -------------------------------------------------------------
+// renderRoleGroups(state, now)
+// Keeps each group heading's summary up to date, e.g.
+// "3 ships · 2 working, 1 docked". If any ship in the group is
+// docked with no orders, the heading lights up amber, so even a
+// collapsed group shows that something needs the player.
+// -------------------------------------------------------------
+function renderRoleGroups(state, now) {
+  for (const group of getRoleGroups(state, now)) {
+    const box = byId("group-" + group.roleId);
+    if (!box) continue;   // (not built yet - skip this time)
+
+    const summary = part(box, "summary");
+    const text = describeGroup(group);
+    // Only rewrite the text when it changes (it's checked 4 times a second).
+    if (summary.textContent !== text) {
+      summary.textContent = text;
+    }
+    box.classList.toggle("needs-orders", group.counts.docked > 0);
   }
 }
 
