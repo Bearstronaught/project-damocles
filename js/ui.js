@@ -571,9 +571,12 @@ function buildFleetCards(state, actions) {
     }
 
     // When this ship's button is clicked, either send it out
-    // or call it back, depending on whether it's busy.
+    // call it back, or (if it's been recalled) send it back to work.
     part(card, "button").addEventListener("click", () => {
-      if (getJobForShip(actions.getState(), ship.id)) {
+      const job = getJobForShip(actions.getState(), ship.id);
+      if (job && job.recall) {
+        actions.resumeShip(ship.id);
+      } else if (job) {
         actions.recallShip(ship.id);
       } else {
         actions.dispatchShip(ship.id);
@@ -879,9 +882,10 @@ function renderFleet(state, now) {
       if (phase.phase === "outbound") text = `Outbound to ${fieldName} — arrives in ${timeLeft}`;
       if (phase.phase === "mining") text = `Mining ${fieldName} — hold full in ${timeLeft}`;
       if (phase.phase === "returning") text = `Returning home — docks in ${timeLeft}`;
+      if (job.recall) text = recallStatus(state, job, now);
 
       status.textContent = text;
-      button.textContent = "Recall";
+      button.textContent = job.recall ? "Resume" : "Recall";
       card.classList.add("busy", "phase-" + phase.phase);
     } else {
       fills.forEach((fill) => { fill.style.width = "0%"; });
@@ -889,6 +893,34 @@ function renderFleet(state, now) {
       button.textContent = "Dispatch to " + fieldName;
     }
   }
+}
+
+
+// -------------------------------------------------------------
+// recallStatus(state, job, now)
+// The status line for a ship that's been recalled, e.g.
+//   "Recalled — returning with 60 t, docks in 52s"
+// -------------------------------------------------------------
+function recallStatus(state, job, now) {
+  const docksIn = formatDuration(Math.max(0, job.startedAt + job.durationMs - now));
+
+  if (job.type === "haul") {
+    return job.noSale
+      ? `Recalled — bringing its cargo back, docks in ${docksIn}`
+      : `Recalled — standing down after this run, docks in ${docksIn}`;
+  }
+  // A barge: a part-full hold if it left the field early,
+  // otherwise a full one.
+  const full = SHIP_TYPES[findShipType(state, job.shipId)].cargoCapacity;
+  const load = job.amountOverride ?? full;
+  return load === 0
+    ? `Recalled — turning back empty, docks in ${docksIn}`
+    : `Recalled — returning with ${formatTonnes(load)}, docks in ${docksIn}`;
+}
+
+// The ship type ID of one of the player's ships.
+function findShipType(state, shipId) {
+  return state.ships.find((ship) => ship.id === shipId).type;
 }
 
 
@@ -953,9 +985,10 @@ function renderFreighterCard(state, ship, card, now) {
   if (phase.phase === "outbound") text = `Hauling ${formatTonnes(tonnes)} to the hub — arrives in ${timeLeft}`;
   if (phase.phase === "trading") text = `Selling at the hub — done in ${timeLeft}`;
   if (phase.phase === "returning") text = `Returning home — docks in ${timeLeft}`;
+  if (job.recall) text = recallStatus(state, job, now);
 
   status.textContent = text;
-  button.textContent = "Recall";
+  button.textContent = job.recall ? "Resume" : "Recall";
   card.classList.add("busy", "phase-" + phase.phase);
 }
 
@@ -970,7 +1003,10 @@ function renderOwnedList(state) {
     const job = getJobForShip(state, ship.id);
     if (job) {
       const phase = getJobPhase(job, now);
-      if (job.type === "haul") {
+      if (job.recall) {
+        part(row, "status").textContent = "Recalled · docks in " +
+          formatDuration(Math.max(0, job.startedAt + job.durationMs - now));
+      } else if (job.type === "haul") {
         // e.g. "Trading · Merchant hub · 12s", or just "Waiting for cargo"
         part(row, "status").textContent = phase.phase === "waiting"
           ? PHASE_LABELS.waiting

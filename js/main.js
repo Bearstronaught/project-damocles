@@ -15,7 +15,7 @@
 
 import { RULES, ITEMS, FIELDS, SHIP_TYPES, SKILLS, HUB, HOME, HAUL_MODES } from "../data/content.js";
 import { createNewGame, findShip } from "./state.js";
-import { startMiningJob, startHaulJob, cancelJob, getJobForShip, processJobs } from "./jobs.js";
+import { startMiningJob, startHaulJob, recallJob, resumeJob, getJobForShip, processJobs } from "./jobs.js";
 import { sellAll, sellEverything } from "./trade.js";
 import { buyShip, sellShip, renameShip } from "./shipyard.js";
 import { buyUpgrade, getCommandCapacity } from "./command.js";
@@ -79,20 +79,37 @@ const actions = {
     refresh();
   },
 
+  // Recall = "come home". The ship always flies back (no
+  // shortcuts), then stays docked. See recallJob in jobs.js.
   recallShip(shipId) {
     const job = getJobForShip(state, shipId);
-    if (job) {
-      // Note the cargo BEFORE cancelling (cancelling empties it).
-      const unsoldCargo = job.type === "haul" && job.cargo && !job.sold;
-      cancelJob(state, job.id);
-      const name = findShip(state, shipId).name;
-      if (job.type === "haul") {
-        addLog(unsoldCargo
-          ? `${name} recalled. Its cargo goes back into the home hold.`
-          : `${name} recalled and stood down.`, "fleet");
-      } else {
-        addLog(`${name} recalled. Partial cargo dumped.`, "fleet");
-      }
+    if (!job) return;
+    const ship = findShip(state, shipId);
+    const recall = recallJob(state, job.id, Date.now());
+    if (!recall) return;
+
+    const docks = recall.docksInMs !== undefined ? formatDuration(recall.docksInMs) : "";
+    if (recall.mode === "stoodDown") {
+      addLog(`${ship.name} stands down at ${HOME.name}.`, "fleet");
+    } else if (job.type === "haul") {
+      addLog(job.noSale
+        ? `${ship.name} recalled. Turning back with its cargo; docks in ${docks}.`
+        : `${ship.name} recalled. Heading home after this run; docks in ${docks}.`, "fleet");
+    } else if (recall.mode === "turnback") {
+      addLog(`${ship.name} recalled. Turning back empty; docks in ${docks}.`, "fleet");
+    } else if (recall.mode === "leftEarly") {
+      addLog(`${ship.name} recalled. Leaving the field with ${formatTonnes(recall.amount)}; docks in ${docks}.`, "fleet");
+    } else {
+      addLog(`${ship.name} recalled. Bringing home ${formatTonnes(recall.amount)}; docks in ${docks}.`, "fleet");
+    }
+    refresh();
+  },
+
+  // Cancels a recall: the ship carries on working.
+  resumeShip(shipId) {
+    const job = getJobForShip(state, shipId);
+    if (job && resumeJob(state, job.id, Date.now())) {
+      addLog(`${findShip(state, shipId).name} resumes work.`, "fleet");
     }
     refresh();
   },
@@ -216,8 +233,14 @@ function tick() {
       addLog(`${ship.name} docked with ${formatTonnes(result.amount)} of ${itemName} (+${formatXp(result.xpGained)} Mining XP).`, "trip");
     } else if (result.kind === "haul") {
       addLog(`${ship.name} sold ${describeCargo(result.cargo)} at the ${HUB.name.toLowerCase()} for ${formatNumber(result.credits)} cr (+${formatXp(result.xpGained)} Trade XP).`, "trade");
+    } else if (result.kind === "docked") {
+      addLog(result.returnedCargo
+        ? `${ship.name} docked at ${HOME.name}; ${describeCargo(result.returnedCargo)} back in the hold. Standing by.`
+        : `${ship.name} docked at ${HOME.name}. Standing by.`, "trip");
     }
-    logLevelUps(result.skillId, result.newLevels);
+    if (result.kind !== "docked") {   // docking earns no XP
+      logLevelUps(result.skillId, result.newLevels);
+    }
   }
 
   render(state, now);

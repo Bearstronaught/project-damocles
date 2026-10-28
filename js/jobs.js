@@ -220,6 +220,146 @@ export function cancelJob(state, jobId) {
 }
 
 
+// =============================================================
+// RECALLING A SHIP ("come home") AND RESUMING
+// =============================================================
+//
+// Recall never teleports a ship. It always FLIES home, so
+// recalling is never quicker than waiting (no shortcuts):
+//
+//   Barge, outbound     turns round: the flight home takes as long
+//                       as it had flown out. No ore.
+//   Barge, at the field leaves now with what it has mined so far
+//                       (a part-full hold), then the normal flight.
+//   Barge, returning    carries on home and unloads as normal.
+//   Freighter, outbound turns round and brings the cargo back.
+//   Freighter, at hub   finishes selling, then flies home.
+//   Freighter, returning carries on home.
+//   Freighter, waiting  already home: stands down straight away.
+//
+// In every case it STAYS DOCKED afterwards instead of starting
+// another trip. Recalling is stored on the job as:
+//   job.recall = { mode, at, original }
+//     mode     "turnback", "leftEarly" or "finishing"
+//     at       how far into the trip (ms) it was recalled
+//     original the trip's normal timings, so Resume can restore them
+
+// -------------------------------------------------------------
+// recallJob(state, jobId, now)
+// Calls a ship home. Returns what happened, for the log:
+//   { mode, docksInMs, amount }   (amount: tonnes a barge brings)
+// or { mode: "stoodDown" } for a freighter already at the dock,
+// or null if there's nothing to recall.
+// -------------------------------------------------------------
+export function recallJob(state, jobId, now) {
+  const job = state.jobs.find((j) => j.id === jobId);
+  if (!job || job.recall) {
+    return null;   // no such job, or already recalled
+  }
+
+  // A freighter waiting for cargo is already home.
+  if (job.type === "haul" && job.status === "waiting") {
+    cancelJob(state, jobId);
+    return { mode: "stoodDown" };
+  }
+
+  // How far into this trip it is (kept within the trip).
+  const at = Math.min(Math.max(now - job.startedAt, 0), job.durationMs);
+
+  // Remember the normal timings, in case the player resumes.
+  const original = {
+    outboundMs: job.outboundMs,
+    returnMs: job.returnMs,
+    durationMs: job.durationMs,
+  };
+  if (job.type === "mining") original.miningMs = job.miningMs;
+  if (job.type === "haul") original.tradeMs = job.tradeMs;
+
+  let mode;
+
+  if (at < job.outboundMs) {
+    // STILL FLYING OUT: turn round. The trip becomes "fly out
+    // for 'at' ms, then fly back for 'at' ms", with no middle.
+    mode = "turnback";
+    job.outboundMs = at;
+    job.returnMs = at;
+    job.durationMs = at * 2;
+    if (job.type === "mining") {
+      job.miningMs = 0;
+      job.amountOverride = 0;      // nothing mined
+    } else {
+      job.tradeMs = 0;
+      job.noSale = true;           // bring the cargo back unsold
+    }
+  } else if (job.type === "mining" && at < job.outboundMs + job.miningMs) {
+    // AT THE FIELD: stop mining now, keep what's in the hold.
+    mode = "leftEarly";
+    const minedMs = at - job.outboundMs;
+    const capacity = SHIP_TYPES[findShip(state, job.shipId).type].cargoCapacity;
+    // The hold fills evenly while mining, so half the time = half
+    // the hold. Math.floor rounds down to whole tonnes.
+    job.amountOverride = Math.floor(capacity * (minedMs / job.miningMs));
+    job.miningMs = minedMs;
+    job.durationMs = job.outboundMs + minedMs + job.returnMs;
+  } else {
+    // ALREADY HEADING HOME (or selling at the hub): carry on as
+    // normal, just don't start another trip.
+    mode = "finishing";
+  }
+
+  job.repeat = false;
+  job.recall = { mode: mode, at: at, original: original };
+
+  const amount = job.type === "mining"
+    ? (job.amountOverride ?? getTripPlan(findShip(state, job.shipId).type, job.fieldId).orePerTrip)
+    : null;
+  // ("??" means: use the left side unless it's missing, then the right.)
+
+  return { mode: mode, docksInMs: job.startedAt + job.durationMs - now, amount: amount };
+}
+
+
+// -------------------------------------------------------------
+// resumeJob(state, jobId, now)
+// Cancels a recall: the ship goes back to work.
+//   turnback:  it turns round again from wherever it has got to.
+//              Only the time spent heading home is lost.
+//   leftEarly: it carries on home with its part-full hold (it has
+//              already left the field), then trips go back to normal.
+//   finishing: nothing changed yet, so it simply keeps going.
+// Returns true if it resumed.
+// -------------------------------------------------------------
+export function resumeJob(state, jobId, now) {
+  const job = state.jobs.find((j) => j.id === jobId);
+  if (!job || !job.recall) {
+    return false;
+  }
+
+  const { mode, at, original } = job.recall;
+
+  if (mode === "turnback") {
+    // Where is it? It flew out for "at" ms, then has been heading
+    // home for (elapsed - at) ms, so it's this far out:
+    const elapsed = Math.min(Math.max(now - job.startedAt, 0), job.durationMs);
+    const distanceOut = Math.max(0, at - (elapsed - at));
+
+    // Put the normal trip back, and pretend it left home just
+    // long enough ago to be exactly where it is now.
+    Object.assign(job, original);
+    job.startedAt = now - distanceOut;
+    delete job.amountOverride;
+    delete job.noSale;
+  } else if (mode === "leftEarly") {
+    // This short trip finishes as it is; the NEXT one is normal.
+    job.restoreAfterTrip = original;
+  }
+
+  job.repeat = true;
+  delete job.recall;
+  return true;
+}
+
+
 // -------------------------------------------------------------
 // getJobForShip(state, shipId)
 // Returns the job a ship is doing, or undefined if it's idle.
@@ -320,6 +460,10 @@ export function getJobProgress(job, now) {
   if (job.type === "haul" && job.status === "waiting") {
     return 0;
   }
+  // A ship recalled the instant it left has a 0 ms trip: it's done.
+  if (job.durationMs === 0) {
+    return 1;
+  }
   const elapsed = now - job.startedAt;
   const progress = elapsed / job.durationMs;
 
@@ -356,7 +500,12 @@ export function getJobPhase(job, now) {
 
   // How full each phase is: "elapsed minus where the phase
   // starts, divided by its length", kept between 0 and 1.
-  const fill = (start, length) => Math.min(Math.max((elapsed - start) / length, 0), 1);
+  // A phase of length 0 (a recalled ship that never reached the
+  // field) counts as full once we're past it, so we never divide by 0.
+  const fill = (start, length) => {
+    if (length === 0) return elapsed >= start ? 1 : 0;
+    return Math.min(Math.max((elapsed - start) / length, 0), 1);
+  };
   const fills = [
     fill(0, job.outboundMs),
     fill(outEnd, middleMs),
@@ -399,6 +548,8 @@ export function getJobPhase(job, now) {
 // can report it:
 //   mining: { kind: "mining", shipId, itemId, amount, trips,
 //             skillId: "mining", xpGained, newLevels }
+//   docked: { kind: "docked", shipId, returnedCargo? }  a recalled
+//           ship arriving home to stand down
 //   haul:   { kind: "haul", shipId, cargo, tonnes, credits,
 //             trips, skillId: "trade", xpGained, newLevels }
 // -------------------------------------------------------------
@@ -448,7 +599,7 @@ function findNextEvent(state, now) {
     if (job.type === "mining") {
       time = job.startedAt + job.durationMs;
     } else if (job.type === "haul" && job.status === "travelling") {
-      time = job.sold
+      time = (job.sold || job.noSale)
         ? job.startedAt + job.durationMs                  // docks back home
         : job.startedAt + job.outboundMs + job.tradeMs;   // sells at the hub
     } else {
@@ -478,27 +629,56 @@ function runEvent(state, job, time) {
     const plan = getTripPlan(ship.type, job.fieldId);
     const field = FIELDS[job.fieldId];
 
-    addItem(state, field.yields, plan.orePerTrip);
-    const newLevels = addXp(state, "mining", plan.xpPerTrip);
+    // A full hold - unless it was recalled before filling up.
+    const amount = job.amountOverride ?? plan.orePerTrip;
+    const xp = amount / field.tonnesPerXp;
+    delete job.amountOverride;
+
+    let newLevels = [];
+    if (amount > 0) {
+      addItem(state, field.yields, amount);
+      newLevels = addXp(state, "mining", xp);
+    }
 
     if (job.repeat) {
       // The next trip starts the moment this one ends, so no
       // time is lost between trips.
       job.startedAt += job.durationMs;
+      // A trip cut short (then resumed) is over: back to normal.
+      if (job.restoreAfterTrip) {
+        Object.assign(job, job.restoreAfterTrip);
+        delete job.restoreAfterTrip;
+      }
     } else {
+      // Recalled: it docks and stays docked.
       state.jobs = state.jobs.filter((j) => j !== job);
+    }
+
+    // Turned back before mining anything: just say it docked.
+    if (amount === 0) {
+      return { kind: "docked", shipId: job.shipId, trips: 1, xpGained: 0, newLevels: [] };
     }
 
     return {
       kind: "mining",
       shipId: job.shipId,
       itemId: field.yields,
-      amount: plan.orePerTrip,
+      amount: amount,
       trips: 1,
       skillId: "mining",
-      xpGained: plan.xpPerTrip,
+      xpGained: xp,
       newLevels: newLevels,
     };
+  }
+
+  // --- A freighter turned back before selling docks: unload ---
+  if (job.type === "haul" && job.noSale) {
+    const cargo = job.cargo;
+    for (const [itemId, amount] of Object.entries(cargo || {})) {
+      addItem(state, itemId, amount);   // back into the home hold
+    }
+    state.jobs = state.jobs.filter((j) => j !== job);
+    return { kind: "docked", shipId: job.shipId, trips: 1, xpGained: 0, newLevels: [], returnedCargo: cargo };
   }
 
   // --- A freighter finishes trading at the hub: get paid ---
@@ -521,8 +701,14 @@ function runEvent(state, job, time) {
     };
   }
 
-  // --- A freighter docks back home: wait for the next load ---
+  // --- A freighter docks back home ---
   if (job.type === "haul" && job.sold) {
+    if (!job.repeat) {
+      // Recalled: it stays docked.
+      state.jobs = state.jobs.filter((j) => j !== job);
+      return { kind: "docked", shipId: job.shipId, trips: 1, xpGained: 0, newLevels: [] };
+    }
+    // Otherwise wait for the next load.
     job.status = "waiting";
     job.sold = false;
     job.startedAt = time;   // (when it started waiting)
@@ -553,6 +739,11 @@ function mergeResultsByShip(results) {
       if (copy.cargo) copy.cargo = { ...copy.cargo };
       byShip[key] = copy;
       merged.push(copy);
+      continue;
+    }
+
+    // "Docked" has nothing to add up.
+    if (result.kind === "docked") {
       continue;
     }
 

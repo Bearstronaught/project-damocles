@@ -22,7 +22,7 @@
 import assert from "node:assert/strict";
 import { SHIP_TYPES, ITEMS, COMMAND } from "../data/content.js";
 import { createNewGame } from "../js/state.js";
-import { startMiningJob, startHaulJob, processJobs, cancelJob, getJobProgress, getJobPhase, getTripPlan, getHaulPlan, loadCargo } from "../js/jobs.js";
+import { startMiningJob, startHaulJob, processJobs, cancelJob, recallJob, resumeJob, getJobProgress, getJobPhase, getTripPlan, getHaulPlan, loadCargo } from "../js/jobs.js";
 import { sellAll, sellEverything, getCargoValue, sellAtHub, getTradeXp, getPrice } from "../js/trade.js";
 import { parseSave, applyOfflineProgress, exportSave, importSave } from "../js/save.js";
 import { XP_TABLE, getLevelForXp, getLevel, getLevelProgress, addXp, isShipTypeUnlocked, MAX_LEVEL } from "../js/skills.js";
@@ -1119,6 +1119,177 @@ test("A renamed ship keeps its name through export and import", () => {
   renameShip(state, "ship-1", "Grit & <Gravel>");
   const back = importSave(exportSave(state)).state;
   assert.equal(back.ships[0].name, "Grit & <Gravel>");
+});
+
+// =============================================================
+// RECALL ("come home") AND RESUME
+// A Prospector trip: 45s out, 60s mining, 45s back (150s), 120 t.
+// =============================================================
+
+test("Recall while flying out: turns back, docks after the same time, no ore", () => {
+  const state = createNewGame();
+  const job = startMiningJob(state, "ship-1", "inner_belt", START);
+  const recall = recallJob(state, job.id, START + 30 * SECOND);
+  assert.equal(recall.mode, "turnback");
+  assert.equal(recall.docksInMs, 30 * SECOND);       // flew out 30s, flies back 30s
+
+  processJobs(state, START + 60 * SECOND - 1);
+  assert.equal(state.jobs.length, 1);                // still on its way home
+  const results = processJobs(state, START + 60 * SECOND);
+  assert.equal(state.jobs.length, 0);                // docked and standing by
+  assert.equal(state.inventory.iron_ore, 0);
+  assert.equal(results[0].kind, "docked");
+});
+
+test("Recall halfway through mining: leaves with half a hold (60 t)", () => {
+  const state = createNewGame();
+  const job = startMiningJob(state, "ship-1", "inner_belt", START);
+  const recall = recallJob(state, job.id, START + 75 * SECOND);   // 30s into 60s mining
+  assert.equal(recall.mode, "leftEarly");
+  assert.equal(recall.amount, 60);
+  assert.equal(recall.docksInMs, 45 * SECOND);       // the normal flight home
+
+  processJobs(state, START + 120 * SECOND);
+  assert.equal(state.inventory.iron_ore, 60);
+  assert.equal(state.skills.mining.xp, 6);           // 60 t ÷ 10
+  assert.equal(state.jobs.length, 0);
+});
+
+test("Recall on the way home: full hold at the normal time, then stays docked", () => {
+  const state = createNewGame();
+  const job = startMiningJob(state, "ship-1", "inner_belt", START);
+  const recall = recallJob(state, job.id, START + 120 * SECOND);
+  assert.equal(recall.mode, "finishing");
+
+  processJobs(state, START + 150 * SECOND - 1);
+  assert.equal(state.inventory.iron_ore, 0);         // not home yet - no shortcut
+  processJobs(state, START + HOUR);
+  assert.equal(state.inventory.iron_ore, 120);       // one trip only
+  assert.equal(state.jobs.length, 0);
+});
+
+test("No exploit: recalling never gets ore home sooner than waiting", () => {
+  // Try recalling at every second of a trip. However it's timed,
+  // nothing may arrive before the trip's normal end.
+  for (let t = 0; t <= 150; t++) {
+    const state = createNewGame();
+    const job = startMiningJob(state, "ship-1", "inner_belt", START);
+    recallJob(state, job.id, START + t * SECOND);
+    // Before the normal end of the trip, a recall may have brought
+    // home a PART load, but never a full one.
+    processJobs(state, START + 150 * SECOND - 1);
+    assert.ok(state.inventory.iron_ore < 120, `recalled at ${t}s: full hold arrived early`);
+    // ...and never more ore than a normal trip
+    processJobs(state, START + HOUR);
+    assert.ok(state.inventory.iron_ore <= 120);
+  }
+});
+
+test("No exploit: a Courier recalled after selling still flies the 3 minutes home", () => {
+  const state = gameWithCourier();
+  state.inventory.iron_ore = 1200;                   // enough for two loads
+  const job = startHaulJob(state, "ship-2", START);
+  processJobs(state, START + HAUL.outboundMs + HAUL.tradeMs);   // sold
+  const recall = recallJob(state, job.id, START + HAUL.outboundMs + HAUL.tradeMs);
+  assert.equal(recall.docksInMs, HAUL.returnMs);     // 3 minutes, not instant
+
+  // Can't be sent out again until it actually docks.
+  assert.equal(startHaulJob(state, "ship-2", START + HAUL.outboundMs + HAUL.tradeMs), null);
+  processJobs(state, START + HAUL.durationMs);
+  assert.equal(state.jobs.length, 0);                // docked, standing by
+  assert.equal(state.inventory.iron_ore, 600);       // second load untouched
+});
+
+test("Courier recalled on the way out: no sale, cargo back only when it docks", () => {
+  const state = gameWithCourier();
+  state.inventory.iron_ore = 600;
+  const job = startHaulJob(state, "ship-2", START);
+  recallJob(state, job.id, START + 60 * SECOND);     // 1 minute out
+  processJobs(state, START + 2 * MINUTE - 1);
+  assert.equal(state.inventory.iron_ore, 0);         // still on board, flying back
+  processJobs(state, START + 2 * MINUTE);
+  assert.equal(state.inventory.iron_ore, 600);       // unloaded at home
+  assert.equal(state.credits, 0);
+  assert.equal(state.jobs.length, 0);
+});
+
+test("Courier recalled while selling: finishes the sale, then flies home", () => {
+  const state = gameWithCourier();
+  state.inventory.iron_ore = 600;
+  const job = startHaulJob(state, "ship-2", START);
+  recallJob(state, job.id, START + HAUL.outboundMs + 10 * SECOND);
+  processJobs(state, START + HAUL.durationMs);
+  assert.equal(state.credits, 4800);
+  assert.equal(state.jobs.length, 0);
+});
+
+test("Courier waiting at the dock stands down straight away", () => {
+  const state = gameWithCourier();
+  const job = startHaulJob(state, "ship-2", START);  // nothing to load: waiting
+  assert.equal(recallJob(state, job.id, START + SECOND).mode, "stoodDown");
+  assert.equal(state.jobs.length, 0);
+});
+
+test("Resume after turning back: heads out again, losing only the time spent", () => {
+  const state = createNewGame();
+  const job = startMiningJob(state, "ship-1", "inner_belt", START);
+  recallJob(state, job.id, START + 30 * SECOND);     // turn back at 30s out
+  resumeJob(state, job.id, START + 40 * SECOND);     // 10s later: 20s out
+  // It's 20s out, so the trip ends 130s from now... i.e. 20s late.
+  processJobs(state, START + 170 * SECOND - 1);
+  assert.equal(state.inventory.iron_ore, 0);
+  processJobs(state, START + 170 * SECOND);
+  assert.equal(state.inventory.iron_ore, 120);       // a full, normal trip
+  assert.equal(state.jobs.length, 1);                // and it keeps working
+});
+
+test("Resume after leaving the field early: part-load home, then normal trips", () => {
+  const state = createNewGame();
+  const job = startMiningJob(state, "ship-1", "inner_belt", START);
+  recallJob(state, job.id, START + 75 * SECOND);     // 60 t, docks at 120s
+  resumeJob(state, job.id, START + 80 * SECOND);
+  processJobs(state, START + 120 * SECOND);
+  assert.equal(state.inventory.iron_ore, 60);
+  assert.equal(job.durationMs, 150 * SECOND);        // next trip is normal again
+  processJobs(state, START + 270 * SECOND);
+  assert.equal(state.inventory.iron_ore, 180);       // + one full trip
+});
+
+test("Resume while finishing: nothing lost, keeps repeating", () => {
+  const state = createNewGame();
+  const job = startMiningJob(state, "ship-1", "inner_belt", START);
+  recallJob(state, job.id, START + 120 * SECOND);
+  resumeJob(state, job.id, START + 125 * SECOND);
+  processJobs(state, START + 300 * SECOND);
+  assert.equal(state.inventory.iron_ore, 240);       // exactly as if never recalled
+});
+
+test("Recalling twice does nothing the second time", () => {
+  const state = createNewGame();
+  const job = startMiningJob(state, "ship-1", "inner_belt", START);
+  recallJob(state, job.id, START + 30 * SECOND);
+  assert.equal(recallJob(state, job.id, START + 31 * SECOND), null);
+});
+
+test("Recall right as it leaves: docks at once with nothing", () => {
+  const state = createNewGame();
+  const job = startMiningJob(state, "ship-1", "inner_belt", START);
+  recallJob(state, job.id, START);
+  assert.equal(getJobProgress(job, START), 1);       // no dividing by zero
+  processJobs(state, START);
+  assert.equal(state.jobs.length, 0);
+});
+
+test("A recalled ship's trip survives a save and time away", () => {
+  const state = createNewGame();
+  const job = startMiningJob(state, "ship-1", "inner_belt", START);
+  recallJob(state, job.id, START + 75 * SECOND);
+  state.lastSavedAt = START + 75 * SECOND;
+  const loaded = importSave(exportSave(state)).state;
+  loaded.lastSavedAt = START + 75 * SECOND;          // (export stamps "now")
+  applyOfflineProgress(loaded, START + HOUR);
+  assert.equal(loaded.inventory.iron_ore, 60);       // just the part-load
+  assert.equal(loaded.jobs.length, 0);
 });
 
 // -------------------------------------------------------------
