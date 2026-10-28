@@ -130,7 +130,7 @@ export const SHIP_TYPES = {
     size: "small",
     skill: "mining",
     unlockLevel: 1,
-    cost: 15000,              // about an hour of mining with one Prospector
+    cost: 8000,              // about an hour of mining with one Prospector
     art: "hull_prospector",
   },
   excavator: {
@@ -221,7 +221,7 @@ export const TRADE = {
 // everywhere in the game. ("Home dock" is a placeholder until the
 // lore names it.)
 export const HOME = {
-  name: "Home dock",
+  name: "Anvil Station",
 };
 
 // THE MERCHANT HUB: where freighters sell for better prices.
