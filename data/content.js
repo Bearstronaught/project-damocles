@@ -136,9 +136,11 @@ export const SHIP_TYPES = {
   excavator: {
     name: "Excavator-class barge",
     role: "mining",
-    description: "Heavy hauler with twin drill heads. Slow to get there, but brings back over three times the ore.",
-    cargoCapacity: 400,
-    miningRate: 200,
+    description: "Heavy hauler with twin drill heads. Slow to get there, but brings back four times the ore.",
+    // 480 t at 240 t/min: earns about 25% more than two Prospectors
+    // on the same 2 command points, so it's a real upgrade (28 Oct).
+    cargoCapacity: 480,
+    miningRate: 240,
     speed: 0.75,
     size: "medium",
     skill: "mining",

@@ -81,17 +81,24 @@ test("Prospector trip: 45s out, 1m mining, 45s back = 2m 30s, 120 t ore, 12 XP",
   assert.equal(PROSPECTOR.xpPerTrip, 12);
 });
 
-test("Excavator trip: 1m out (slower drive), 2m mining, 1m back = 4m, 400 t ore", () => {
+test("Excavator trip: 1m out (slower drive), 2m mining, 1m back = 4m, 480 t ore", () => {
   assert.equal(EXCAVATOR.outboundMs, 60 * SECOND);
   assert.equal(EXCAVATOR.miningMs, 120 * SECOND);
   assert.equal(EXCAVATOR.durationMs, 240 * SECOND);
-  assert.equal(EXCAVATOR.orePerTrip, 400);
+  assert.equal(EXCAVATOR.orePerTrip, 480);
 });
 
-test("Excavator earns about twice the Prospector's credits per hour", () => {
+test("Excavator earns 2.5x a Prospector per hour", () => {
   const perHour = (plan) => plan.orePerTrip * (HOUR / plan.durationMs);
   const ratio = perHour(EXCAVATOR) / perHour(PROSPECTOR);
-  assert.ok(ratio > 1.9 && ratio < 2.3, "ratio was " + ratio.toFixed(2));
+  assert.ok(ratio > 2.4 && ratio < 2.6, "ratio was " + ratio.toFixed(2));
+});
+
+test("On the same 2 command points, an Excavator beats two Prospectors", () => {
+  // Otherwise there's no reason to trade up at Mining 10.
+  const perHour = (plan) => plan.orePerTrip * (HOUR / plan.durationMs);
+  assert.equal(SHIP_TYPES.excavator.size, "medium");    // 2 command points
+  assert.ok(perHour(EXCAVATOR) > 1.2 * 2 * perHour(PROSPECTOR));
 });
 
 test("Buying an Excavator takes over 2 hours of Prospector mining", () => {
