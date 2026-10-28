@@ -18,7 +18,8 @@
 //   Version 2: added skills (XP) and a ship-number counter
 //   Version 3: trips have three phases, timed by ship stats
 //   Version 4: command upgrades, and each ship has a destination
-export const SAVE_VERSION = 4;
+//   Version 5: added the Trade skill
+export const SAVE_VERSION = 5;
 
 
 // -------------------------------------------------------------
@@ -61,6 +62,7 @@ export function createNewGame() {
     // XP in each skill. Levels are worked out from XP (skills.js).
     skills: {
       mining: { xp: 0 },
+      trade: { xp: 0 },
     },
 
     // Jobs that are currently running (empty at the start).

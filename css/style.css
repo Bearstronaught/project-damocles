@@ -682,14 +682,22 @@ body {
   padding-bottom: 6px;
 }
 
+.cargo-table th,
 .cargo-table td {
-  padding: 6px 0;
+  padding-right: 6px;         /* space between columns */
+  white-space: nowrap;        /* "2,000 cr" never splits over two lines */
+}
+
+.cargo-table td {
+  padding-top: 6px;
+  padding-bottom: 6px;
   border-top: 1px solid var(--line);
   color: var(--amber);
 }
 
 .cargo-table td:first-child {
   color: var(--steel);
+  white-space: normal;        /* item names may wrap; numbers may not */
 }
 
 .price-note {
@@ -1022,6 +1030,13 @@ body {
 /* ----- Cargo table extras ----- */
 .cargo-table td.cargo-price {
   color: var(--steel-dim);
+}
+
+/* Hub prices are teal: they're paid somewhere else, not here.
+   (This rule sits after .cargo-price on purpose: when two rules
+   are equally specific, the later one wins.) */
+.cargo-table td.cargo-price.cargo-hub {
+  color: var(--teal);
 }
 
 .cargo-table tr.empty td {

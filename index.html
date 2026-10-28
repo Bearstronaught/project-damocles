@@ -42,6 +42,7 @@
     <span class="status-item">Fleet <b id="fleet-size">1</b></span>
     <span class="status-item">Command <b id="command-readout">1/4</b></span>
     <span class="status-item">Mining <b id="mining-level">Lv 1</b></span>
+    <span class="status-item">Trade <b id="trade-level">Lv 1</b></span>
     <span class="status-item status-save"><i class="pulse-dot"></i> Autosave on</span>
   </div>
 
@@ -79,7 +80,8 @@
             <tr>
               <th>Item</th>
               <th>Units</th>
-              <th>Price</th>
+              <th>Home</th>
+              <th>Hub</th>
               <th>Value</th>
               <th><span class="visually-hidden">Sell</span></th>
             </tr>
@@ -87,13 +89,15 @@
           <tbody id="cargo-body"></tbody>
           <tfoot>
             <tr>
-              <td colspan="3">Total</td>
+              <td colspan="4">Total</td>
               <td id="cargo-total">0 cr</td>
               <td></td>
             </tr>
           </tfoot>
         </table>
-        <button id="sell-all" class="btn btn-primary">Sell all cargo</button>
+        <!-- Explains the two prices (text written by ui.js) -->
+        <p class="price-note" id="hub-note"></p>
+        <button id="sell-all" class="btn btn-primary">Sell all at home dock</button>
       </div>
 
       <!-- Log: messages about what happened -->

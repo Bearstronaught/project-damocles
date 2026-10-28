@@ -17,7 +17,7 @@
 // flicker and sometimes swallow clicks.)
 // =============================================================
 
-import { ITEMS, SHIP_TYPES, FIELDS, SKILLS, HULL_SIZES, COMMAND } from "../data/content.js";
+import { ITEMS, SHIP_TYPES, FIELDS, SKILLS, HULL_SIZES, COMMAND, HUB } from "../data/content.js";
 import { getJobForShip, getJobPhase, getTripPlan } from "./jobs.js";
 import { getLevel, getLevelProgress, isShipTypeUnlocked, isFieldUnlocked } from "./skills.js";
 import { canBuyShip, canSellShip, getSellValue } from "./shipyard.js";
@@ -289,12 +289,18 @@ function buildCargoTable(actions) {
       <td>${item.name}</td>
       <td data-part="amount">0</td>
       <td class="cargo-price">${item.sellPrice} cr</td>
+      <td class="cargo-price cargo-hub">${item.hubPrice} cr</td>
       <td data-part="value">0 cr</td>
       <td><button class="btn btn-small" data-part="sell">Sell</button></td>
     `;
     part(row, "sell").addEventListener("click", () => actions.sellItem(itemId));
     body.appendChild(row);
   }
+
+  // The note under the table explains the two prices.
+  byId("hub-note").textContent =
+    `Selling here is instant at the home price. The ${HUB.name.toLowerCase()} pays the hub price, ` +
+    `but needs a freighter to haul the ore there (freighters unlock with Trade levels).`;
 }
 
 
@@ -467,8 +473,11 @@ function buildSkillCards() {
     }
     unlocks.sort((a, b) => a.level - b.level);   // lowest level first
 
-    // Turn each unlock into a line of the list.
-    const unlockLines = unlocks.map((u) => `
+    // Turn each unlock into a line of the list. A skill with
+    // nothing to unlock yet gets one plain line saying so.
+    const unlockLines = unlocks.length === 0
+      ? `<li>Nothing to unlock yet.</li>`
+      : unlocks.map((u) => `
       <li data-unlock="${u.key}">
         <span class="unlock-level">Lv ${u.level}</span>
         <span class="unlock-kind">${u.kind}</span>
@@ -539,6 +548,7 @@ function renderStatusStrip(state, now) {
   byId("clock").textContent = new Date(now).toLocaleTimeString("en-GB");
   byId("fleet-size").textContent = state.ships.length;
   byId("mining-level").textContent = "Lv " + getLevel(state, "mining");
+  byId("trade-level").textContent = "Lv " + getLevel(state, "trade");
   byId("command-readout").textContent = getCommandUsed(state) + "/" + getCommandCapacity(state);
 
   // "1 ship" / "2 ships" in the panel corners
@@ -761,7 +771,8 @@ function renderSkills(state) {
       part(card, "xp").textContent = "Max level";
     } else {
       const left = progress.xpForNextLevel - progress.xpIntoLevel;
-      part(card, "xp").textContent = `${formatNumber(left)} XP to level ${progress.level + 1}`;
+      // Round UP: 0.4 XP still needed should read "1", never "0".
+      part(card, "xp").textContent = `${formatNumber(Math.ceil(left))} XP to level ${progress.level + 1}`;
     }
 
     // Mark each unlock as done or still to come.
@@ -837,6 +848,14 @@ export function addLog(message, kind = "system") {
 // 12345 -> "12,345"
 export function formatNumber(number) {
   return Math.floor(number).toLocaleString("en-GB");
+}
+
+// XP can be a fraction (14.4 XP for a 144 cr sale), so show
+// one decimal place when needed:  6 -> "6",  14.4 -> "14.4"
+export function formatXp(xp) {
+  // Round to 1 decimal place first, so 14.400000001 shows as 14.4
+  const rounded = Math.round(xp * 10) / 10;
+  return rounded.toLocaleString("en-GB", { maximumFractionDigits: 1 });
 }
 
 // 75000 ms -> "1m 15s";  9000 ms -> "9s"

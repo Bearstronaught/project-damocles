@@ -23,7 +23,7 @@ import assert from "node:assert/strict";
 import { SHIP_TYPES, ITEMS, COMMAND } from "../data/content.js";
 import { createNewGame } from "../js/state.js";
 import { startMiningJob, processJobs, cancelJob, getJobProgress, getJobPhase, getTripPlan } from "../js/jobs.js";
-import { sellAll, sellEverything, getCargoValue } from "../js/trade.js";
+import { sellAll, sellEverything, getCargoValue, sellAtHub, getTradeXp, getPrice } from "../js/trade.js";
 import { parseSave, applyOfflineProgress } from "../js/save.js";
 import { XP_TABLE, getLevelForXp, getLevel, getLevelProgress, addXp, isShipTypeUnlocked, MAX_LEVEL } from "../js/skills.js";
 import { canBuyShip, buyShip, canSellShip, sellShip, getSellValue } from "../js/shipyard.js";
@@ -203,16 +203,78 @@ test("A clock set backwards doesn't take ore away", () => {
 test("Selling all ore pays the market price and empties the hold", () => {
   const state = createNewGame();
   state.inventory.iron_ore = 30;
-  const earned = sellAll(state, "iron_ore");
-  assert.equal(earned, 30 * ITEMS.iron_ore.sellPrice);
-  assert.equal(state.credits, earned);
+  const sale = sellAll(state, "iron_ore");
+  assert.equal(sale.credits, 30 * ITEMS.iron_ore.sellPrice);
+  assert.equal(state.credits, sale.credits);
   assert.equal(state.inventory.iron_ore, 0);
 });
 
-test("Selling with an empty hold earns nothing", () => {
+test("Selling with an empty hold earns nothing, not even XP", () => {
   const state = createNewGame();
-  assert.equal(sellAll(state, "iron_ore"), 0);
+  assert.deepEqual(sellAll(state, "iron_ore"), { credits: 0, xp: 0, newLevels: [] });
   assert.equal(state.credits, 0);
+  assert.equal(state.skills.trade.xp, 0);
+});
+
+test("The hub pays about 60% more than home for each ore", () => {
+  assert.equal(getPrice("iron_ore", "home"), 5);
+  assert.equal(getPrice("iron_ore", "hub"), 8);
+  assert.equal(getPrice("nickel_ore", "home"), 12);
+  assert.equal(getPrice("nickel_ore", "hub"), 19);
+});
+
+test("Selling at home earns 1 Trade XP per 10 cr (12 iron = 60 cr = 6 XP)", () => {
+  const state = createNewGame();
+  state.inventory.iron_ore = 12;
+  const sale = sellAll(state, "iron_ore");
+  assert.equal(sale.xp, 6);
+  assert.equal(state.skills.trade.xp, 6);
+  assert.equal(state.skills.mining.xp, 0);          // Mining XP untouched
+});
+
+test("Trade XP can be a fraction: 12 nickel = 144 cr = 14.4 XP", () => {
+  const state = createNewGame();
+  state.inventory.nickel_ore = 12;
+  assert.equal(sellAll(state, "nickel_ore").xp, 14.4);
+});
+
+test("A big home sale reports the Trade levels it reached", () => {
+  const state = createNewGame();
+  state.inventory.iron_ore = 400;                   // 2,000 cr = 200 XP
+  const sale = sellAll(state, "iron_ore");
+  assert.equal(getLevel(state, "trade"), 3);        // level 3 starts at 174 XP
+  assert.deepEqual(sale.newLevels, [2, 3]);
+});
+
+test("Selling at the hub: 60 iron pays 480 cr and 108 XP (48 sale + 60 bonus)", () => {
+  const state = createNewGame();
+  const sale = sellAtHub(state, { iron_ore: 60 });
+  assert.equal(sale.credits, 480);
+  assert.equal(sale.units, 60);
+  assert.equal(sale.xp, 108);
+  assert.equal(state.credits, 480);
+  assert.equal(state.skills.trade.xp, 108);
+});
+
+test("The hub takes mixed cargo and doesn't touch the home hold", () => {
+  const state = createNewGame();
+  state.inventory.iron_ore = 99;                    // stays at home
+  const sale = sellAtHub(state, { nickel_ore: 20, iron_ore: 40 });
+  assert.equal(sale.credits, 20 * 19 + 40 * 8);      // 380 + 320 = 700
+  assert.equal(sale.xp, getTradeXp(700, 60));       // 70 + 60 = 130
+  assert.equal(state.inventory.iron_ore, 99);
+});
+
+test("Hauling 60 iron earns over 3x the Trade XP of selling it at home", () => {
+  const homeXp = getTradeXp(60 * ITEMS.iron_ore.sellPrice);        // 30
+  const hubXp = getTradeXp(60 * ITEMS.iron_ore.hubPrice, 60);      // 108
+  assert.ok(hubXp > homeXp * 3, `${hubXp} vs ${homeXp}`);
+});
+
+test("Trade 3 takes roughly an hour of one Prospector selling at home", () => {
+  const xpPerHour = getTradeXp(PROSPECTOR.orePerTrip * ITEMS.iron_ore.sellPrice) * (HOUR / TRIP);
+  const hours = XP_TABLE[3] / xpPerHour;
+  assert.ok(hours > 1 && hours < 1.5, hours.toFixed(2) + " hours");
 });
 
 
@@ -393,7 +455,7 @@ test("Two ships with different trip lengths each pay out on their own timer", ()
 // SAVE UPGRADES
 // =============================================================
 
-test("A version 1 save (first commit) upgrades all the way to version 4", () => {
+test("A version 1 save (first commit) upgrades all the way to version 5", () => {
   // Exactly what the first commit's game saved.
   const oldSave = {
     version: 1,
@@ -404,10 +466,10 @@ test("A version 1 save (first commit) upgrades all the way to version 4", () => 
     lastSavedAt: START,
   };
   const state = parseSave(JSON.stringify(oldSave));
-  assert.equal(state.version, 4);
+  assert.equal(state.version, 5);
   assert.equal(state.credits, 50);                 // nothing lost
   assert.equal(state.inventory.iron_ore, 10);
-  assert.deepEqual(state.skills, { mining: { xp: 0 } });
+  assert.deepEqual(state.skills, { mining: { xp: 0 }, trade: { xp: 0 } });
   assert.equal(state.nextShipNumber, 2);
 });
 
@@ -426,7 +488,7 @@ test("A version 2 save's old 20s trip is re-timed to the new three-phase trip", 
   };
   const state = parseSave(JSON.stringify(oldSave));
   const job = state.jobs[0];
-  assert.equal(state.version, 4);
+  assert.equal(state.version, 5);
   assert.equal(job.durationMs, PROSPECTOR.durationMs);
   assert.equal(job.outboundMs, PROSPECTOR.outboundMs);
   assert.equal(job.miningMs, PROSPECTOR.miningMs);
@@ -588,7 +650,10 @@ test("Selling everything sells every item and adds it all up", () => {
   state.inventory.nickel_ore = 10;
   const expected = 10 * ITEMS.iron_ore.sellPrice + 10 * ITEMS.nickel_ore.sellPrice;
   assert.equal(getCargoValue(state), expected);
-  assert.equal(sellEverything(state), expected);
+  assert.equal(getCargoValue(state, "hub"), 10 * 8 + 10 * 19);
+  const sale = sellEverything(state);
+  assert.equal(sale.credits, expected);
+  assert.equal(sale.xp, expected / 10);
   assert.equal(state.credits, expected);
   assert.equal(getCargoValue(state), 0);
 });
@@ -611,12 +676,30 @@ test("A version 3 save gains command upgrades and destinations, keeping its ship
     lastSavedAt: START,
   };
   const state = parseSave(JSON.stringify(oldSave));
-  assert.equal(state.version, 4);
+  assert.equal(state.version, 5);
   assert.equal(state.commandUpgrades, 0);
   assert.ok(state.ships.every((ship) => ship.destination === "inner_belt"));
   assert.equal(state.ships.length, 3);                  // nobody loses a ship...
   assert.equal(getCommandUsed(state), 5);
   assert.equal(canBuyShip(state, "excavator").ok, false);   // ...but can't buy more
+});
+
+test("A version 4 save gains the Trade skill at 0 XP, keeping its Mining XP", () => {
+  const oldSave = {
+    version: 4,
+    credits: 1200,
+    inventory: { iron_ore: 30, nickel_ore: 0 },
+    nextShipNumber: 2,
+    commandUpgrades: 0,
+    skills: { mining: { xp: 900 } },
+    ships: [{ id: "ship-1", name: "Rusty Pick", type: "prospector", destination: "inner_belt" }],
+    jobs: [],
+    lastSavedAt: START,
+  };
+  const state = parseSave(JSON.stringify(oldSave));
+  assert.equal(state.version, 5);
+  assert.deepEqual(state.skills, { mining: { xp: 900 }, trade: { xp: 0 } });
+  assert.equal(state.credits, 1200);
 });
 
 // -------------------------------------------------------------

@@ -21,7 +21,7 @@ import { buyShip, sellShip } from "./shipyard.js";
 import { buyUpgrade, getCommandCapacity } from "./command.js";
 import { getUnlocksAtLevel, getFieldUnlocksAtLevel, isFieldUnlocked } from "./skills.js";
 import { saveGame, loadGame, deleteSave, applyOfflineProgress } from "./save.js";
-import { setupUI, buildFleetViews, render, addLog, formatNumber, formatDuration } from "./ui.js";
+import { setupUI, buildFleetViews, render, addLog, formatNumber, formatXp, formatDuration } from "./ui.js";
 
 
 // -------------------------------------------------------------
@@ -78,17 +78,20 @@ const actions = {
   },
 
   sellItem(itemId) {
-    const earned = sellAll(state, itemId);
-    if (earned > 0) {
-      addLog(`Sold ${ITEMS[itemId].name.toLowerCase()} for ${formatNumber(earned)} cr.`, "trade");
+    // sale = { credits, xp, newLevels } (see trade.js)
+    const sale = sellAll(state, itemId);
+    if (sale.credits > 0) {
+      addLog(`Sold ${ITEMS[itemId].name.toLowerCase()} at the home dock for ${formatNumber(sale.credits)} cr (+${formatXp(sale.xp)} Trade XP).`, "trade");
+      logLevelUps("trade", sale.newLevels);
     }
     refresh();
   },
 
   sellCargo() {
-    const earned = sellEverything(state);
-    if (earned > 0) {
-      addLog(`Sold the whole hold for ${formatNumber(earned)} cr.`, "trade");
+    const sale = sellEverything(state);
+    if (sale.credits > 0) {
+      addLog(`Sold the whole hold at the home dock for ${formatNumber(sale.credits)} cr (+${formatXp(sale.xp)} Trade XP).`, "trade");
+      logLevelUps("trade", sale.newLevels);
     }
     refresh();
   },

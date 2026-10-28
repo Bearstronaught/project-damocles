@@ -20,14 +20,19 @@
 // Each item is listed under a short ID (like "iron_ore").
 // The code always uses the ID; the "name" is only for display.
 // Items show in the cargo hold in the order they're listed here.
+//   sellPrice  what the HOME dock pays for one unit (instant sale)
+//   hubPrice   what the MERCHANT HUB pays for one unit (about 60%
+//              more, but a freighter has to fly it there)
 export const ITEMS = {
   iron_ore: {
     name: "Iron ore",         // what the player sees
-    sellPrice: 5,             // credits paid for ONE unit
+    sellPrice: 5,             // credits paid for ONE unit at home
+    hubPrice: 8,
   },
   nickel_ore: {
     name: "Nickel ore",
     sellPrice: 12,
+    hubPrice: 19,
   },
 };
 
@@ -41,6 +46,10 @@ export const SKILLS = {
   mining: {
     name: "Mining",
     description: "Send barges to asteroid fields to bring back ore. Levels unlock better mining ships and richer fields.",
+  },
+  trade: {
+    name: "Trade",
+    description: "Sell goods for credits. Selling at home is instant; hauling to the merchant hub pays more and earns bonus XP. Levels unlock freighters.",
   },
 };
 
@@ -166,6 +175,31 @@ export const FIELDS = {
     xpPerUnit: 2,             // still double the Inner Belt
     unlockLevel: 5,
   },
+};
+
+
+// -------------------------------------------------------------
+// TRADE: how selling earns Trade XP.
+// -------------------------------------------------------------
+//   creditsPerXp       every this-many credits earned from a sale
+//                      gives 1 Trade XP (10 = 1 XP per 10 cr).
+//                      XP can be a fraction: 25 cr = 2.5 XP.
+//   hubBonusXpPerUnit  extra XP for each unit delivered to the
+//                      merchant hub, on top of the sale XP, as a
+//                      reward for making the trip.
+export const TRADE = {
+  creditsPerXp: 10,
+  hubBonusXpPerUnit: 1,
+};
+
+// THE MERCHANT HUB: where freighters sell for better prices.
+// The name is a placeholder until the lore names it.
+//   travelSeconds  one way, for a ship with speed 1.0
+//                  (used by freighters, coming next)
+export const HUB = {
+  name: "Merchant hub",
+  description: "A busy trading post a few minutes' flight from home. Pays well for ore you bring in.",
+  travelSeconds: 180,
 };
 
 

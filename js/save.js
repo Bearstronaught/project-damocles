@@ -145,7 +145,14 @@ function upgradeSave(state) {
     state.version = 4;
   }
 
-  // (Future: if (state.version === 4) { ...; state.version = 5; })
+  // --- Version 4 -> 5: the Trade skill ---
+  if (state.version === 4) {
+    // Earlier sales didn't earn XP, so everyone starts Trade at 0.
+    state.skills.trade = { xp: 0 };
+    state.version = 5;
+  }
+
+  // (Future: if (state.version === 5) { ...; state.version = 6; })
 
   if (state.version > SAVE_VERSION) {
     // A save from a NEWER version of the game than this one.
