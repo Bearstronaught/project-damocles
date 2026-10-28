@@ -127,6 +127,59 @@ export function sellShip(state, shipId) {
 
 
 // -------------------------------------------------------------
+// RENAMING SHIPS
+// -------------------------------------------------------------
+
+// The longest name allowed, so names fit on the ship cards.
+export const MAX_NAME_LENGTH = 24;
+
+// -------------------------------------------------------------
+// renameShip(state, shipId, newName)
+// Gives a ship a new name. Returns { ok: true, oldName, name }
+// or { ok: false, reason: "..." } so the screen can say why not.
+// -------------------------------------------------------------
+export function renameShip(state, shipId, newName) {
+  const ship = findShip(state, shipId);
+  if (!ship) {
+    return { ok: false, reason: "No such ship." };
+  }
+
+  const name = tidyName(newName);
+
+  if (name === "") {
+    return { ok: false, reason: "Give the ship a name." };
+  }
+  if (name.length > MAX_NAME_LENGTH) {
+    return { ok: false, reason: `Names can be up to ${MAX_NAME_LENGTH} characters.` };
+  }
+
+  // No two ships with the same name (ignoring capitals), so the
+  // log never leaves you wondering which "Lucky Strike" docked.
+  const taken = state.ships.some(
+    (other) => other.id !== shipId && other.name.toLowerCase() === name.toLowerCase()
+  );
+  if (taken) {
+    return { ok: false, reason: "Another ship already has that name." };
+  }
+
+  const oldName = ship.name;
+  ship.name = name;
+  return { ok: true, oldName: oldName, name: name };
+}
+
+// -------------------------------------------------------------
+// tidyName(text)
+// Removes spaces from the ends, and squashes runs of spaces
+// (or tabs, or line breaks) in the middle down to one space:
+//   "  Lucky    Strike  " -> "Lucky Strike"
+// -------------------------------------------------------------
+function tidyName(text) {
+  // \s+ means "one or more spaces of any kind"; g means "everywhere"
+  return (text || "").replace(/\s+/g, " ").trim();
+}
+
+
+// -------------------------------------------------------------
 // pickShipName(number)
 // Ship 2 gets the first name in SHIP_NAMES, ship 3 the second,
 // and so on. After the list runs out: "Barge 8", "Barge 9"...

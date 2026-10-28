@@ -216,6 +216,14 @@ export const TRADE = {
   hubTonnesPerBonusXp: 10,
 };
 
+// HOME: the player's starting station, where barges unload and
+// where ore sells instantly. Change the name here and it changes
+// everywhere in the game. ("Home dock" is a placeholder until the
+// lore names it.)
+export const HOME = {
+  name: "Home dock",
+};
+
 // THE MERCHANT HUB: where freighters sell for better prices.
 // The name is a placeholder until the lore names it.
 //   travelSeconds  one way, for a ship with speed 1.0

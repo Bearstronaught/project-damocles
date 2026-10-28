@@ -17,10 +17,10 @@
 // flicker and sometimes swallow clicks.)
 // =============================================================
 
-import { ITEMS, SHIP_TYPES, FIELDS, SKILLS, HULL_SIZES, COMMAND, HUB, HAUL_MODES } from "../data/content.js";
+import { ITEMS, SHIP_TYPES, FIELDS, SKILLS, HULL_SIZES, COMMAND, HUB, HOME, HAUL_MODES } from "../data/content.js";
 import { getJobForShip, getJobPhase, getTripPlan, getHaulPlan, getOreInHold } from "./jobs.js";
 import { getLevel, getLevelProgress, isShipTypeUnlocked, isFieldUnlocked } from "./skills.js";
-import { canBuyShip, canSellShip, getSellValue } from "./shipyard.js";
+import { canBuyShip, canSellShip, getSellValue, MAX_NAME_LENGTH } from "./shipyard.js";
 import { getShipPoints, getCommandCapacity, getCommandUsed, getNextUpgradeCost, canBuyUpgrade } from "./command.js";
 import { getCargoValue, getTradeXp } from "./trade.js";
 import { getSchematic } from "./art.js";
@@ -36,6 +36,24 @@ const PHASE_LABELS = {
   returning: "Returning",
   waiting: "Waiting for cargo",
 };
+
+
+// -------------------------------------------------------------
+// escapeHtml(text)
+// Players can type ship names, and a name goes inside HTML we
+// build as text. A name like "<b>Bold</b>" would be read as
+// HTML and break the card (or worse, in a save someone shares).
+// This swaps the special characters for their "safe" versions,
+// so the name always shows exactly as typed.
+// -------------------------------------------------------------
+function escapeHtml(text) {
+  return String(text)
+    .replaceAll("&", "&amp;")    // must go first
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
 
 
 // Shortcut: find an element on the page by its id="..." name.
@@ -451,6 +469,10 @@ function buildCargoTable(actions) {
     body.appendChild(row);
   }
 
+  // The station's name, from content.js, on the panel and button.
+  byId("home-name-tag").textContent = HOME.name;
+  byId("sell-all").textContent = "Sell all at " + HOME.name;
+
   // The note under the table explains the two prices.
   byId("hub-note").textContent =
     `Selling here is instant at the home price. The ${HUB.name.toLowerCase()} pays the hub price, ` +
@@ -516,7 +538,7 @@ function buildFleetCards(state, actions) {
       <div class="ship-art">${getSchematic(shipType.art)}</div>
       <div class="ship-body">
         <div class="card-header">
-          <span class="card-name">${ship.name}</span>
+          <span class="card-name">${escapeHtml(ship.name)}</span>
           <span class="card-sub">${shipType.name}</span>
         </div>
         ${picker}
@@ -580,7 +602,7 @@ function buildOwnedList(state, actions) {
         <div class="ship-art">${getSchematic(shipType.art)}</div>
         <div class="owned-main">
           <div class="card-header">
-            <span class="card-name">${ship.name}</span>
+            <span class="card-name">${escapeHtml(ship.name)}</span>
             <span class="card-sub">${shipType.name}</span>
           </div>
           <div class="owned-status" data-part="status">Docked</div>
@@ -590,6 +612,14 @@ function buildOwnedList(state, actions) {
       <div class="owned-detail">
         <div>
           <p class="ship-desc">${shipType.description}</p>
+          <!-- Rename: type a new name, then press Rename or Enter -->
+          <div class="rename-row">
+            <input class="rename-input" data-part="rename-input" type="text"
+                   maxlength="${MAX_NAME_LENGTH}" value="${escapeHtml(ship.name)}"
+                   aria-label="Ship name" spellcheck="false">
+            <button class="btn btn-small" data-part="rename">Rename</button>
+          </div>
+          <div class="rename-note" data-part="rename-note"></div>
           <button class="btn btn-sell" data-part="sell"></button>
           <div class="sell-note" data-part="sell-note"></div>
         </div>
@@ -600,6 +630,26 @@ function buildOwnedList(state, actions) {
 
     makeTwoClick(part(row, "sell"), "Click again to sell", () => {
       actions.sellShip(ship.id);
+    });
+
+    // Renaming. On success the fleet views are rebuilt with the
+    // new name; if it's refused, say why under the box.
+    const nameInput = part(row, "rename-input");
+    const renameNote = part(row, "rename-note");
+    const tryRename = () => {
+      const result = actions.renameShip(ship.id, nameInput.value);
+      if (!result.ok) {
+        renameNote.textContent = result.reason;
+      }
+    };
+    part(row, "rename").addEventListener("click", tryRename);
+    // Pressing Enter in the box does the same as the button.
+    nameInput.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") tryRename();
+    });
+    // Start typing again and the old error message goes away.
+    nameInput.addEventListener("input", () => {
+      renameNote.textContent = "";
     });
 
     list.appendChild(row);
@@ -835,7 +885,7 @@ function renderFleet(state, now) {
       card.classList.add("busy", "phase-" + phase.phase);
     } else {
       fills.forEach((fill) => { fill.style.width = "0%"; });
-      status.textContent = "Docked at home — awaiting orders";
+      status.textContent = `Docked at ${HOME.name} — awaiting orders`;
       button.textContent = "Dispatch to " + fieldName;
     }
   }
@@ -878,7 +928,7 @@ function renderFreighterCard(state, ship, card, now) {
 
   if (!job) {
     fills.forEach((fill) => { fill.style.width = "0%"; });
-    status.textContent = "Docked at home — awaiting orders";
+    status.textContent = `Docked at ${HOME.name} — awaiting orders`;
     button.textContent = "Start hub runs";
     return;
   }
@@ -930,7 +980,7 @@ function renderOwnedList(state) {
           PHASE_LABELS[phase.phase] + " · " + FIELDS[job.fieldId].name + " · " + formatDuration(phase.msLeftInPhase);
       }
     } else {
-      part(row, "status").textContent = "Docked at home";
+      part(row, "status").textContent = "Docked at " + HOME.name;
     }
     row.classList.toggle("busy", Boolean(job));
 
@@ -1045,7 +1095,7 @@ function renderShipyard(state) {
       note.textContent = `Need ${formatNumber(shipType.cost - state.credits)} more cr.`;
     } else {
       tag.textContent = "Available";
-      note.textContent = "Ready to buy. New ships dock at home, awaiting orders.";
+      note.textContent = `Ready to buy. New ships dock at ${HOME.name}, awaiting orders.`;
       anythingToBuy = true;
     }
   }

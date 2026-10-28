@@ -26,7 +26,7 @@ import { startMiningJob, startHaulJob, processJobs, cancelJob, getJobProgress, g
 import { sellAll, sellEverything, getCargoValue, sellAtHub, getTradeXp, getPrice } from "../js/trade.js";
 import { parseSave, applyOfflineProgress, exportSave, importSave } from "../js/save.js";
 import { XP_TABLE, getLevelForXp, getLevel, getLevelProgress, addXp, isShipTypeUnlocked, MAX_LEVEL } from "../js/skills.js";
-import { canBuyShip, buyShip, canSellShip, sellShip, getSellValue } from "../js/shipyard.js";
+import { canBuyShip, buyShip, canSellShip, sellShip, getSellValue, renameShip } from "../js/shipyard.js";
 import { getCommandCapacity, getCommandUsed, getNextUpgradeCost, buyUpgrade } from "../js/command.js";
 import { isFieldUnlocked } from "../js/skills.js";
 
@@ -1060,6 +1060,56 @@ test("Importing never changes the game it came from", () => {
   const copy = importSave(text).state;
   copy.credits = 999_999;
   assert.notEqual(original.credits, 999_999);
+});
+
+// =============================================================
+// RENAMING SHIPS
+// =============================================================
+
+test("A ship can be renamed", () => {
+  const state = createNewGame();
+  const result = renameShip(state, "ship-1", "Ore Else");
+  assert.deepEqual(result, { ok: true, oldName: "Rusty Pick", name: "Ore Else" });
+  assert.equal(state.ships[0].name, "Ore Else");
+});
+
+test("Extra spaces are tidied: '  Lucky    Strike ' becomes 'Lucky Strike'", () => {
+  const state = createNewGame();
+  renameShip(state, "ship-1", "  Lucky    Strike ");
+  assert.equal(state.ships[0].name, "Lucky Strike");
+});
+
+test("An empty (or all-spaces) name is refused", () => {
+  const state = createNewGame();
+  assert.equal(renameShip(state, "ship-1", "    ").ok, false);
+  assert.equal(state.ships[0].name, "Rusty Pick");
+});
+
+test("Names over 24 characters are refused; exactly 24 is fine", () => {
+  const state = createNewGame();
+  assert.equal(renameShip(state, "ship-1", "A".repeat(25)).ok, false);
+  assert.equal(renameShip(state, "ship-1", "A".repeat(24)).ok, true);
+});
+
+test("Two ships can't share a name (capitals don't count as different)", () => {
+  const state = createNewGame();
+  state.credits = SHIP_TYPES.prospector.cost;
+  buyShip(state, "prospector");                       // "Second Wind"
+  const result = renameShip(state, "ship-1", "SECOND WIND");
+  assert.equal(result.ok, false);
+  assert.match(result.reason, /already has that name/);
+});
+
+test("Re-typing a ship's own name in different capitals is allowed", () => {
+  const state = createNewGame();
+  assert.equal(renameShip(state, "ship-1", "RUSTY PICK").ok, true);
+});
+
+test("A renamed ship keeps its name through export and import", () => {
+  const state = createNewGame();
+  renameShip(state, "ship-1", "Grit & <Gravel>");
+  const back = importSave(exportSave(state)).state;
+  assert.equal(back.ships[0].name, "Grit & <Gravel>");
 });
 
 // -------------------------------------------------------------

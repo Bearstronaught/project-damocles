@@ -13,11 +13,11 @@
 //   5. Start autosaving.
 // =============================================================
 
-import { RULES, ITEMS, FIELDS, SHIP_TYPES, SKILLS, HUB, HAUL_MODES } from "../data/content.js";
+import { RULES, ITEMS, FIELDS, SHIP_TYPES, SKILLS, HUB, HOME, HAUL_MODES } from "../data/content.js";
 import { createNewGame, findShip } from "./state.js";
 import { startMiningJob, startHaulJob, cancelJob, getJobForShip, processJobs } from "./jobs.js";
 import { sellAll, sellEverything } from "./trade.js";
-import { buyShip, sellShip } from "./shipyard.js";
+import { buyShip, sellShip, renameShip } from "./shipyard.js";
 import { buyUpgrade, getCommandCapacity } from "./command.js";
 import { getUnlocksAtLevel, getFieldUnlocksAtLevel, isFieldUnlocked } from "./skills.js";
 import { saveGame, loadGame, deleteSave, applyOfflineProgress, exportSave, importSave } from "./save.js";
@@ -110,7 +110,7 @@ const actions = {
     // sale = { credits, xp, newLevels } (see trade.js)
     const sale = sellAll(state, itemId);
     if (sale.credits > 0) {
-      addLog(`Sold ${ITEMS[itemId].name.toLowerCase()} at the home dock for ${formatNumber(sale.credits)} cr (+${formatXp(sale.xp)} Trade XP).`, "trade");
+      addLog(`Sold ${ITEMS[itemId].name.toLowerCase()} at ${HOME.name} for ${formatNumber(sale.credits)} cr (+${formatXp(sale.xp)} Trade XP).`, "trade");
       logLevelUps("trade", sale.newLevels);
     }
     refresh();
@@ -119,7 +119,7 @@ const actions = {
   sellCargo() {
     const sale = sellEverything(state);
     if (sale.credits > 0) {
-      addLog(`Sold the whole hold at the home dock for ${formatNumber(sale.credits)} cr (+${formatXp(sale.xp)} Trade XP).`, "trade");
+      addLog(`Sold the whole hold at ${HOME.name} for ${formatNumber(sale.credits)} cr (+${formatXp(sale.xp)} Trade XP).`, "trade");
       logLevelUps("trade", sale.newLevels);
     }
     refresh();
@@ -130,7 +130,7 @@ const actions = {
     if (ship) {
       // The fleet changed, so rebuild the ship cards.
       buildFleetViews(state, actions);
-      addLog(`${ship.name} (${SHIP_TYPES[ship.type].name}) joins the fleet. Docked at home, awaiting orders.`, "fleet");
+      addLog(`${ship.name} (${SHIP_TYPES[ship.type].name}) joins the fleet. Docked at ${HOME.name}, awaiting orders.`, "fleet");
     }
     refresh();
   },
@@ -143,6 +143,18 @@ const actions = {
       addLog(`${ship.name} sold for ${formatNumber(earned)} cr.`, "fleet");
     }
     refresh();
+  },
+
+  // Returns { ok, reason } so the screen can show why a name
+  // was refused.
+  renameShip(shipId, newName) {
+    const result = renameShip(state, shipId, newName);
+    if (result.ok && result.name !== result.oldName) {
+      buildFleetViews(state, actions);   // the name shows on several screens
+      addLog(`${result.oldName} renamed to ${result.name}.`, "fleet");
+      refresh();
+    }
+    return result;
   },
 
   buyCommandUpgrade() {

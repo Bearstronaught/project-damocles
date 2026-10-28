@@ -607,6 +607,42 @@ body {
 }
 
 
+/* ----- Renaming a ship (Fleet screen, opened card) ----- */
+.rename-row {
+  display: flex;
+  gap: 8px;
+  margin: 10px 0 2px;
+}
+
+.rename-input {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font-display);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--amber);
+  background: var(--bg);
+  border: 1px solid var(--line-strong);
+  padding: 6px 8px;
+}
+
+.rename-input:focus-visible {
+  border-color: var(--amber);
+  outline: none;
+}
+
+.rename-row .btn {
+  width: auto;
+}
+
+.rename-note {
+  min-height: 1.3em;          /* keeps the space, so nothing jumps */
+  margin-bottom: 8px;
+  font-size: 12px;
+  color: var(--red);
+}
+
+
 /* ----- Expandable cards (ships on the Fleet screen, skills) -----
    Built from <details>: click the summary to open or close. */
 .expandable > summary {
