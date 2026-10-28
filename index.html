@@ -39,7 +39,6 @@
   <!-- ===== Status strip: a few live readouts ===== -->
   <div class="status-strip">
     <span class="status-item">Local <b id="clock">--:--:--</b></span>
-    <span class="status-item">Fleet <b id="fleet-size">1</b></span>
     <span class="status-item">Command <b id="command-readout">1/4</b></span>
     <span class="status-item">Mining <b id="mining-level">Lv 1</b></span>
     <span class="status-item">Trade <b id="trade-level">Lv 1</b></span>
@@ -50,7 +49,8 @@
        data-screen says which screen each button opens. -->
   <nav class="nav">
     <button class="nav-btn" data-screen="command">Command</button>
-    <button class="nav-btn" data-screen="ships">Ships</button>
+    <button class="nav-btn" data-screen="fleet">Fleet</button>
+    <button class="nav-btn" data-screen="shipyard">Shipyard</button>
     <button class="nav-btn" data-screen="skills">Skills</button>
   </nav>
 
@@ -79,9 +79,11 @@
           <thead>
             <tr>
               <th>Item</th>
-              <th>Units</th>
-              <th>Home</th>
-              <th>Hub</th>
+              <th>Stock</th>
+              <!-- Prices are per tonne: the unit sits in the header so
+                   each price cell stays short enough for a phone. -->
+              <th>Home <small>cr/t</small></th>
+              <th>Hub <small>cr/t</small></th>
               <th>Value</th>
               <th><span class="visually-hidden">Sell</span></th>
             </tr>
@@ -110,8 +112,9 @@
       </div>
     </section>
 
-    <!-- ===================== SHIPS SCREEN ===================== -->
-    <section class="screen layout" data-screen="ships" hidden>
+    <!-- ===================== FLEET SCREEN ===================== -->
+    <!-- The ships you own, and how many you can command. -->
+    <section class="screen layout" data-screen="fleet" hidden>
 
       <!-- Command capacity: points used, and the upgrade -->
       <div class="panel panel-wide">
@@ -143,14 +146,19 @@
         </div>
         <div id="owned-list" class="owned-list"></div>
       </div>
+    </section>
 
-      <!-- Ships you can buy (built by ui.js) -->
+    <!-- ===================== SHIPYARD SCREEN ===================== -->
+    <!-- Ships you can buy. Only unlocked ships are shown. -->
+    <section class="screen layout" data-screen="shipyard" hidden>
       <div class="panel panel-wide">
         <div class="panel-head">
           <h2 class="panel-title">Shipyard</h2>
           <span class="panel-tag">Trip stats are per round trip from home</span>
         </div>
         <div id="shipyard-list" class="card-grid"></div>
+        <!-- How many ships are still locked (text written by ui.js) -->
+        <p id="shipyard-note" class="price-note"></p>
       </div>
     </section>
 

@@ -219,6 +219,15 @@ body {
   color: var(--amber);
 }
 
+/* On a phone, slimmer buttons so all four fit on one row */
+@media (max-width: 600px) {
+  .nav-btn {
+    padding: 7px 10px;
+    letter-spacing: 0.08em;
+    font-size: 12px;
+  }
+}
+
 /* The screen you're on: solid amber, with one corner cut off
    like a panel. (Only here - clipping a button that has a
    border would cut the border off too.) */
@@ -558,12 +567,22 @@ body {
   gap: 10px;
 }
 
-.owned-row {
+/* The short version you always see: drawing | name and status | +/- */
+.owned-summary {
   display: grid;
-  /* drawing | name and status | stats */
-  grid-template-columns: 120px minmax(0, 1fr) minmax(0, 320px);
+  grid-template-columns: 90px minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: center;
+}
+
+/* The detail when opened: description and Sell | full stats */
+.owned-detail {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 320px);
   gap: 16px;
-  align-items: start;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--line-strong);
 }
 
 .owned-status {
@@ -579,12 +598,105 @@ body {
 }
 
 @media (max-width: 640px) {
-  .owned-row {
-    grid-template-columns: 100px minmax(0, 1fr);
+  .owned-summary {
+    grid-template-columns: 70px minmax(0, 1fr) auto;
   }
-  .owned-row .stats {
-    grid-column: 1 / -1;      /* stats drop onto their own line */
+  .owned-detail {
+    grid-template-columns: minmax(0, 1fr);   /* stats drop below */
   }
+}
+
+
+/* ----- Expandable cards (ships on the Fleet screen, skills) -----
+   Built from <details>: click the summary to open or close. */
+.expandable > summary {
+  cursor: pointer;
+  list-style: none;           /* hide the browser's own triangle */
+}
+
+.expandable > summary::-webkit-details-marker {
+  display: none;              /* (Safari needs this as well) */
+}
+
+.expandable:hover {
+  border-color: var(--line-strong);
+}
+
+/* "MORE +" when shut, "LESS −" when open */
+.expand-hint::after {
+  content: "More +";
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--steel-dim);
+  white-space: nowrap;
+}
+
+.expandable[open] .expand-hint::after {
+  content: "Less −";
+}
+
+.expandable:hover .expand-hint::after {
+  color: var(--amber);
+}
+
+.skill-detail {
+  margin-top: 6px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--line-strong);
+}
+
+.skill-detail .skill-total {
+  margin: 6px 0 0;
+  font-size: 12px;
+}
+
+
+/* ----- Destination dropdown on mining ship cards ----- */
+.dest-select-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 8px 0 10px;
+}
+
+.dest-label {
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--steel-dim);
+}
+
+.dest-select {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font-display);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--teal);
+  background: var(--bg);
+  border: 1px solid var(--line-strong);
+  padding: 6px 8px;
+  cursor: pointer;
+}
+
+.dest-select:hover:not(:disabled),
+.dest-select:focus-visible {
+  border-color: var(--teal);
+  outline: none;
+}
+
+/* Mid-trip the menu is frozen */
+.dest-select:disabled {
+  cursor: default;
+  color: var(--steel-dim);
+}
+
+/* The options inside the opened menu */
+.dest-select option {
+  background: var(--panel-raised);
+  color: var(--steel);
 }
 
 
@@ -599,6 +711,12 @@ body {
 .yard-card {
   display: flex;
   flex-direction: column;
+}
+
+/* Skill cards open and close, so each keeps its own height
+   (otherwise opening one stretches its neighbour to match). */
+#skills-list {
+  align-items: start;
 }
 
 .yard-art {
@@ -1095,6 +1213,32 @@ body {
 /* ----- Cargo table extras ----- */
 .cargo-table td.cargo-price {
   color: var(--steel-dim);
+}
+
+/* "cr/t" under the Home and Hub headings */
+.cargo-table th small {
+  display: block;
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  text-transform: none;
+}
+
+/* On a narrow phone: smaller text and tighter columns */
+@media (max-width: 480px) {
+  .cargo-table {
+    font-size: 12px;
+  }
+  .cargo-table th,
+  .cargo-table td {
+    padding-right: 4px;
+  }
+  .cargo-table .btn-small {
+    padding: 4px 6px;
+  }
+  .cargo-table th:last-child,
+  .cargo-table td:last-child {
+    padding-right: 0;         /* no spare gap after the Sell column */
+  }
 }
 
 /* Hub prices are teal: they're paid somewhere else, not here.

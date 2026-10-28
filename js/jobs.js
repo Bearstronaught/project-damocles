@@ -73,7 +73,7 @@ export function getTripPlan(shipTypeId, fieldId) {
   // Travel: a speed of 0.75 makes the trip take 1 ÷ 0.75 = 1.33x as long.
   const travelMs = Math.round((field.travelSeconds / shipType.speed) * 1000);
 
-  // Mining: minutes to fill the hold = cargo ÷ (units per minute).
+  // Mining: minutes to fill the hold = cargo ÷ (tonnes per minute).
   const miningMs = Math.round((shipType.cargoCapacity / shipType.miningRate) * 60 * 1000);
 
   return {
@@ -82,7 +82,7 @@ export function getTripPlan(shipTypeId, fieldId) {
     returnMs: travelMs,
     durationMs: travelMs + miningMs + travelMs,
     orePerTrip: shipType.cargoCapacity,
-    xpPerTrip: shipType.cargoCapacity * field.xpPerUnit,
+    xpPerTrip: shipType.cargoCapacity / field.tonnesPerXp,   // e.g. 120 t ÷ 10 = 12 XP
   };
 }
 
@@ -235,7 +235,7 @@ export function getJobForShip(state, shipId) {
 
 // -------------------------------------------------------------
 // getOreInHold(state)
-// How many units of ore are in the home hold, all types added up.
+// How many tonnes of ore are in the home hold, all types added up.
 // -------------------------------------------------------------
 export function getOreInHold(state) {
   let total = 0;
@@ -399,7 +399,7 @@ export function getJobPhase(job, now) {
 // can report it:
 //   mining: { kind: "mining", shipId, itemId, amount, trips,
 //             skillId: "mining", xpGained, newLevels }
-//   haul:   { kind: "haul", shipId, cargo, units, credits,
+//   haul:   { kind: "haul", shipId, cargo, tonnes, credits,
 //             trips, skillId: "trade", xpGained, newLevels }
 // -------------------------------------------------------------
 export function processJobs(state, now) {
@@ -512,7 +512,7 @@ function runEvent(state, job, time) {
       kind: "haul",
       shipId: job.shipId,
       cargo: cargo,
-      units: sale.units,
+      tonnes: sale.tonnes,
       credits: sale.credits,
       trips: 1,
       skillId: "trade",
@@ -563,7 +563,7 @@ function mergeResultsByShip(results) {
     if (result.kind === "mining") {
       total.amount += result.amount;
     } else {
-      total.units += result.units;
+      total.tonnes += result.tonnes;
       total.credits += result.credits;
       for (const [itemId, amount] of Object.entries(result.cargo)) {
         total.cargo[itemId] = (total.cargo[itemId] || 0) + amount;

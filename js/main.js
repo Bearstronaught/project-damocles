@@ -21,7 +21,7 @@ import { buyShip, sellShip } from "./shipyard.js";
 import { buyUpgrade, getCommandCapacity } from "./command.js";
 import { getUnlocksAtLevel, getFieldUnlocksAtLevel, isFieldUnlocked } from "./skills.js";
 import { saveGame, loadGame, deleteSave, applyOfflineProgress, exportSave, importSave } from "./save.js";
-import { setupUI, buildFleetViews, render, addLog, formatNumber, formatXp, formatDuration } from "./ui.js";
+import { setupUI, buildFleetViews, render, addLog, formatNumber, formatXp, formatTonnes, formatDuration } from "./ui.js";
 
 
 // -------------------------------------------------------------
@@ -201,7 +201,7 @@ function tick() {
     const ship = findShip(state, result.shipId);
     if (result.kind === "mining") {
       const itemName = ITEMS[result.itemId].name.toLowerCase();
-      addLog(`${ship.name} docked with ${result.amount} ${itemName} (+${formatXp(result.xpGained)} Mining XP).`, "trip");
+      addLog(`${ship.name} docked with ${formatTonnes(result.amount)} of ${itemName} (+${formatXp(result.xpGained)} Mining XP).`, "trip");
     } else if (result.kind === "haul") {
       addLog(`${ship.name} sold ${describeCargo(result.cargo)} at the ${HUB.name.toLowerCase()} for ${formatNumber(result.credits)} cr (+${formatXp(result.xpGained)} Trade XP).`, "trade");
     }
@@ -221,11 +221,11 @@ function refresh() {
 
 // -------------------------------------------------------------
 // describeCargo(cargo)
-// { nickel_ore: 20, iron_ore: 40 } -> "20 nickel ore and 40 iron ore"
+// { nickel_ore: 200, iron_ore: 400 } -> "200 t nickel ore and 400 t iron ore"
 // -------------------------------------------------------------
 function describeCargo(cargo) {
   const parts = Object.entries(cargo).map(
-    ([itemId, amount]) => `${formatNumber(amount)} ${ITEMS[itemId].name.toLowerCase()}`
+    ([itemId, amount]) => `${formatTonnes(amount)} ${ITEMS[itemId].name.toLowerCase()}`
   );
   return parts.join(" and ");
 }
@@ -240,7 +240,7 @@ function logLevelUps(skillId, levels) {
     addLog(`${SKILLS[skillId].name} reached level ${level}.`, "level");
 
     for (const typeId of getUnlocksAtLevel(skillId, level)) {
-      addLog(`New ship unlocked: ${SHIP_TYPES[typeId].name}. See the Ships screen.`, "level");
+      addLog(`New ship unlocked: ${SHIP_TYPES[typeId].name}. It's now in the Shipyard.`, "level");
     }
     if (skillId === "mining") {
       for (const fieldId of getFieldUnlocksAtLevel(level)) {

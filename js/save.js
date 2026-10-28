@@ -86,7 +86,14 @@ export function parseSave(text) {
     return null;
   }
 
-  return upgradeSave(state);
+  // A save that's badly broken inside could make an upgrade step
+  // fail. Treat that the same as damaged text, not a crash.
+  try {
+    return upgradeSave(state);
+  } catch (error) {
+    console.warn("Save could not be upgraded:", error);
+    return null;
+  }
 }
 
 
@@ -272,7 +279,30 @@ function upgradeSave(state) {
     state.version = 5;
   }
 
-  // (Future: if (state.version === 5) { ...; state.version = 6; })
+  // --- Version 5 -> 6: cargo in tonnes, everything x10 ---
+  // Cargo and credits were both multiplied by 10 (so a Prospector
+  // carries 120 t and costs 15,000 cr). Multiply the player's
+  // money and stock by 10 too, so they're worth exactly the same.
+  // XP and levels didn't change.
+  if (state.version === 5) {
+    state.credits *= 10;
+    // "|| {}" and "|| []": if a part is missing, use an empty one
+    // rather than crashing (the save is checked properly later).
+    for (const itemId of Object.keys(state.inventory || {})) {
+      state.inventory[itemId] *= 10;
+    }
+    // Ore on board a freighter mid-run counts too.
+    for (const job of state.jobs || []) {
+      if (job.type === "haul" && job.cargo) {
+        for (const itemId of Object.keys(job.cargo)) {
+          job.cargo[itemId] *= 10;
+        }
+      }
+    }
+    state.version = 6;
+  }
+
+  // (Future: if (state.version === 6) { ...; state.version = 7; })
 
   if (state.version > SAVE_VERSION) {
     // A save from a NEWER version of the game than this one.

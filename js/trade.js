@@ -34,25 +34,26 @@ export function getPrice(itemId, market) {
 
 
 // -------------------------------------------------------------
-// getTradeXp(credits, unitsDeliveredToHub)
+// getTradeXp(credits, tonnesDeliveredToHub)
 // How much Trade XP a sale is worth:
-//   1 XP per 10 credits earned (from TRADE.creditsPerXp)
-//   + 1 bonus XP per unit delivered to the hub
-// e.g. 60 cr at home         -> 6 XP
-//      480 cr for 60 units at the hub -> 48 + 60 = 108 XP
+//   1 XP per 100 credits earned (TRADE.creditsPerXp)
+//   + 1 bonus XP per 10 tonnes delivered to the hub
+//     (TRADE.hubTonnesPerBonusXp)
+// e.g. 600 cr at home                    -> 6 XP
+//      4,800 cr for 600 t at the hub     -> 48 + 60 = 108 XP
 // -------------------------------------------------------------
-export function getTradeXp(credits, unitsDeliveredToHub = 0) {
+export function getTradeXp(credits, tonnesDeliveredToHub = 0) {
   const saleXp = credits / TRADE.creditsPerXp;
-  const bonusXp = unitsDeliveredToHub * TRADE.hubBonusXpPerUnit;
+  const bonusXp = tonnesDeliveredToHub / TRADE.hubTonnesPerBonusXp;
   return saleXp + bonusXp;
 }
 
 
 // -------------------------------------------------------------
 // sellAll(state, itemId)
-// Sells every unit of one item at the HOME dock.
+// Sells all of one item at the HOME dock.
 // Returns what happened, so the screen can report it:
-//   { credits: 60, xp: 6, newLevels: [] }
+//   { credits: 600, xp: 6, newLevels: [] }
 // -------------------------------------------------------------
 export function sellAll(state, itemId) {
   const amount = state.inventory[itemId] || 0;   // "|| 0" = treat missing as zero
@@ -98,28 +99,28 @@ export function sellEverything(state) {
 // sellAtHub(state, cargo)
 // Sells a freighter's cargo at the MERCHANT HUB.
 // cargo lists what the ship carried, e.g.
-//   { iron_ore: 40, nickel_ore: 20 }
+//   { iron_ore: 400, nickel_ore: 200 }   (tonnes)
 // The goods have already left the home hold when the ship was
 // loaded, so this only pays out - it doesn't touch the hold.
-// Returns { credits, xp, units, newLevels }.
+// Returns { credits, xp, tonnes, newLevels }.
 // -------------------------------------------------------------
 export function sellAtHub(state, cargo) {
   let credits = 0;
-  let units = 0;
+  let tonnes = 0;
 
   // Object.entries gives pairs: ["iron_ore", 40]
   for (const [itemId, amount] of Object.entries(cargo)) {
     credits += amount * getPrice(itemId, "hub");
-    units += amount;
+    tonnes += amount;
   }
 
   state.credits += credits;
 
   // Sale XP plus the bonus for every unit hauled there.
-  const xp = getTradeXp(credits, units);
+  const xp = getTradeXp(credits, tonnes);
   const newLevels = addXp(state, "trade", xp);
 
-  return { credits: credits, xp: xp, units: units, newLevels: newLevels };
+  return { credits: credits, xp: xp, tonnes: tonnes, newLevels: newLevels };
 }
 
 

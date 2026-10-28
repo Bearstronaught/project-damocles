@@ -17,16 +17,18 @@
 // -------------------------------------------------------------
 // ITEMS: anything that can sit in the cargo hold.
 // -------------------------------------------------------------
+// All cargo is measured in TONNES (t). The screen shows big
+// amounts as kilotonnes (kt) and megatonnes (Mt) automatically.
 // Each item is listed under a short ID (like "iron_ore").
 // The code always uses the ID; the "name" is only for display.
 // Items show in the cargo hold in the order they're listed here.
-//   sellPrice  what the HOME dock pays for one unit (instant sale)
-//   hubPrice   what the MERCHANT HUB pays for one unit (about 60%
+//   sellPrice  what the HOME dock pays per tonne (instant sale)
+//   hubPrice   what the MERCHANT HUB pays per tonne (about 60%
 //              more, but a freighter has to fly it there)
 export const ITEMS = {
   iron_ore: {
     name: "Iron ore",         // what the player sees
-    sellPrice: 5,             // credits paid for ONE unit at home
+    sellPrice: 5,             // credits paid per tonne at home
     hubPrice: 8,
   },
   nickel_ore: {
@@ -75,12 +77,12 @@ export const HULL_SIZES = {
 //   pointsPerUpgrade  points each Fleet command upgrade adds
 //   firstUpgradeCost  price of the first upgrade (credits)
 //   costMultiplier    each upgrade costs this many times the last
-//                     (2 = doubles: 2,000 -> 4,000 -> 8,000 ...)
+//                     (2 = doubles: 20,000 -> 40,000 -> 80,000 ...)
 //   maxUpgrades       how many upgrades can be bought in total
 export const COMMAND = {
   startPoints: 4,
   pointsPerUpgrade: 2,
-  firstUpgradeCost: 2000,
+  firstUpgradeCost: 20000,
   costMultiplier: 2,
   maxUpgrades: 10,
 };
@@ -100,8 +102,8 @@ export const SELL_RATE = 0.5;
 //   "freight"  hauls ore from home to the merchant hub and sells it
 //
 // The three working stats decide how long a mining trip takes:
-//   cargoCapacity  units of ore the hold carries home per trip
-//   miningRate     units mined per minute at the field
+//   cargoCapacity  tonnes of ore the hold carries home per trip
+//   miningRate     tonnes mined per minute at the field
 //                  (mining time = cargo / rate, so a big hold
 //                  with a slow drill spends longer at the rock)
 //   speed          how fast the drive is, as a multiplier:
@@ -122,38 +124,38 @@ export const SHIP_TYPES = {
     name: "Prospector-class barge",
     role: "mining",
     description: "Small, quick and cheap to run. Your first barge, and a cheap way to grow the fleet early on.",
-    cargoCapacity: 12,
-    miningRate: 12,
+    cargoCapacity: 120,
+    miningRate: 120,
     speed: 1.0,
     size: "small",
     skill: "mining",
     unlockLevel: 1,
-    cost: 1500,               // about an hour of mining with one Prospector
+    cost: 15000,              // about an hour of mining with one Prospector
     art: "hull_prospector",
   },
   excavator: {
     name: "Excavator-class barge",
     role: "mining",
     description: "Heavy hauler with twin drill heads. Slow to get there, but brings back over three times the ore.",
-    cargoCapacity: 40,
-    miningRate: 20,
+    cargoCapacity: 400,
+    miningRate: 200,
     speed: 0.75,
     size: "medium",
     skill: "mining",
     unlockLevel: 10,
-    cost: 3000,
+    cost: 30000,
     art: "hull_excavator",
   },
   courier: {
     name: "Courier-class freighter",
     role: "freight",
     description: "Small, quick freighter. Hauls ore to the merchant hub for better prices and bonus Trade XP.",
-    cargoCapacity: 60,
+    cargoCapacity: 600,
     speed: 1.0,
     size: "small",
     skill: "trade",
     unlockLevel: 3,
-    cost: 2500,
+    cost: 25000,
     art: "hull_courier",
   },
 };
@@ -175,7 +177,9 @@ export const SHIP_NAMES = [
 // -------------------------------------------------------------
 //   yields        which item (from ITEMS) it produces
 //   travelSeconds one way, for a ship with speed 1.0
-//   xpPerUnit     Mining XP earned per unit of ore brought home
+//   tonnesPerXp   1 Mining XP for every this-many tonnes brought
+//                 home (10 = 1 XP per 10 t, so a 120 t hold = 12 XP).
+//                 Written this way round so the maths stays exact.
 //   unlockLevel   Mining level needed to send ships there
 // Fields show on screen in the order they're listed here.
 export const FIELDS = {
@@ -184,7 +188,7 @@ export const FIELDS = {
     description: "Iron-rich rubble close to home.",
     yields: "iron_ore",
     travelSeconds: 45,
-    xpPerUnit: 1,             // halved 28 Oct: early levels came too fast
+    tonnesPerXp: 10,          // halved 28 Oct: early levels came too fast
     unlockLevel: 1,
   },
   outer_belt: {
@@ -192,7 +196,7 @@ export const FIELDS = {
     description: "Sparse nickel rock on the edge of the system. Twice the flight, much better pay.",
     yields: "nickel_ore",
     travelSeconds: 90,
-    xpPerUnit: 2,             // still double the Inner Belt
+    tonnesPerXp: 5,           // double the Inner Belt's XP
     unlockLevel: 5,
   },
 };
@@ -201,15 +205,15 @@ export const FIELDS = {
 // -------------------------------------------------------------
 // TRADE: how selling earns Trade XP.
 // -------------------------------------------------------------
-//   creditsPerXp       every this-many credits earned from a sale
-//                      gives 1 Trade XP (10 = 1 XP per 10 cr).
-//                      XP can be a fraction: 25 cr = 2.5 XP.
-//   hubBonusXpPerUnit  extra XP for each unit delivered to the
-//                      merchant hub, on top of the sale XP, as a
-//                      reward for making the trip.
+//   creditsPerXp           every this-many credits earned from a
+//                          sale gives 1 Trade XP (100 = 1 XP per
+//                          100 cr). XP can be a fraction: 250 cr = 2.5 XP.
+//   hubTonnesPerBonusXp    1 extra XP for every this-many tonnes
+//                          delivered to the merchant hub, on top of
+//                          the sale XP, as a reward for the trip.
 export const TRADE = {
-  creditsPerXp: 10,
-  hubBonusXpPerUnit: 1,
+  creditsPerXp: 100,
+  hubTonnesPerBonusXp: 10,
 };
 
 // THE MERCHANT HUB: where freighters sell for better prices.

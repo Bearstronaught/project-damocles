@@ -19,7 +19,8 @@
 //   Version 3: trips have three phases, timed by ship stats
 //   Version 4: command upgrades, and each ship has a destination
 //   Version 5: added the Trade skill
-export const SAVE_VERSION = 5;
+//   Version 6: cargo in tonnes - all amounts and credits x10
+export const SAVE_VERSION = 6;
 
 
 // -------------------------------------------------------------
@@ -34,7 +35,7 @@ export function createNewGame() {
     // "one shared credit pool").
     credits: 0,
 
-    // What's in storage, counted by item ID from content.js.
+    // What's in storage, in tonnes, by item ID from content.js.
     inventory: {
       iron_ore: 0,
       nickel_ore: 0,
