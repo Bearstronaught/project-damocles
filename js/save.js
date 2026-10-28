@@ -90,6 +90,126 @@ export function parseSave(text) {
 }
 
 
+// =============================================================
+// EXPORT AND IMPORT (backups, and moving between devices)
+// =============================================================
+//
+// An exported save is ONE line of text, like:
+//   DAMOCLES:eyJ2ZXJzaW9uIjo1LCJjcmVkaXRzIjo...
+//
+// The part after "DAMOCLES:" is the save's JSON in "base64":
+// a way of writing any text using only letters, numbers, + and /.
+// That keeps it on one line (easy to copy and paste), and it
+// means nobody edits it by accident. (It's NOT a secret - anyone
+// can decode base64 - so it's no protection against cheating.
+// For a single-player game, that's fine.)
+
+// The label at the start of every exported save.
+const EXPORT_PREFIX = "DAMOCLES:";
+
+
+// -------------------------------------------------------------
+// exportSave(state)
+// Turns the game into one line of text for the player to keep.
+// -------------------------------------------------------------
+export function exportSave(state) {
+  state.lastSavedAt = Date.now();   // so time away counts from NOW
+  const json = JSON.stringify(state);
+  return EXPORT_PREFIX + textToBase64(json);
+}
+
+
+// -------------------------------------------------------------
+// importSave(text)
+// Reads text the player pasted (or loaded from a file).
+// Returns { ok: true, state } or { ok: false, reason: "..." },
+// so the screen can say what went wrong. Nothing in the
+// current game changes here - the caller decides what to do.
+// -------------------------------------------------------------
+export function importSave(text) {
+  // .trim() removes spaces and line breaks from both ends, which
+  // often sneak in when copying and pasting.
+  const cleaned = (text || "").trim();
+
+  if (cleaned === "") {
+    return { ok: false, reason: "Paste a save first." };
+  }
+
+  // Exported saves start with the label. As a fallback, plain
+  // JSON (what the browser stores) is accepted too.
+  let json;
+  if (cleaned.startsWith(EXPORT_PREFIX)) {
+    try {
+      json = base64ToText(cleaned.slice(EXPORT_PREFIX.length));
+    } catch (error) {
+      return { ok: false, reason: "That save text is damaged (it may have been cut short when copying)." };
+    }
+  } else if (cleaned.startsWith("{")) {
+    json = cleaned;
+  } else {
+    return { ok: false, reason: "That doesn't look like a Project Damocles save." };
+  }
+
+  // parseSave turns the text into a game and upgrades old versions.
+  const state = parseSave(json);
+  if (!state) {
+    return { ok: false, reason: "That save text is damaged (it may have been cut short when copying)." };
+  }
+
+  if (!looksLikeASave(state)) {
+    return { ok: false, reason: "That doesn't look like a Project Damocles save." };
+  }
+
+  if (state.version > SAVE_VERSION) {
+    return { ok: false, reason: "That save is from a newer version of the game." };
+  }
+
+  return { ok: true, state: state };
+}
+
+
+// -------------------------------------------------------------
+// looksLikeASave(state)
+// A quick check that the main parts of a save are there and
+// the right kind of thing, so a random bit of JSON can't be
+// loaded and break the game.
+// -------------------------------------------------------------
+function looksLikeASave(state) {
+  return (
+    typeof state === "object" && state !== null &&
+    typeof state.version === "number" &&
+    typeof state.credits === "number" &&
+    typeof state.inventory === "object" && state.inventory !== null &&
+    Array.isArray(state.ships) && state.ships.length > 0 &&
+    Array.isArray(state.jobs) &&
+    typeof state.skills === "object" && state.skills !== null &&
+    typeof state.lastSavedAt === "number"
+  );
+}
+
+
+// -------------------------------------------------------------
+// textToBase64(text) and base64ToText(base64)
+// The browser's own btoa/atob only handle plain English letters,
+// so the text is first turned into bytes (UTF-8), which copes
+// with any character - in case ship names ever get accents.
+// -------------------------------------------------------------
+function textToBase64(text) {
+  const bytes = new TextEncoder().encode(text);   // text -> bytes
+  let binary = "";
+  for (const byte of bytes) {
+    binary += String.fromCharCode(byte);          // bytes -> a string btoa accepts
+  }
+  return btoa(binary);
+}
+
+function base64ToText(base64) {
+  const binary = atob(base64);                    // throws if it isn't base64
+  const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
+  return new TextDecoder().decode(bytes);         // bytes -> text
+}
+
+
 // -------------------------------------------------------------
 // upgradeSave(state)
 // Brings an old save up to the current format.

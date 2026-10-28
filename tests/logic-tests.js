@@ -24,7 +24,7 @@ import { SHIP_TYPES, ITEMS, COMMAND } from "../data/content.js";
 import { createNewGame } from "../js/state.js";
 import { startMiningJob, startHaulJob, processJobs, cancelJob, getJobProgress, getJobPhase, getTripPlan, getHaulPlan, loadCargo } from "../js/jobs.js";
 import { sellAll, sellEverything, getCargoValue, sellAtHub, getTradeXp, getPrice } from "../js/trade.js";
-import { parseSave, applyOfflineProgress } from "../js/save.js";
+import { parseSave, applyOfflineProgress, exportSave, importSave } from "../js/save.js";
 import { XP_TABLE, getLevelForXp, getLevel, getLevelProgress, addXp, isShipTypeUnlocked, MAX_LEVEL } from "../js/skills.js";
 import { canBuyShip, buyShip, canSellShip, sellShip, getSellValue } from "../js/shipyard.js";
 import { getCommandCapacity, getCommandUsed, getNextUpgradeCost, buyUpgrade } from "../js/command.js";
@@ -942,6 +942,93 @@ test("With 3 Prospectors, a Courier earns more than a 4th Prospector would", () 
   // ...but one Courier can't keep up with 3 Prospectors' ore
   // alone, so a second Courier (or a Hauler) has a real job too.
   assert.ok(runsNeeded > runsPossible);
+});
+
+// =============================================================
+// SAVE EXPORT AND IMPORT
+// =============================================================
+
+// A game with a bit of everything in it, to export.
+function busyGame() {
+  const state = gameWithCourier("constant");
+  state.inventory.iron_ore = 37;
+  state.skills.mining.xp = 1234.5;
+  startMiningJob(state, "ship-1", "inner_belt", START);
+  return state;
+}
+
+test("Export makes one line starting DAMOCLES:", () => {
+  const text = exportSave(busyGame());
+  assert.ok(text.startsWith("DAMOCLES:"));
+  assert.ok(!text.includes("\n"));
+});
+
+test("Export then import gives back the same game", () => {
+  const original = busyGame();
+  const text = exportSave(original);
+  const result = importSave(text);
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.state, original);
+});
+
+test("Spaces and line breaks around a pasted save are ignored", () => {
+  const text = exportSave(busyGame());
+  assert.equal(importSave("  \n" + text + "\n  ").ok, true);
+});
+
+test("An empty paste is refused with a helpful reason", () => {
+  assert.deepEqual(importSave("   "), { ok: false, reason: "Paste a save first." });
+});
+
+test("Random text is refused", () => {
+  const result = importSave("hello commander");
+  assert.equal(result.ok, false);
+  assert.match(result.reason, /doesn't look like/);
+});
+
+test("A save cut short while copying is refused as damaged", () => {
+  const text = exportSave(busyGame());
+  const result = importSave(text.slice(0, text.length - 40));
+  assert.equal(result.ok, false);
+  assert.match(result.reason, /damaged/);
+});
+
+test("JSON that isn't a save (no ships, no credits) is refused", () => {
+  const result = importSave('{"version": 5, "hello": "world"}');
+  assert.equal(result.ok, false);
+});
+
+test("A save from a newer version of the game is refused", () => {
+  const future = busyGame();
+  future.version = 99;
+  const result = importSave("DAMOCLES:" + btoa(JSON.stringify(future)));
+  assert.equal(result.ok, false);
+  assert.match(result.reason, /newer version/);
+});
+
+test("Plain JSON from the browser's own storage imports too", () => {
+  const state = busyGame();
+  assert.equal(importSave(JSON.stringify(state)).ok, true);
+});
+
+test("An old version 1 save imports and upgrades to version 5", () => {
+  const oldSave = {
+    version: 1, credits: 50, inventory: { iron_ore: 10 },
+    ships: [{ id: "ship-1", name: "Rusty Pick", type: "prospector" }],
+    jobs: [], lastSavedAt: START,
+  };
+  const result = importSave("DAMOCLES:" + btoa(JSON.stringify(oldSave)));
+  assert.equal(result.ok, true);
+  assert.equal(result.state.version, 5);
+  assert.equal(result.state.credits, 50);
+});
+
+test("Importing never changes the game it came from", () => {
+  const original = busyGame();
+  const text = exportSave(original);
+  const copy = importSave(text).state;
+  copy.credits = 999_999;
+  assert.notEqual(original.credits, 999_999);
 });
 
 // -------------------------------------------------------------

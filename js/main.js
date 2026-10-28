@@ -20,7 +20,7 @@ import { sellAll, sellEverything } from "./trade.js";
 import { buyShip, sellShip } from "./shipyard.js";
 import { buyUpgrade, getCommandCapacity } from "./command.js";
 import { getUnlocksAtLevel, getFieldUnlocksAtLevel, isFieldUnlocked } from "./skills.js";
-import { saveGame, loadGame, deleteSave, applyOfflineProgress } from "./save.js";
+import { saveGame, loadGame, deleteSave, applyOfflineProgress, exportSave, importSave } from "./save.js";
 import { setupUI, buildFleetViews, render, addLog, formatNumber, formatXp, formatDuration } from "./ui.js";
 
 
@@ -151,6 +151,32 @@ const actions = {
       addLog(`Fleet command expanded: +${gained} points (now ${getCommandCapacity(state)}).`, "fleet");
     }
     refresh();
+  },
+
+  // Returns the save as one line of text (see save.js).
+  exportSave() {
+    return exportSave(state);
+  },
+
+  // Replaces the current game with a pasted save.
+  // Returns { ok: true } or { ok: false, reason } for the screen.
+  importSave(text) {
+    const result = importSave(text);
+    if (!result.ok) {
+      return result;
+    }
+
+    state = result.state;
+    buildFleetViews(state, actions);    // the fleet is different now
+    addLog("Save imported.", "system");
+
+    // Catch up on the time since that save was exported, exactly
+    // like coming back to the game.
+    const report = applyOfflineProgress(state, Date.now());
+    reportOfflineProgress(report);
+
+    refresh();   // redraw and save it as the current game
+    return { ok: true };
   },
 
   resetGame() {

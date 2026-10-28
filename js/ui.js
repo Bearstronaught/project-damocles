@@ -65,6 +65,7 @@ function part(card, name) {
 export function setupUI(state, actions) {
   setupNavigation();
   setupResetButton(actions);
+  setupBackup(actions);
 
   byId("sell-all").addEventListener("click", () => actions.sellCargo());
   byId("command-upgrade").addEventListener("click", () => actions.buyCommandUpgrade());
@@ -142,11 +143,13 @@ export function showScreen(name) {
 // confirm() pop-up because some places (like embedded previews)
 // block it.
 //
-// armedText: what the button says while armed
-// onConfirm: what to do on the second click
+// armedText:  what the button says while armed
+// onConfirm:  what to do on the second click
+// normalText: (optional) what to change the text back to when
+//             it disarms - for buttons render() doesn't rewrite
 // Returns a function that puts the button back to normal.
 // -------------------------------------------------------------
-function makeTwoClick(button, armedText, onConfirm) {
+function makeTwoClick(button, armedText, onConfirm, normalText = null) {
   let armed = false;
   let timer = null;
 
@@ -154,6 +157,9 @@ function makeTwoClick(button, armedText, onConfirm) {
     armed = false;
     clearTimeout(timer);
     button.classList.remove("armed");
+    if (normalText) {
+      button.textContent = normalText;
+    }
   }
 
   button.addEventListener("click", () => {
@@ -184,6 +190,79 @@ function setupResetButton(actions) {
     resetButton.textContent = "Reset save";
     actions.resetGame();
   });
+}
+
+
+// -------------------------------------------------------------
+// SAVE BACKUP: export, download, import, load from a file.
+// -------------------------------------------------------------
+function setupBackup(actions) {
+  const textBox = byId("backup-text");
+  const fileInput = byId("save-file");
+
+  // A message under the buttons; isError turns it red.
+  function say(message, isError = false) {
+    const line = byId("backup-message");
+    line.textContent = message;
+    line.classList.toggle("error", isError);
+  }
+
+  // EXPORT: put the save text in the box, and try to copy it.
+  byId("export-save").addEventListener("click", async () => {
+    const text = actions.exportSave();
+    textBox.value = text;
+    textBox.select();   // highlight it, ready to copy by hand if needed
+
+    // The clipboard can be blocked (some browsers, some pages),
+    // so "try" it and fall back to asking the player to copy.
+    // "await" waits for the copy to finish before carrying on.
+    try {
+      await navigator.clipboard.writeText(text);
+      say("Save copied to your clipboard. Paste it somewhere safe.");
+    } catch (error) {
+      say("Save exported. Select the text above and copy it (Ctrl+C).");
+    }
+  });
+
+  // DOWNLOAD: the same text, saved as a .txt file.
+  byId("download-save").addEventListener("click", () => {
+    const text = actions.exportSave();
+    textBox.value = text;
+
+    // A "Blob" is a file made in memory. We make a temporary
+    // link to it and click it, which makes the browser download it.
+    const file = new Blob([text], { type: "text/plain" });
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(file);
+    // e.g. damocles-save-2026-10-28.txt
+    link.download = "damocles-save-" + new Date().toISOString().slice(0, 10) + ".txt";
+    link.click();
+    URL.revokeObjectURL(link.href);   // tidy up the temporary link
+    say("Save downloaded as " + link.download + ".");
+  });
+
+  // LOAD FILE: open the file picker; the chosen file's text goes
+  // into the box, ready to import.
+  byId("choose-file").addEventListener("click", () => fileInput.click());
+  fileInput.addEventListener("change", async () => {
+    const file = fileInput.files[0];
+    if (!file) return;
+    textBox.value = await file.text();
+    fileInput.value = "";   // so picking the same file again still works
+    say("File loaded. Click Import to replace your current game with it.");
+  });
+
+  // IMPORT: replaces the current game, so it needs two clicks.
+  const importButton = byId("import-save");
+  makeTwoClick(importButton, "Click again to replace your game", () => {
+    const result = actions.importSave(textBox.value);
+    if (result.ok) {
+      textBox.value = "";
+      say("Save imported. Welcome back, commander.");
+    } else {
+      say(result.reason, true);
+    }
+  }, "Import");
 }
 
 
