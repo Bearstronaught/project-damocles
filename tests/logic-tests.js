@@ -55,10 +55,11 @@ function test(name, testFunction) {
   }
 }
 
-// A game at Mining level 2 with some money, for shipyard tests.
-function gameAtLevel2(credits) {
+// A game at Mining level 10 (Excavator unlocked) with some money,
+// for shipyard tests.
+function gameAtLevel10(credits) {
   const state = createNewGame();
-  state.skills.mining.xp = XP_TABLE[2];
+  state.skills.mining.xp = XP_TABLE[10];
   state.credits = credits;
   return state;
 }
@@ -70,13 +71,13 @@ function gameAtLevel2(credits) {
 // balance as it stands. If you change content.js, update them.
 // =============================================================
 
-test("Prospector trip: 45s out, 1m mining, 45s back = 2m 30s, 12 ore, 24 XP", () => {
+test("Prospector trip: 45s out, 1m mining, 45s back = 2m 30s, 12 ore, 12 XP", () => {
   assert.equal(PROSPECTOR.outboundMs, 45 * SECOND);
   assert.equal(PROSPECTOR.miningMs, 60 * SECOND);
   assert.equal(PROSPECTOR.returnMs, 45 * SECOND);
   assert.equal(PROSPECTOR.durationMs, 150 * SECOND);
   assert.equal(PROSPECTOR.orePerTrip, 12);
-  assert.equal(PROSPECTOR.xpPerTrip, 24);
+  assert.equal(PROSPECTOR.xpPerTrip, 12);
 });
 
 test("Excavator trip: 1m out (slower drive), 2m mining, 1m back = 4m, 40 ore", () => {
@@ -287,13 +288,13 @@ test("Each trip earns XP for every unit of ore brought home", () => {
   assert.equal(state.skills.mining.xp, PROSPECTOR.xpPerTrip * 2);
 });
 
-test("Mining level 2 arrives on the 4th Prospector trip (10 minutes)", () => {
+test("Mining level 2 arrives on the 7th Prospector trip (17m 30s)", () => {
   const state = createNewGame();
   startMiningJob(state, "ship-1", "inner_belt", START);
-  processJobs(state, START + TRIP * 3);
-  assert.equal(getLevel(state, "mining"), 1);    // 72 XP after 3 trips
-  const results = processJobs(state, START + TRIP * 4);
-  assert.equal(getLevel(state, "mining"), 2);    // 96 XP after 4
+  processJobs(state, START + TRIP * 6);
+  assert.equal(getLevel(state, "mining"), 1);    // 72 XP after 6 trips
+  const results = processJobs(state, START + TRIP * 7);
+  assert.equal(getLevel(state, "mining"), 2);    // 84 XP after 7
   assert.deepEqual(results[0].newLevels, [2]);
 });
 
@@ -324,8 +325,9 @@ test("At level 99 the XP bar is full and says so", () => {
 // SHIPYARD
 // =============================================================
 
-test("The Excavator is locked at Mining level 1", () => {
+test("The Excavator is locked at Mining level 9", () => {
   const state = createNewGame();
+  state.skills.mining.xp = XP_TABLE[10] - 1;   // 1 XP short of level 10
   state.credits = 1_000_000;
   assert.equal(isShipTypeUnlocked(state, "excavator"), false);
   assert.deepEqual(canBuyShip(state, "excavator"), { ok: false, reason: "Locked" });
@@ -334,13 +336,13 @@ test("The Excavator is locked at Mining level 1", () => {
 });
 
 test("Unlocked but 1 cr short: can't buy, and the reason says why", () => {
-  const state = gameAtLevel2(SHIP_TYPES.excavator.cost - 1);
+  const state = gameAtLevel10(SHIP_TYPES.excavator.cost - 1);
   assert.deepEqual(canBuyShip(state, "excavator"), { ok: false, reason: "Not enough credits" });
 });
 
 test("Buying an Excavator takes its price and adds 'Second Wind' as ship-2", () => {
   const cost = SHIP_TYPES.excavator.cost;
-  const state = gameAtLevel2(cost + 250);
+  const state = gameAtLevel10(cost + 250);
   const ship = buyShip(state, "excavator");
   assert.equal(state.credits, 250);
   assert.equal(state.ships.length, 2);
@@ -349,14 +351,34 @@ test("Buying an Excavator takes its price and adds 'Second Wind' as ship-2", () 
   assert.equal(state.nextShipNumber, 3);
 });
 
-test("The starting Prospector is not for sale", () => {
+test("A second Prospector can be bought from the start, for 1,500 cr", () => {
   const state = createNewGame();
-  state.credits = 1_000_000;
-  assert.equal(canBuyShip(state, "prospector").ok, false);
+  state.credits = 1500;
+  const ship = buyShip(state, "prospector");
+  assert.ok(ship);
+  assert.equal(ship.type, "prospector");
+  assert.equal(state.credits, 0);
+  assert.equal(state.ships.length, 2);
+});
+
+test("Four Prospectors fill the 4 starting command points", () => {
+  const state = createNewGame();
+  state.credits = 1500 * 4;
+  buyShip(state, "prospector");
+  buyShip(state, "prospector");
+  buyShip(state, "prospector");
+  assert.deepEqual(canBuyShip(state, "prospector"), { ok: false, reason: "Not enough command points" });
+  assert.equal(state.credits, 1500);                 // the 4th wasn't charged
+});
+
+test("A second Prospector takes about an hour of mining to afford", () => {
+  const creditsPerHour = PROSPECTOR.orePerTrip * ITEMS.iron_ore.sellPrice * (HOUR / TRIP);
+  const hours = SHIP_TYPES.prospector.cost / creditsPerHour;
+  assert.ok(hours > 0.75 && hours < 1.5, hours.toFixed(2) + " hours");
 });
 
 test("Two ships with different trip lengths each pay out on their own timer", () => {
-  const state = gameAtLevel2(SHIP_TYPES.excavator.cost);
+  const state = gameAtLevel10(SHIP_TYPES.excavator.cost);
   buyShip(state, "excavator");
   startMiningJob(state, "ship-1", "inner_belt", START);
   startMiningJob(state, "ship-2", "inner_belt", START);
@@ -425,13 +447,13 @@ test("A new game has 4 command points, 1 used by the Prospector", () => {
 });
 
 test("An Excavator uses 2 points: Prospector + 1 Excavator = 3 of 4", () => {
-  const state = gameAtLevel2(SHIP_TYPES.excavator.cost);
+  const state = gameAtLevel10(SHIP_TYPES.excavator.cost);
   buyShip(state, "excavator");
   assert.equal(getCommandUsed(state), 3);
 });
 
 test("A second Excavator is blocked by command, even with the money", () => {
-  const state = gameAtLevel2(SHIP_TYPES.excavator.cost * 2);
+  const state = gameAtLevel10(SHIP_TYPES.excavator.cost * 2);
   buyShip(state, "excavator");
   assert.deepEqual(canBuyShip(state, "excavator"), { ok: false, reason: "Not enough command points" });
   assert.equal(buyShip(state, "excavator"), null);
@@ -468,7 +490,7 @@ test("After the last upgrade there are no more to buy", () => {
 });
 
 test("Expanding command makes room for the second Excavator", () => {
-  const state = gameAtLevel2(SHIP_TYPES.excavator.cost * 2 + 2000);
+  const state = gameAtLevel10(SHIP_TYPES.excavator.cost * 2 + 2000);
   buyShip(state, "excavator");
   buyUpgrade(state);
   assert.ok(buyShip(state, "excavator"));
@@ -481,13 +503,13 @@ test("Expanding command makes room for the second Excavator", () => {
 // SELLING SHIPS
 // =============================================================
 
-test("An Excavator sells for half its price; the Prospector for its 250 cr resale", () => {
+test("Both barges sell for half their price (Excavator 1,500, Prospector 750)", () => {
   assert.equal(getSellValue("excavator"), SHIP_TYPES.excavator.cost / 2);
-  assert.equal(getSellValue("prospector"), 250);
+  assert.equal(getSellValue("prospector"), 750);
 });
 
 test("Selling a docked ship pays out and frees its command points", () => {
-  const state = gameAtLevel2(SHIP_TYPES.excavator.cost);
+  const state = gameAtLevel10(SHIP_TYPES.excavator.cost);
   buyShip(state, "excavator");
   const earned = sellShip(state, "ship-2");
   assert.equal(earned, SHIP_TYPES.excavator.cost / 2);
@@ -497,7 +519,7 @@ test("Selling a docked ship pays out and frees its command points", () => {
 });
 
 test("A ship can't be sold mid-trip", () => {
-  const state = gameAtLevel2(SHIP_TYPES.excavator.cost);
+  const state = gameAtLevel10(SHIP_TYPES.excavator.cost);
   buyShip(state, "excavator");
   startMiningJob(state, "ship-2", "inner_belt", START);
   assert.deepEqual(canSellShip(state, "ship-2"), { ok: false, reason: "Ship is busy" });
@@ -512,7 +534,7 @@ test("Your last ship can't be sold", () => {
 });
 
 test("Ship IDs are never reused after a sale", () => {
-  const state = gameAtLevel2(SHIP_TYPES.excavator.cost * 2);
+  const state = gameAtLevel10(SHIP_TYPES.excavator.cost * 2);
   buyShip(state, "excavator");             // ship-2
   sellShip(state, "ship-2");
   const next = buyShip(state, "excavator");
@@ -538,7 +560,7 @@ test("Prospector to the Outer Belt: 1m 30s each way, 1m mining = 4m trip", () =>
   assert.equal(plan.outboundMs, 90 * SECOND);
   assert.equal(plan.miningMs, 60 * SECOND);
   assert.equal(plan.durationMs, 240 * SECOND);
-  assert.equal(plan.xpPerTrip, 12 * 4);
+  assert.equal(plan.xpPerTrip, 12 * 2);
 });
 
 test("An Outer Belt trip brings home nickel ore, not iron", () => {

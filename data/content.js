@@ -105,15 +105,14 @@ export const SELL_RATE = 0.5;
 export const SHIP_TYPES = {
   prospector: {
     name: "Prospector-class barge",
-    description: "Small, quick and cheap to run. Your first barge.",
+    description: "Small, quick and cheap to run. Your first barge, and a cheap way to grow the fleet early on.",
     cargoCapacity: 12,
     miningRate: 12,
     speed: 1.0,
     size: "small",
     skill: "mining",
     unlockLevel: 1,
-    cost: null,               // your starting ship; not sold at the yard
-    resale: 250,              // ...but a scrapyard will take it
+    cost: 1500,               // about an hour of mining with one Prospector
     art: "hull_prospector",
   },
   excavator: {
@@ -124,7 +123,7 @@ export const SHIP_TYPES = {
     speed: 0.75,
     size: "medium",
     skill: "mining",
-    unlockLevel: 2,
+    unlockLevel: 10,
     cost: 3000,
     art: "hull_excavator",
   },
@@ -156,7 +155,7 @@ export const FIELDS = {
     description: "Iron-rich rubble close to home.",
     yields: "iron_ore",
     travelSeconds: 45,
-    xpPerUnit: 2,
+    xpPerUnit: 1,             // halved 28 Oct: early levels came too fast
     unlockLevel: 1,
   },
   outer_belt: {
@@ -164,7 +163,7 @@ export const FIELDS = {
     description: "Sparse nickel rock on the edge of the system. Twice the flight, much better pay.",
     yields: "nickel_ore",
     travelSeconds: 90,
-    xpPerUnit: 4,
+    xpPerUnit: 2,             // still double the Inner Belt
     unlockLevel: 5,
   },
 };
