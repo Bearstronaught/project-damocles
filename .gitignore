@@ -1,0 +1,5 @@
+# Files Git should never save into the project
+
+# Screenshots from test runs
+*.png
+!assets/**/*.png
