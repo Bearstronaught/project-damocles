@@ -129,7 +129,23 @@ function upgradeSave(state) {
     state.version = 3;
   }
 
-  // (Future: if (state.version === 3) { ...; state.version = 4; })
+  // --- Version 3 -> 4: command upgrades and ship destinations ---
+  if (state.version === 3) {
+    // Nobody had upgrades before they existed.
+    state.commandUpgrades = 0;
+
+    // Every ship used to mine the Inner Belt, so start there.
+    for (const ship of state.ships) {
+      ship.destination = "inner_belt";
+    }
+
+    // Older players may already own more ships than the new
+    // command cap allows. That's fine: they keep them all, and
+    // simply can't buy more until they upgrade or sell one.
+    state.version = 4;
+  }
+
+  // (Future: if (state.version === 4) { ...; state.version = 5; })
 
   if (state.version > SAVE_VERSION) {
     // A save from a NEWER version of the game than this one.

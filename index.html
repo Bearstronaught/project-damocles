@@ -40,6 +40,7 @@
   <div class="status-strip">
     <span class="status-item">Local <b id="clock">--:--:--</b></span>
     <span class="status-item">Fleet <b id="fleet-size">1</b></span>
+    <span class="status-item">Command <b id="command-readout">1/4</b></span>
     <span class="status-item">Mining <b id="mining-level">Lv 1</b></span>
     <span class="status-item status-save"><i class="pulse-dot"></i> Autosave on</span>
   </div>
@@ -72,20 +73,27 @@
           <h2 class="panel-title">Cargo hold</h2>
           <span class="panel-tag">Home dock</span>
         </div>
+        <!-- One row per item (built by ui.js from content.js) -->
         <table class="cargo-table">
-          <tr>
-            <th>Item</th>
-            <th>Units</th>
-            <th>Value</th>
-          </tr>
-          <tr>
-            <td>Iron ore</td>
-            <td id="ore-amount">0</td>
-            <td id="ore-value">0 cr</td>
-          </tr>
+          <thead>
+            <tr>
+              <th>Item</th>
+              <th>Units</th>
+              <th>Price</th>
+              <th>Value</th>
+              <th><span class="visually-hidden">Sell</span></th>
+            </tr>
+          </thead>
+          <tbody id="cargo-body"></tbody>
+          <tfoot>
+            <tr>
+              <td colspan="3">Total</td>
+              <td id="cargo-total">0 cr</td>
+              <td></td>
+            </tr>
+          </tfoot>
         </table>
-        <div class="price-note">Market price: <span id="ore-price">5</span> cr per unit</div>
-        <button id="sell-ore" class="btn btn-primary">Sell all ore</button>
+        <button id="sell-all" class="btn btn-primary">Sell all cargo</button>
       </div>
 
       <!-- Log: messages about what happened -->
@@ -101,6 +109,28 @@
     <!-- ===================== SHIPS SCREEN ===================== -->
     <section class="screen layout" data-screen="ships" hidden>
 
+      <!-- Command capacity: points used, and the upgrade -->
+      <div class="panel panel-wide">
+        <div class="panel-head">
+          <h2 class="panel-title">Fleet command</h2>
+          <span class="panel-tag">Small hull 1 pt · Medium hull 2 pts</span>
+        </div>
+        <div class="command-row">
+          <div class="command-meter">
+            <div class="command-figures">
+              <span class="command-big" id="command-used">1</span>
+              <span class="command-of">/ <span id="command-cap">4</span> points in use</span>
+            </div>
+            <!-- One small block ("pip") per point, built by ui.js -->
+            <div class="pips" id="command-pips"></div>
+          </div>
+          <div class="command-upgrade">
+            <div class="yard-note" id="command-note"></div>
+            <button id="command-upgrade" class="btn btn-primary">Expand command</button>
+          </div>
+        </div>
+      </div>
+
       <!-- The ships you own, with their stats (built by ui.js) -->
       <div class="panel panel-wide">
         <div class="panel-head">
@@ -114,7 +144,7 @@
       <div class="panel panel-wide">
         <div class="panel-head">
           <h2 class="panel-title">Shipyard</h2>
-          <span class="panel-tag">Stats for a round trip to the Inner Belt</span>
+          <span class="panel-tag">Trip stats are per round trip from home</span>
         </div>
         <div id="shipyard-list" class="card-grid"></div>
       </div>

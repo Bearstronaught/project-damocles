@@ -17,7 +17,8 @@
 //   Version 1: credits, cargo, ships, jobs
 //   Version 2: added skills (XP) and a ship-number counter
 //   Version 3: trips have three phases, timed by ship stats
-export const SAVE_VERSION = 3;
+//   Version 4: command upgrades, and each ship has a destination
+export const SAVE_VERSION = 4;
 
 
 // -------------------------------------------------------------
@@ -35,17 +36,24 @@ export function createNewGame() {
     // What's in storage, counted by item ID from content.js.
     inventory: {
       iron_ore: 0,
+      nickel_ore: 0,
     },
 
     // The player's fleet. Each ship has its own unique ID
-    // ("ship-1") and a "type" that points at SHIP_TYPES.
+    // ("ship-1"), a "type" that points at SHIP_TYPES, and a
+    // "destination": the field it mines when dispatched.
     ships: [
       {
         id: "ship-1",
         name: "Rusty Pick",
         type: "prospector",
+        destination: "inner_belt",
       },
     ],
+
+    // How many Fleet command upgrades have been bought.
+    // The total command points are worked out from this (command.js).
+    commandUpgrades: 0,
 
     // The number the NEXT ship bought will get ("ship-2").
     nextShipNumber: 2,

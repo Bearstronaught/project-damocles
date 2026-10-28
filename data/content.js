@@ -19,10 +19,15 @@
 // -------------------------------------------------------------
 // Each item is listed under a short ID (like "iron_ore").
 // The code always uses the ID; the "name" is only for display.
+// Items show in the cargo hold in the order they're listed here.
 export const ITEMS = {
   iron_ore: {
     name: "Iron ore",         // what the player sees
     sellPrice: 5,             // credits paid for ONE unit
+  },
+  nickel_ore: {
+    name: "Nickel ore",
+    sellPrice: 12,
   },
 };
 
@@ -35,9 +40,44 @@ export const ITEMS = {
 export const SKILLS = {
   mining: {
     name: "Mining",
-    description: "Send barges to asteroid fields to bring back ore. Levels unlock better mining ships.",
+    description: "Send barges to asteroid fields to bring back ore. Levels unlock better mining ships and richer fields.",
   },
 };
+
+
+// -------------------------------------------------------------
+// HULL SIZES and COMMAND POINTS
+// -------------------------------------------------------------
+// Every ship takes up command points depending on its size.
+// The player can only command so many points at once (see
+// COMMAND below). Bigger hulls cost more points but do more
+// work per point, which nudges players towards them.
+// (Large and capital hulls don't exist yet; their numbers are
+// placeholders.)
+export const HULL_SIZES = {
+  small:   { name: "Small",   commandPoints: 1 },
+  medium:  { name: "Medium",  commandPoints: 2 },
+  large:   { name: "Large",   commandPoints: 4 },
+  capital: { name: "Capital", commandPoints: 8 },
+};
+
+// COMMAND: how much the player can command, and how it grows.
+//   startPoints       points a new player has
+//   pointsPerUpgrade  points each Fleet command upgrade adds
+//   firstUpgradeCost  price of the first upgrade (credits)
+//   costMultiplier    each upgrade costs this many times the last
+//                     (2 = doubles: 2,000 -> 4,000 -> 8,000 ...)
+//   maxUpgrades       how many upgrades can be bought in total
+export const COMMAND = {
+  startPoints: 4,
+  pointsPerUpgrade: 2,
+  firstUpgradeCost: 2000,
+  costMultiplier: 2,
+  maxUpgrades: 10,
+};
+
+// SELLING: an idle ship sells for this share of its price.
+export const SELL_RATE = 0.5;
 
 
 // -------------------------------------------------------------
@@ -55,10 +95,13 @@ export const SKILLS = {
 //                  1.0 = normal, 0.75 = takes a third longer
 //
 // And the shipyard details:
+//   size           hull size, from HULL_SIZES (sets command points)
 //   skill          which skill this ship belongs to
 //   unlockLevel    the skill level needed to buy one
 //   cost           price in credits (null = not for sale)
-//   art            which drawing to use (see js/art.js)
+//   resale         what it sells for, if it has no shop price
+//                  (otherwise it sells for cost x SELL_RATE)
+//   art            which picture to use (see js/art.js)
 export const SHIP_TYPES = {
   prospector: {
     name: "Prospector-class barge",
@@ -66,9 +109,11 @@ export const SHIP_TYPES = {
     cargoCapacity: 12,
     miningRate: 12,
     speed: 1.0,
+    size: "small",
     skill: "mining",
     unlockLevel: 1,
-    cost: null,               // your starting ship; not sold
+    cost: null,               // your starting ship; not sold at the yard
+    resale: 250,              // ...but a scrapyard will take it
     art: "hull_prospector",
   },
   excavator: {
@@ -77,6 +122,7 @@ export const SHIP_TYPES = {
     cargoCapacity: 40,
     miningRate: 20,
     speed: 0.75,
+    size: "medium",
     skill: "mining",
     unlockLevel: 2,
     cost: 3000,
@@ -99,12 +145,27 @@ export const SHIP_NAMES = [
 // -------------------------------------------------------------
 // MINING FIELDS: places a ship can be sent to mine.
 // -------------------------------------------------------------
+//   yields        which item (from ITEMS) it produces
+//   travelSeconds one way, for a ship with speed 1.0
+//   xpPerUnit     Mining XP earned per unit of ore brought home
+//   unlockLevel   Mining level needed to send ships there
+// Fields show on screen in the order they're listed here.
 export const FIELDS = {
   inner_belt: {
     name: "Inner Belt",
-    yields: "iron_ore",       // which item (from ITEMS) it produces
-    travelSeconds: 45,        // one way, for a ship with speed 1.0
-    xpPerUnit: 2,             // Mining XP earned per unit of ore brought home
+    description: "Iron-rich rubble close to home.",
+    yields: "iron_ore",
+    travelSeconds: 45,
+    xpPerUnit: 2,
+    unlockLevel: 1,
+  },
+  outer_belt: {
+    name: "Outer Belt",
+    description: "Sparse nickel rock on the edge of the system. Twice the flight, much better pay.",
+    yields: "nickel_ore",
+    travelSeconds: 90,
+    xpPerUnit: 4,
+    unlockLevel: 5,
   },
 };
 

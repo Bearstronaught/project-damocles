@@ -13,7 +13,7 @@ import { ITEMS } from "../data/content.js";
 
 // -------------------------------------------------------------
 // sellAll(state, itemId)
-// Sells every unit of an item. Returns the credits earned.
+// Sells every unit of one item. Returns the credits earned.
 // -------------------------------------------------------------
 export function sellAll(state, itemId) {
   const amount = state.inventory[itemId] || 0;   // "|| 0" = treat missing as zero
@@ -29,4 +29,30 @@ export function sellAll(state, itemId) {
   state.credits += earned;       // ...and the money arrives
 
   return earned;
+}
+
+
+// -------------------------------------------------------------
+// sellEverything(state)
+// Sells every item in the hold. Returns the total earned.
+// -------------------------------------------------------------
+export function sellEverything(state) {
+  let total = 0;
+  for (const itemId of Object.keys(ITEMS)) {
+    total += sellAll(state, itemId);
+  }
+  return total;
+}
+
+
+// -------------------------------------------------------------
+// getCargoValue(state)
+// What everything in the hold is worth right now.
+// -------------------------------------------------------------
+export function getCargoValue(state) {
+  let total = 0;
+  for (const [itemId, item] of Object.entries(ITEMS)) {
+    total += (state.inventory[itemId] || 0) * item.sellPrice;
+  }
+  return total;
 }

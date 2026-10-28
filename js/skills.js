@@ -9,7 +9,7 @@
 // if we change the curve later, everyone's levels update.
 // =============================================================
 
-import { SHIP_TYPES, RULES } from "../data/content.js";
+import { SHIP_TYPES, FIELDS, RULES } from "../data/content.js";
 
 // The highest level (99, set in content.js).
 export const MAX_LEVEL = RULES.maxLevel;
@@ -135,6 +135,16 @@ export function isShipTypeUnlocked(state, shipTypeId) {
 
 
 // -------------------------------------------------------------
+// isFieldUnlocked(state, fieldId)
+// True if the player's Mining level is high enough to send
+// ships to this field.
+// -------------------------------------------------------------
+export function isFieldUnlocked(state, fieldId) {
+  return getLevel(state, "mining") >= FIELDS[fieldId].unlockLevel;
+}
+
+
+// -------------------------------------------------------------
 // getUnlocksAtLevel(skillId, level)
 // Which ship types a skill unlocks at exactly this level.
 // Returns a list of ship type IDs, e.g. ["excavator"].
@@ -145,4 +155,14 @@ export function getUnlocksAtLevel(skillId, level) {
     const shipType = SHIP_TYPES[typeId];
     return shipType.skill === skillId && shipType.unlockLevel === level;
   });
+}
+
+
+// -------------------------------------------------------------
+// getFieldUnlocksAtLevel(level)
+// Which mining fields open up at exactly this Mining level.
+// Returns a list of field IDs, e.g. ["outer_belt"].
+// -------------------------------------------------------------
+export function getFieldUnlocksAtLevel(level) {
+  return Object.keys(FIELDS).filter((fieldId) => FIELDS[fieldId].unlockLevel === level);
 }

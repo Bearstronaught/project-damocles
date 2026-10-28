@@ -33,7 +33,7 @@
 
 import { FIELDS, SHIP_TYPES } from "../data/content.js";
 import { addItem, findShip } from "./state.js";
-import { addXp } from "./skills.js";
+import { addXp, isFieldUnlocked } from "./skills.js";
 
 
 // -------------------------------------------------------------
@@ -73,6 +73,11 @@ export function startMiningJob(state, shipId, fieldId, now) {
   // A ship can only do one job at a time (design doc), so
   // refuse if this ship is already busy.
   if (getJobForShip(state, shipId)) {
+    return null;
+  }
+
+  // ...and refuse a field the player hasn't unlocked yet.
+  if (!isFieldUnlocked(state, fieldId)) {
     return null;
   }
 

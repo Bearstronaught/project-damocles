@@ -6,8 +6,8 @@
 //
 // What happens, in order:
 //   1. Load the save (or start a new game).
-//   2. Catch up on any time the player was away.
-//   3. Set up the screen.
+//   2. Set up the screen.
+//   3. Catch up on any time the player was away.
 //   4. Start the "game loop" - a timer that, several times a
 //      second, finishes due jobs and redraws the screen.
 //   5. Start autosaving.
@@ -16,9 +16,10 @@
 import { RULES, ITEMS, FIELDS, SHIP_TYPES, SKILLS } from "../data/content.js";
 import { createNewGame, findShip } from "./state.js";
 import { startMiningJob, cancelJob, getJobForShip, processJobs } from "./jobs.js";
-import { sellAll } from "./trade.js";
-import { buyShip } from "./shipyard.js";
-import { getUnlocksAtLevel } from "./skills.js";
+import { sellAll, sellEverything } from "./trade.js";
+import { buyShip, sellShip } from "./shipyard.js";
+import { buyUpgrade, getCommandCapacity } from "./command.js";
+import { getUnlocksAtLevel, getFieldUnlocksAtLevel, isFieldUnlocked } from "./skills.js";
 import { saveGame, loadGame, deleteSave, applyOfflineProgress } from "./save.js";
 import { setupUI, buildFleetViews, render, addLog, formatNumber, formatDuration } from "./ui.js";
 
@@ -46,9 +47,24 @@ const actions = {
     return state;
   },
 
+  setDestination(shipId, fieldId) {
+    const ship = findShip(state, shipId);
+    // Only docked ships can change course, and only to fields
+    // that are unlocked. (The buttons are disabled otherwise,
+    // but checking here too means the rule can't be skipped.)
+    if (!ship || getJobForShip(state, shipId) || !isFieldUnlocked(state, fieldId)) {
+      return;
+    }
+    ship.destination = fieldId;
+    refresh();
+  },
+
   dispatchShip(shipId) {
-    startMiningJob(state, shipId, "inner_belt", Date.now());
-    addLog(`${findShip(state, shipId).name} departs for ${FIELDS.inner_belt.name}.`, "fleet");
+    const ship = findShip(state, shipId);
+    const job = startMiningJob(state, shipId, ship.destination, Date.now());
+    if (job) {
+      addLog(`${ship.name} departs for ${FIELDS[ship.destination].name}.`, "fleet");
+    }
     refresh();
   },
 
@@ -61,10 +77,18 @@ const actions = {
     refresh();
   },
 
-  sellOre() {
-    const earned = sellAll(state, "iron_ore");
+  sellItem(itemId) {
+    const earned = sellAll(state, itemId);
     if (earned > 0) {
-      addLog(`Sold iron ore for ${formatNumber(earned)} cr.`, "trade");
+      addLog(`Sold ${ITEMS[itemId].name.toLowerCase()} for ${formatNumber(earned)} cr.`, "trade");
+    }
+    refresh();
+  },
+
+  sellCargo() {
+    const earned = sellEverything(state);
+    if (earned > 0) {
+      addLog(`Sold the whole hold for ${formatNumber(earned)} cr.`, "trade");
     }
     refresh();
   },
@@ -75,6 +99,24 @@ const actions = {
       // The fleet changed, so rebuild the ship cards.
       buildFleetViews(state, actions);
       addLog(`${ship.name} (${SHIP_TYPES[ship.type].name}) joins the fleet. Docked at home, awaiting orders.`, "fleet");
+    }
+    refresh();
+  },
+
+  sellShip(shipId) {
+    const ship = findShip(state, shipId);
+    const earned = sellShip(state, shipId);
+    if (earned > 0) {
+      buildFleetViews(state, actions);
+      addLog(`${ship.name} sold for ${formatNumber(earned)} cr.`, "fleet");
+    }
+    refresh();
+  },
+
+  buyCommandUpgrade() {
+    const gained = buyUpgrade(state);
+    if (gained > 0) {
+      addLog(`Fleet command expanded: +${gained} points (now ${getCommandCapacity(state)}).`, "fleet");
     }
     refresh();
   },
@@ -118,7 +160,7 @@ function refresh() {
 
 // -------------------------------------------------------------
 // logLevelUps(skillId, levels)
-// Announces each new level, and any ships it unlocked.
+// Announces each new level, and anything it unlocked.
 // -------------------------------------------------------------
 function logLevelUps(skillId, levels) {
   for (const level of levels) {
@@ -126,6 +168,11 @@ function logLevelUps(skillId, levels) {
 
     for (const typeId of getUnlocksAtLevel(skillId, level)) {
       addLog(`New ship unlocked: ${SHIP_TYPES[typeId].name}. See the Ships screen.`, "level");
+    }
+    if (skillId === "mining") {
+      for (const fieldId of getFieldUnlocksAtLevel(level)) {
+        addLog(`New field unlocked: ${FIELDS[fieldId].name}. Pick it on a docked ship's card.`, "level");
+      }
     }
   }
 }
@@ -146,16 +193,21 @@ function reportOfflineProgress(report) {
     message += ` (Only ${RULES.offlineCapHours}h counted.)`;
   }
 
-  // Add up everything gained while away.
-  let totalOre = 0;
+  // Add up everything gained while away, item by item.
+  const gained = {};   // e.g. { iron_ore: 240, nickel_ore: 36 }
   let totalXp = 0;
   for (const result of report.results) {
-    totalOre += result.amount;
+    if (!result.itemId) continue;
+    gained[result.itemId] = (gained[result.itemId] || 0) + result.amount;
     totalXp += result.xpGained;
   }
 
-  if (totalOre > 0) {
-    message += ` Your fleet brought back ${formatNumber(totalOre)} iron ore and earned ${formatNumber(totalXp)} Mining XP.`;
+  // Turn it into words: "240 iron ore and 36 nickel ore"
+  const parts = Object.entries(gained).map(
+    ([itemId, amount]) => `${formatNumber(amount)} ${ITEMS[itemId].name.toLowerCase()}`
+  );
+  if (parts.length > 0) {
+    message += ` Your fleet brought back ${parts.join(" and ")}, earning ${formatNumber(totalXp)} Mining XP.`;
   }
   addLog(message, "system");
 
@@ -167,7 +219,7 @@ function reportOfflineProgress(report) {
 
 
 // -------------------------------------------------------------
-// 3. Set up the screen.
+// 2. Set up the screen.
 // -------------------------------------------------------------
 setupUI(state, actions);
 
@@ -177,7 +229,7 @@ if (isNewGame) {
 
 
 // -------------------------------------------------------------
-// 2. Offline progress (only for a returning player).
+// 3. Offline progress (only for a returning player).
 // This runs after set-up so its messages have a log to go in.
 // -------------------------------------------------------------
 if (!isNewGame) {

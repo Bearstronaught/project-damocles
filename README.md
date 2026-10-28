@@ -2,7 +2,7 @@
 
 A space-based idle game. Grow from one mining barge into a galaxy-spanning empire through mining, trade, industry and exploration.
 
-**Current state:** early prototype. Ships fly out to an asteroid field, mine until the hold is full and fly home; trip times come from each ship's stats (cargo hold, mining rate, drive speed). Ore sells for credits, and progress continues while the game is closed (up to 24 hours). Mining levels follow RuneScape's XP curve up to 99; Mining level 2 unlocks the Excavator-class barge. Three screens: Command, Ships (your fleet and the shipyard, with full stats) and Skills.
+**Current state:** early prototype. Ships fly out to an asteroid field, mine until the hold is full and fly home; trip times come from each ship's stats (cargo hold, mining rate, drive speed). Ore sells for credits, and progress continues while the game is closed (up to 24 hours). Mining levels follow RuneScape's XP curve up to 99; Mining level 2 unlocks the Excavator-class barge and level 5 the Outer Belt (nickel ore). Each ship uses command points by hull size, which cap the fleet; buy Fleet command upgrades to expand it, or sell an idle ship for half its price. Three screens: Command, Ships (fleet command, your fleet, the shipyard) and Skills.
 
 ## Running the game
 
@@ -34,7 +34,8 @@ js/main.js          starting point: loads the save, runs the game loop, autosave
 js/state.js         what the player owns: credits, cargo, ships, jobs
 js/jobs.js          timed work (mining trips) and finishing jobs that are due
 js/skills.js        XP, levels, and which ships each level unlocks
-js/shipyard.js      buying new ships
+js/shipyard.js      buying and selling ships
+js/command.js       command capacity: points per hull, upgrades
 js/trade.js         selling goods for credits
 js/save.js          save, load, version upgrades, offline progress
 js/ui.js            drawing the screens and handling button clicks

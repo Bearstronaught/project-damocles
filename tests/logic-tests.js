@@ -20,13 +20,15 @@
 // =============================================================
 
 import assert from "node:assert/strict";
-import { SHIP_TYPES, ITEMS } from "../data/content.js";
+import { SHIP_TYPES, ITEMS, COMMAND } from "../data/content.js";
 import { createNewGame } from "../js/state.js";
 import { startMiningJob, processJobs, cancelJob, getJobProgress, getJobPhase, getTripPlan } from "../js/jobs.js";
-import { sellAll } from "../js/trade.js";
+import { sellAll, sellEverything, getCargoValue } from "../js/trade.js";
 import { parseSave, applyOfflineProgress } from "../js/save.js";
 import { XP_TABLE, getLevelForXp, getLevel, getLevelProgress, addXp, isShipTypeUnlocked, MAX_LEVEL } from "../js/skills.js";
-import { canBuyShip, buyShip } from "../js/shipyard.js";
+import { canBuyShip, buyShip, canSellShip, sellShip, getSellValue } from "../js/shipyard.js";
+import { getCommandCapacity, getCommandUsed, getNextUpgradeCost, buyUpgrade } from "../js/command.js";
+import { isFieldUnlocked } from "../js/skills.js";
 
 const SECOND = 1000;                 // milliseconds in a second
 const HOUR = 60 * 60 * SECOND;
@@ -369,7 +371,7 @@ test("Two ships with different trip lengths each pay out on their own timer", ()
 // SAVE UPGRADES
 // =============================================================
 
-test("A version 1 save (first commit) upgrades all the way to version 3", () => {
+test("A version 1 save (first commit) upgrades all the way to version 4", () => {
   // Exactly what the first commit's game saved.
   const oldSave = {
     version: 1,
@@ -380,7 +382,7 @@ test("A version 1 save (first commit) upgrades all the way to version 3", () => 
     lastSavedAt: START,
   };
   const state = parseSave(JSON.stringify(oldSave));
-  assert.equal(state.version, 3);
+  assert.equal(state.version, 4);
   assert.equal(state.credits, 50);                 // nothing lost
   assert.equal(state.inventory.iron_ore, 10);
   assert.deepEqual(state.skills, { mining: { xp: 0 } });
@@ -402,13 +404,198 @@ test("A version 2 save's old 20s trip is re-timed to the new three-phase trip", 
   };
   const state = parseSave(JSON.stringify(oldSave));
   const job = state.jobs[0];
-  assert.equal(state.version, 3);
+  assert.equal(state.version, 4);
   assert.equal(job.durationMs, PROSPECTOR.durationMs);
   assert.equal(job.outboundMs, PROSPECTOR.outboundMs);
   assert.equal(job.miningMs, PROSPECTOR.miningMs);
   assert.equal(state.skills.mining.xp, 120);       // XP kept
 });
 
+
+
+// =============================================================
+// COMMAND CAPACITY
+// =============================================================
+
+test("A new game has 4 command points, 1 used by the Prospector", () => {
+  const state = createNewGame();
+  assert.equal(getCommandCapacity(state), COMMAND.startPoints);
+  assert.equal(getCommandCapacity(state), 4);
+  assert.equal(getCommandUsed(state), 1);
+});
+
+test("An Excavator uses 2 points: Prospector + 1 Excavator = 3 of 4", () => {
+  const state = gameAtLevel2(SHIP_TYPES.excavator.cost);
+  buyShip(state, "excavator");
+  assert.equal(getCommandUsed(state), 3);
+});
+
+test("A second Excavator is blocked by command, even with the money", () => {
+  const state = gameAtLevel2(SHIP_TYPES.excavator.cost * 2);
+  buyShip(state, "excavator");
+  assert.deepEqual(canBuyShip(state, "excavator"), { ok: false, reason: "Not enough command points" });
+  assert.equal(buyShip(state, "excavator"), null);
+  assert.equal(state.credits, SHIP_TYPES.excavator.cost);   // no money taken
+});
+
+test("Command upgrades: +2 points each, priced 2,000 then 4,000 then 8,000", () => {
+  const state = createNewGame();
+  state.credits = 2000 + 4000 + 8000;
+  assert.equal(getNextUpgradeCost(state), 2000);
+  buyUpgrade(state);
+  assert.equal(getNextUpgradeCost(state), 4000);
+  buyUpgrade(state);
+  assert.equal(getNextUpgradeCost(state), 8000);
+  buyUpgrade(state);
+  assert.equal(getCommandCapacity(state), 4 + 3 * 2);
+  assert.equal(state.credits, 0);
+});
+
+test("An upgrade you can't afford does nothing", () => {
+  const state = createNewGame();
+  state.credits = 1999;
+  assert.equal(buyUpgrade(state), 0);
+  assert.equal(state.credits, 1999);
+  assert.equal(state.commandUpgrades, 0);
+});
+
+test("After the last upgrade there are no more to buy", () => {
+  const state = createNewGame();
+  state.commandUpgrades = COMMAND.maxUpgrades;
+  assert.equal(getNextUpgradeCost(state), null);
+  state.credits = 1e12;
+  assert.equal(buyUpgrade(state), 0);
+});
+
+test("Expanding command makes room for the second Excavator", () => {
+  const state = gameAtLevel2(SHIP_TYPES.excavator.cost * 2 + 2000);
+  buyShip(state, "excavator");
+  buyUpgrade(state);
+  assert.ok(buyShip(state, "excavator"));
+  assert.equal(getCommandUsed(state), 5);
+  assert.equal(getCommandCapacity(state), 6);
+});
+
+
+// =============================================================
+// SELLING SHIPS
+// =============================================================
+
+test("An Excavator sells for half its price; the Prospector for its 250 cr resale", () => {
+  assert.equal(getSellValue("excavator"), SHIP_TYPES.excavator.cost / 2);
+  assert.equal(getSellValue("prospector"), 250);
+});
+
+test("Selling a docked ship pays out and frees its command points", () => {
+  const state = gameAtLevel2(SHIP_TYPES.excavator.cost);
+  buyShip(state, "excavator");
+  const earned = sellShip(state, "ship-2");
+  assert.equal(earned, SHIP_TYPES.excavator.cost / 2);
+  assert.equal(state.credits, SHIP_TYPES.excavator.cost / 2);
+  assert.equal(state.ships.length, 1);
+  assert.equal(getCommandUsed(state), 1);
+});
+
+test("A ship can't be sold mid-trip", () => {
+  const state = gameAtLevel2(SHIP_TYPES.excavator.cost);
+  buyShip(state, "excavator");
+  startMiningJob(state, "ship-2", "inner_belt", START);
+  assert.deepEqual(canSellShip(state, "ship-2"), { ok: false, reason: "Ship is busy" });
+  assert.equal(sellShip(state, "ship-2"), 0);
+  assert.equal(state.ships.length, 2);
+});
+
+test("Your last ship can't be sold", () => {
+  const state = createNewGame();
+  assert.deepEqual(canSellShip(state, "ship-1"), { ok: false, reason: "Last ship" });
+  assert.equal(sellShip(state, "ship-1"), 0);
+});
+
+test("Ship IDs are never reused after a sale", () => {
+  const state = gameAtLevel2(SHIP_TYPES.excavator.cost * 2);
+  buyShip(state, "excavator");             // ship-2
+  sellShip(state, "ship-2");
+  const next = buyShip(state, "excavator");
+  assert.equal(next.id, "ship-3");
+});
+
+
+// =============================================================
+// THE OUTER BELT
+// =============================================================
+
+test("The Outer Belt is locked until Mining level 5", () => {
+  const state = createNewGame();
+  state.skills.mining.xp = XP_TABLE[5] - 1;
+  assert.equal(isFieldUnlocked(state, "outer_belt"), false);
+  assert.equal(startMiningJob(state, "ship-1", "outer_belt", START), null);
+  state.skills.mining.xp = XP_TABLE[5];
+  assert.equal(isFieldUnlocked(state, "outer_belt"), true);
+});
+
+test("Prospector to the Outer Belt: 1m 30s each way, 1m mining = 4m trip", () => {
+  const plan = getTripPlan("prospector", "outer_belt");
+  assert.equal(plan.outboundMs, 90 * SECOND);
+  assert.equal(plan.miningMs, 60 * SECOND);
+  assert.equal(plan.durationMs, 240 * SECOND);
+  assert.equal(plan.xpPerTrip, 12 * 4);
+});
+
+test("An Outer Belt trip brings home nickel ore, not iron", () => {
+  const state = createNewGame();
+  state.skills.mining.xp = XP_TABLE[5];
+  startMiningJob(state, "ship-1", "outer_belt", START);
+  processJobs(state, START + 240 * SECOND);
+  assert.equal(state.inventory.nickel_ore, 12);
+  assert.equal(state.inventory.iron_ore, 0);
+});
+
+test("The Outer Belt pays more per hour than the Inner Belt for both ships", () => {
+  const crPerHour = (typeId, fieldId, itemId) => {
+    const plan = getTripPlan(typeId, fieldId);
+    return plan.orePerTrip * ITEMS[itemId].sellPrice * (HOUR / plan.durationMs);
+  };
+  for (const typeId of ["prospector", "excavator"]) {
+    assert.ok(crPerHour(typeId, "outer_belt", "nickel_ore") > crPerHour(typeId, "inner_belt", "iron_ore"), typeId);
+  }
+});
+
+test("Selling everything sells every item and adds it all up", () => {
+  const state = createNewGame();
+  state.inventory.iron_ore = 10;
+  state.inventory.nickel_ore = 10;
+  const expected = 10 * ITEMS.iron_ore.sellPrice + 10 * ITEMS.nickel_ore.sellPrice;
+  assert.equal(getCargoValue(state), expected);
+  assert.equal(sellEverything(state), expected);
+  assert.equal(state.credits, expected);
+  assert.equal(getCargoValue(state), 0);
+});
+
+test("A version 3 save gains command upgrades and destinations, keeping its ships", () => {
+  // A build-3 player who bought two cheap Excavators earlier:
+  // 1 + 2 + 2 = 5 points, over the new cap of 4.
+  const oldSave = {
+    version: 3,
+    credits: 0,
+    inventory: { iron_ore: 5 },
+    nextShipNumber: 4,
+    skills: { mining: { xp: 500 } },
+    ships: [
+      { id: "ship-1", name: "Rusty Pick", type: "prospector" },
+      { id: "ship-2", name: "Second Wind", type: "excavator" },
+      { id: "ship-3", name: "Lucky Strike", type: "excavator" },
+    ],
+    jobs: [],
+    lastSavedAt: START,
+  };
+  const state = parseSave(JSON.stringify(oldSave));
+  assert.equal(state.version, 4);
+  assert.equal(state.commandUpgrades, 0);
+  assert.ok(state.ships.every((ship) => ship.destination === "inner_belt"));
+  assert.equal(state.ships.length, 3);                  // nobody loses a ship...
+  assert.equal(getCommandUsed(state), 5);
+  assert.equal(canBuyShip(state, "excavator").ok, false);   // ...but can't buy more
+});
 
 // -------------------------------------------------------------
 console.log(`\n${passed} passed, ${failed} failed`);

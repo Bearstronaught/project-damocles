@@ -17,18 +17,16 @@
 // flicker and sometimes swallow clicks.)
 // =============================================================
 
-import { ITEMS, SHIP_TYPES, FIELDS, SKILLS } from "../data/content.js";
+import { ITEMS, SHIP_TYPES, FIELDS, SKILLS, HULL_SIZES, COMMAND } from "../data/content.js";
 import { getJobForShip, getJobPhase, getTripPlan } from "./jobs.js";
-import { getLevel, getLevelProgress, isShipTypeUnlocked } from "./skills.js";
-import { canBuyShip } from "./shipyard.js";
+import { getLevel, getLevelProgress, isShipTypeUnlocked, isFieldUnlocked } from "./skills.js";
+import { canBuyShip, canSellShip, getSellValue } from "./shipyard.js";
+import { getShipPoints, getCommandCapacity, getCommandUsed, getNextUpgradeCost, canBuyUpgrade } from "./command.js";
+import { getCargoValue } from "./trade.js";
 import { getSchematic } from "./art.js";
 
 // The screens that exist, in nav order. The first is the default.
 const SCREENS = ["command", "ships", "skills"];
-
-// Only one field exists so far, so every trip goes here.
-// (When there are more fields, each ship will pick its own.)
-const DEFAULT_FIELD = "inner_belt";
 
 // Words shown for each phase of a trip.
 const PHASE_LABELS = {
@@ -60,15 +58,16 @@ function part(card, name) {
 // that are made from game data.
 //
 // "actions" is an object of functions from main.js, e.g.
-//   actions.sellOre()   actions.dispatchShip(shipId)
+//   actions.sellCargo()   actions.dispatchShip(shipId)
 // -------------------------------------------------------------
 export function setupUI(state, actions) {
   setupNavigation();
   setupResetButton(actions);
 
-  byId("sell-ore").addEventListener("click", () => actions.sellOre());
-  byId("ore-price").textContent = ITEMS.iron_ore.sellPrice;
+  byId("sell-all").addEventListener("click", () => actions.sellCargo());
+  byId("command-upgrade").addEventListener("click", () => actions.buyCommandUpgrade());
 
+  buildCargoTable(actions);
   buildFleetViews(state, actions);
   buildShipyard(actions);
   buildSkillCards();
@@ -134,28 +133,52 @@ export function showScreen(name) {
 
 
 // -------------------------------------------------------------
-// RESET BUTTON
-// It can't be undone, so it needs two clicks: the first click
-// "arms" it, the second (within 4 seconds) wipes the save.
-// We don't use the browser's confirm() pop-up because some
-// places (like embedded previews) block it.
+// TWO-CLICK BUTTONS
+// For things that can't be undone (reset, selling a ship), the
+// first click "arms" the button and changes its text; a second
+// click within 4 seconds does it. We don't use the browser's
+// confirm() pop-up because some places (like embedded previews)
+// block it.
+//
+// armedText: what the button says while armed
+// onConfirm: what to do on the second click
+// Returns a function that puts the button back to normal.
 // -------------------------------------------------------------
-function setupResetButton(actions) {
-  const resetButton = byId("reset-game");
-  let resetArmed = false;
+function makeTwoClick(button, armedText, onConfirm) {
+  let armed = false;
+  let timer = null;
 
-  resetButton.addEventListener("click", () => {
-    if (!resetArmed) {
-      resetArmed = true;
-      resetButton.textContent = "Click again to wipe your save";
+  function disarm() {
+    armed = false;
+    clearTimeout(timer);
+    button.classList.remove("armed");
+  }
+
+  button.addEventListener("click", () => {
+    if (!armed) {
+      armed = true;
+      button.classList.add("armed");
+      button.textContent = armedText;
       // If they don't click again in time, put the button back.
-      setTimeout(() => {
-        resetArmed = false;
-        resetButton.textContent = "Reset save";
-      }, 4000);
+      // (render() rewrites the normal text on its next pass.)
+      timer = setTimeout(disarm, 4000);
       return;
     }
-    resetArmed = false;
+    disarm();
+    onConfirm();
+  });
+
+  return disarm;
+}
+
+// Is this button waiting for its second click?
+function isArmed(button) {
+  return button.classList.contains("armed");
+}
+
+function setupResetButton(actions) {
+  const resetButton = byId("reset-game");
+  makeTwoClick(resetButton, "Click again to wipe your save", () => {
     resetButton.textContent = "Reset save";
     actions.resetGame();
   });
@@ -164,43 +187,59 @@ function setupResetButton(actions) {
 
 // -------------------------------------------------------------
 // statsList(typeId)
-// The full stat block for a ship type, as HTML. Used on the
-// Ships screen for both owned ships and the shipyard, so the
-// two always match and can be compared.
+// The full stat block for a ship type, as HTML: its hull stats,
+// then a small table of what a round trip to each field gives.
+// Used for both owned ships and the shipyard, so they always
+// match and can be compared.
 // -------------------------------------------------------------
 function statsList(typeId) {
   const shipType = SHIP_TYPES[typeId];
-  const plan = getTripPlan(typeId, DEFAULT_FIELD);
-  const price = ITEMS[FIELDS[DEFAULT_FIELD].yields].sellPrice;
+  const sizeName = HULL_SIZES[shipType.size].name;
 
-  // How many trips fit in an hour, then what that adds up to.
-  const tripsPerHour = (60 * 60 * 1000) / plan.durationMs;
-  const orePerHour = plan.orePerTrip * tripsPerHour;
-  const creditsPerHour = orePerHour * price;
-  const xpPerHour = plan.xpPerTrip * tripsPerHour;
+  // One row per field: trip length, income and XP per hour.
+  // data-field lets render() dim the fields that are locked.
+  const fieldRows = Object.entries(FIELDS).map(([fieldId, field]) => {
+    const plan = getTripPlan(typeId, fieldId);
+    const price = ITEMS[field.yields].sellPrice;
+    const tripsPerHour = (60 * 60 * 1000) / plan.durationMs;
+
+    return `
+      <tr data-field="${fieldId}">
+        <td>${field.name}</td>
+        <td>${formatDuration(plan.durationMs)}</td>
+        <td class="stat-hot">${formatNumber(plan.orePerTrip * price * tripsPerHour)}</td>
+        <td>${formatNumber(plan.xpPerTrip * tripsPerHour)}</td>
+      </tr>
+    `;
+  }).join("");
 
   // <dl> is a "description list": pairs of label (dt) and value (dd).
   return `
-    <dl class="stats">
-      <dt>Cargo hold</dt>   <dd>${shipType.cargoCapacity} units</dd>
-      <dt>Mining rate</dt>  <dd>${shipType.miningRate} units/min</dd>
-      <dt>Drive speed</dt>  <dd>${shipType.speed.toFixed(2)}×</dd>
-      <dt>Round trip</dt>   <dd>${formatDuration(plan.durationMs)}</dd>
-      <dt>Ore per hour</dt> <dd>${formatNumber(orePerHour)}</dd>
-      <dt>Income</dt>       <dd class="stat-hot">${formatNumber(creditsPerHour)} cr/h</dd>
-      <dt>Mining XP</dt>    <dd>${formatNumber(xpPerHour)} XP/h</dd>
-    </dl>
+    <div class="stat-block">
+      <dl class="stats">
+        <dt>Hull</dt>         <dd>${sizeName} · ${getShipPoints(typeId)} cmd pt${getShipPoints(typeId) === 1 ? "" : "s"}</dd>
+        <dt>Cargo hold</dt>   <dd>${shipType.cargoCapacity} units</dd>
+        <dt>Mining rate</dt>  <dd>${shipType.miningRate} units/min</dd>
+        <dt>Drive speed</dt>  <dd>${shipType.speed.toFixed(2)}×</dd>
+      </dl>
+      <table class="trip-table">
+        <thead>
+          <tr><th>Field</th><th>Trip</th><th>cr/h</th><th>XP/h</th></tr>
+        </thead>
+        <tbody>${fieldRows}</tbody>
+      </table>
+    </div>
   `;
 }
 
 
 // -------------------------------------------------------------
-// routeTracker(fieldName)
+// routeTracker()
 // The three-part bar showing a trip: out, mine, back.
 // Each segment's width is set later to match how long that
 // phase takes, so a long mining stop LOOKS long.
 // -------------------------------------------------------------
-function routeTracker(fieldName) {
+function routeTracker() {
   return `
     <div class="route" data-part="route">
       <div class="route-track">
@@ -210,11 +249,52 @@ function routeTracker(fieldName) {
       </div>
       <div class="route-labels">
         <span>Home</span>
-        <span class="route-field">${fieldName}</span>
+        <span class="route-field" data-part="route-field"></span>
         <span>Home</span>
       </div>
     </div>
   `;
+}
+
+
+// -------------------------------------------------------------
+// destinationPicker(shipId)
+// A row of buttons, one per field, to choose where a ship goes.
+// Locked fields show the level they need.
+// -------------------------------------------------------------
+function destinationPicker() {
+  const buttons = Object.entries(FIELDS).map(([fieldId, field]) => `
+    <button class="dest-btn" data-field="${fieldId}">
+      <span class="dest-name">${field.name}</span>
+      <span class="dest-lock">Mining ${field.unlockLevel}</span>
+    </button>
+  `).join("");
+
+  return `<div class="dest-picker" data-part="dest">${buttons}</div>`;
+}
+
+
+// -------------------------------------------------------------
+// buildCargoTable(actions)
+// One row per item, each with its own small Sell button.
+// -------------------------------------------------------------
+function buildCargoTable(actions) {
+  const body = byId("cargo-body");
+  body.innerHTML = "";
+
+  for (const [itemId, item] of Object.entries(ITEMS)) {
+    const row = document.createElement("tr");
+    row.id = "cargo-" + itemId;
+    row.innerHTML = `
+      <td>${item.name}</td>
+      <td data-part="amount">0</td>
+      <td class="cargo-price">${item.sellPrice} cr</td>
+      <td data-part="value">0 cr</td>
+      <td><button class="btn btn-small" data-part="sell">Sell</button></td>
+    `;
+    part(row, "sell").addEventListener("click", () => actions.sellItem(itemId));
+    body.appendChild(row);
+  }
 }
 
 
@@ -224,11 +304,11 @@ function routeTracker(fieldName) {
 //   - the ship cards on the Command screen
 //   - the "Your fleet" list on the Ships screen
 // Called at start-up, and again whenever the fleet changes
-// (a ship bought, a reset).
+// (a ship bought or sold, a reset).
 // -------------------------------------------------------------
 export function buildFleetViews(state, actions) {
   buildFleetCards(state, actions);
-  buildOwnedList(state);
+  buildOwnedList(state, actions);
 }
 
 function buildFleetCards(state, actions) {
@@ -251,7 +331,8 @@ function buildFleetCards(state, actions) {
           <span class="card-name">${ship.name}</span>
           <span class="card-sub">${shipType.name}</span>
         </div>
-        ${routeTracker(FIELDS[DEFAULT_FIELD].name)}
+        ${destinationPicker()}
+        ${routeTracker()}
         <div class="ship-status" data-part="status">Idle</div>
         <div class="ship-specs">
           Hold <b>${shipType.cargoCapacity}</b>
@@ -261,6 +342,14 @@ function buildFleetCards(state, actions) {
         <button class="btn" data-part="button">Dispatch</button>
       </div>
     `;
+
+    // Choosing a destination (only while docked: a ship can't
+    // change course mid-trip).
+    for (const destButton of part(card, "dest").querySelectorAll(".dest-btn")) {
+      destButton.addEventListener("click", () => {
+        actions.setDestination(ship.id, destButton.dataset.field);
+      });
+    }
 
     // When this ship's button is clicked, either send it out
     // or call it back, depending on whether it's busy.
@@ -276,7 +365,7 @@ function buildFleetCards(state, actions) {
   }
 }
 
-function buildOwnedList(state) {
+function buildOwnedList(state, actions) {
   const list = byId("owned-list");
   list.innerHTML = "";
 
@@ -295,9 +384,16 @@ function buildOwnedList(state) {
         </div>
         <div class="owned-status" data-part="status">Docked</div>
         <p class="ship-desc">${shipType.description}</p>
+        <button class="btn btn-sell" data-part="sell"></button>
+        <div class="sell-note" data-part="sell-note"></div>
       </div>
       ${statsList(ship.type)}
     `;
+
+    makeTwoClick(part(row, "sell"), "Click again to sell", () => {
+      actions.sellShip(ship.id);
+    });
+
     list.appendChild(row);
   }
 }
@@ -329,7 +425,6 @@ function buildShipyard(actions) {
       <p class="ship-desc">${shipType.description}</p>
       ${statsList(typeId)}
       <dl class="stats stats-yard">
-        <dt>Role</dt>      <dd>${skillName}</dd>
         <dt>Requires</dt>  <dd>${skillName} level ${shipType.unlockLevel}</dd>
         <dt>Price</dt>     <dd>${price}</dd>
         <dt>Owned</dt>     <dd data-part="owned">0</dd>
@@ -349,23 +444,35 @@ function buildShipyard(actions) {
 
 // -------------------------------------------------------------
 // buildSkillCards()
-// One card per skill, each with an XP bar and its unlock list.
+// One card per skill, each with an XP bar and its unlock list
+// (ships AND fields, in level order).
 // -------------------------------------------------------------
 function buildSkillCards() {
   const list = byId("skills-list");
   list.innerHTML = "";
 
   for (const [skillId, skill] of Object.entries(SKILLS)) {
-    // Find this skill's ship unlocks, lowest level first.
-    const unlocks = Object.entries(SHIP_TYPES)
-      .filter(([, shipType]) => shipType.skill === skillId)
-      .sort((a, b) => a[1].unlockLevel - b[1].unlockLevel);
+    // Collect everything this skill unlocks into one list:
+    // { level, name, kind, key } - key says what to check later.
+    const unlocks = [];
+    for (const [typeId, shipType] of Object.entries(SHIP_TYPES)) {
+      if (shipType.skill === skillId) {
+        unlocks.push({ level: shipType.unlockLevel, name: shipType.name, kind: "Ship", key: "ship:" + typeId });
+      }
+    }
+    if (skillId === "mining") {
+      for (const [fieldId, field] of Object.entries(FIELDS)) {
+        unlocks.push({ level: field.unlockLevel, name: field.name, kind: "Field", key: "field:" + fieldId });
+      }
+    }
+    unlocks.sort((a, b) => a.level - b.level);   // lowest level first
 
     // Turn each unlock into a line of the list.
-    const unlockLines = unlocks.map(([typeId, shipType]) => `
-      <li data-unlock="${typeId}">
-        <span class="unlock-level">Lv ${shipType.unlockLevel}</span>
-        <span class="unlock-name">${shipType.name}</span>
+    const unlockLines = unlocks.map((u) => `
+      <li data-unlock="${u.key}">
+        <span class="unlock-level">Lv ${u.level}</span>
+        <span class="unlock-kind">${u.kind}</span>
+        <span class="unlock-name">${u.name}</span>
         <span class="unlock-state" data-part="state"></span>
       </li>
     `).join("");
@@ -384,7 +491,7 @@ function buildSkillCards() {
         <span data-part="xp"></span>
         <span class="skill-total" data-part="total"></span>
       </div>
-      <h3 class="sub-title">Ship unlocks</h3>
+      <h3 class="sub-title">Unlocks</h3>
       <ul class="unlock-list">${unlockLines}</ul>
     `;
     list.appendChild(card);
@@ -397,25 +504,33 @@ function buildSkillCards() {
 // =============================================================
 
 export function render(state, now) {
-  renderTreasury(state);
+  renderCargo(state);
   renderStatusStrip(state, now);
   renderFleet(state, now);
+  renderOwnedList(state);
+  renderCommand(state);
   renderShipyard(state);
   renderSkills(state);
 }
 
 
-// Credits and cargo
-function renderTreasury(state) {
-  const ore = state.inventory.iron_ore || 0;
-  const orePrice = ITEMS.iron_ore.sellPrice;
-
+// Credits and the cargo hold
+function renderCargo(state) {
   byId("credits").textContent = formatNumber(state.credits) + " cr";
-  byId("ore-amount").textContent = formatNumber(ore);
-  byId("ore-value").textContent = formatNumber(ore * orePrice) + " cr";
 
-  // The Sell button is greyed out when there's nothing to sell.
-  byId("sell-ore").disabled = ore === 0;
+  for (const [itemId, item] of Object.entries(ITEMS)) {
+    const row = byId("cargo-" + itemId);
+    const amount = state.inventory[itemId] || 0;
+    part(row, "amount").textContent = formatNumber(amount);
+    part(row, "value").textContent = formatNumber(amount * item.sellPrice) + " cr";
+    part(row, "sell").disabled = amount === 0;
+    // Dim rows for items you have none of
+    row.classList.toggle("empty", amount === 0);
+  }
+
+  const total = getCargoValue(state);
+  byId("cargo-total").textContent = formatNumber(total) + " cr";
+  byId("sell-all").disabled = total === 0;
 }
 
 
@@ -424,6 +539,7 @@ function renderStatusStrip(state, now) {
   byId("clock").textContent = new Date(now).toLocaleTimeString("en-GB");
   byId("fleet-size").textContent = state.ships.length;
   byId("mining-level").textContent = "Lv " + getLevel(state, "mining");
+  byId("command-readout").textContent = getCommandUsed(state) + "/" + getCommandCapacity(state);
 
   // "1 ship" / "2 ships" in the panel corners
   const count = state.ships.length + (state.ships.length === 1 ? " ship" : " ships");
@@ -432,19 +548,33 @@ function renderStatusStrip(state, now) {
 }
 
 
-// Each ship: its card on Command and its row on Ships
+// Each ship's card on the Command screen
 function renderFleet(state, now) {
   for (const ship of state.ships) {
     const card = byId("ship-" + ship.id);
-    const row = byId("owned-" + ship.id);
-    if (!card || !row) continue;   // (not built yet - skip this time)
+    if (!card) continue;   // (not built yet - skip this time)
 
     const job = getJobForShip(state, ship.id);
-    const fieldName = FIELDS[DEFAULT_FIELD].name;
+
+    // A busy ship shows where it's actually going; a docked one
+    // shows where it WILL go.
+    const fieldId = job ? job.fieldId : ship.destination;
+    const fieldName = FIELDS[fieldId].name;
+    part(card, "route-field").textContent = fieldName;
+
+    // Destination buttons: highlight the chosen one, lock the
+    // fields not yet unlocked, and freeze them all mid-trip.
+    for (const destButton of part(card, "dest").querySelectorAll(".dest-btn")) {
+      const id = destButton.dataset.field;
+      const unlocked = isFieldUnlocked(state, id);
+      destButton.classList.toggle("selected", id === fieldId);
+      destButton.classList.toggle("locked", !unlocked);
+      destButton.disabled = !unlocked || Boolean(job);
+    }
 
     // Segment widths: from the running job, or (when docked)
     // from the trip this ship WOULD make, as a preview.
-    const timing = job || getTripPlan(ship.type, DEFAULT_FIELD);
+    const timing = job || getTripPlan(ship.type, fieldId);
     part(card, "seg-out").style.flexGrow = timing.outboundMs;
     part(card, "seg-mine").style.flexGrow = timing.miningMs;
     part(card, "seg-back").style.flexGrow = timing.returnMs;
@@ -469,17 +599,91 @@ function renderFleet(state, now) {
       if (phase.phase === "returning") text = `Returning home — docks in ${timeLeft}`;
 
       status.textContent = text;
-      part(row, "status").textContent = PHASE_LABELS[phase.phase] + " · " + timeLeft;
       button.textContent = "Recall";
       card.classList.add("busy", "phase-" + phase.phase);
-      row.classList.add("busy");
     } else {
       fills.forEach((fill) => { fill.style.width = "0%"; });
       status.textContent = "Docked at home — awaiting orders";
-      part(row, "status").textContent = "Docked at home";
       button.textContent = "Dispatch to " + fieldName;
-      row.classList.remove("busy");
     }
+  }
+}
+
+
+// Each ship's row on the Ships screen
+function renderOwnedList(state) {
+  const now = Date.now();
+  for (const ship of state.ships) {
+    const row = byId("owned-" + ship.id);
+    if (!row) continue;
+
+    const job = getJobForShip(state, ship.id);
+    if (job) {
+      const phase = getJobPhase(job, now);
+      part(row, "status").textContent =
+        PHASE_LABELS[phase.phase] + " · " + FIELDS[job.fieldId].name + " · " + formatDuration(phase.msLeftInPhase);
+    } else {
+      part(row, "status").textContent = "Docked at home";
+    }
+    row.classList.toggle("busy", Boolean(job));
+
+    // Dim field rows the player can't use yet
+    for (const fieldRow of row.querySelectorAll("tr[data-field]")) {
+      fieldRow.classList.toggle("locked", !isFieldUnlocked(state, fieldRow.dataset.field));
+    }
+
+    // The Sell button and the note under it
+    const sellButton = part(row, "sell");
+    const note = part(row, "sell-note");
+    const check = canSellShip(state, ship.id);
+    sellButton.disabled = !check.ok;
+    if (!isArmed(sellButton)) {
+      sellButton.textContent = "Sell — " + formatNumber(getSellValue(ship.type)) + " cr";
+    }
+    if (check.reason === "Last ship") note.textContent = "Can't sell your last ship.";
+    else if (check.reason === "Ship is busy") note.textContent = "Recall or wait for it to dock to sell.";
+    else note.textContent = "Frees " + getShipPoints(ship.type) + " command point" + (getShipPoints(ship.type) === 1 ? "" : "s") + ".";
+  }
+}
+
+
+// The Fleet command panel on the Ships screen
+function renderCommand(state) {
+  const used = getCommandUsed(state);
+  const cap = getCommandCapacity(state);
+  byId("command-used").textContent = used;
+  byId("command-cap").textContent = cap;
+
+  // One pip per point of capacity; filled ones are in use.
+  // Only rebuild when the numbers change (not 4 times a second).
+  const pips = byId("command-pips");
+  const key = used + "/" + cap;
+  if (pips.dataset.key !== key) {
+    pips.dataset.key = key;
+    pips.innerHTML = "";
+    const shown = Math.max(used, cap);   // over the cap? show the extra too
+    for (let i = 0; i < shown; i++) {
+      const pip = document.createElement("span");
+      pip.className = "pip";
+      if (i < used) pip.classList.add("used");
+      if (i >= cap) pip.classList.add("over");
+      pips.appendChild(pip);
+    }
+  }
+
+  const cost = getNextUpgradeCost(state);
+  const button = byId("command-upgrade");
+  const note = byId("command-note");
+  if (cost === null) {
+    button.disabled = true;
+    button.textContent = "Fully expanded";
+    note.textContent = "Command is at its maximum.";
+  } else {
+    button.disabled = !canBuyUpgrade(state).ok;
+    button.textContent = `Expand command +${COMMAND.pointsPerUpgrade} — ${formatNumber(cost)} cr`;
+    note.textContent = used > cap
+      ? `Over capacity by ${used - cap}: you keep these ships, but can't buy more until you expand or sell.`
+      : `${cap - used} point${cap - used === 1 ? "" : "s"} free. Upgrade ${state.commandUpgrades + 1} of ${COMMAND.maxUpgrades}.`;
   }
 }
 
@@ -502,39 +706,44 @@ function renderShipyard(state) {
     const check = canBuyShip(state, typeId);
     card.classList.toggle("locked", !unlocked);
 
+    // Dim field rows the player can't use yet
+    for (const fieldRow of card.querySelectorAll("tr[data-field]")) {
+      fieldRow.classList.toggle("locked", !isFieldUnlocked(state, fieldRow.dataset.field));
+    }
+
     // Pick the tag, note and button text for each situation.
     if (shipType.cost === null) {
       tag.textContent = "Starter";
       note.textContent = "Your first barge. Not sold at this yard.";
       button.hidden = true;
-    } else if (!unlocked) {
+      continue;
+    }
+
+    button.hidden = false;
+    button.disabled = !check.ok;
+    button.textContent = `Buy — ${formatNumber(shipType.cost)} cr`;
+
+    if (check.reason === "Locked") {
       const skillName = SKILLS[shipType.skill].name;
-      const level = getLevel(state, shipType.skill);
       tag.textContent = "Locked";
-      note.textContent = `Reach ${skillName} level ${shipType.unlockLevel} to unlock (you're level ${level}).`;
-      button.hidden = false;
-      button.disabled = true;
-      button.textContent = `Buy — ${formatNumber(shipType.cost)} cr`;
+      note.textContent = `Reach ${skillName} level ${shipType.unlockLevel} to unlock (you're level ${getLevel(state, shipType.skill)}).`;
+    } else if (check.reason === "Not enough command points") {
+      tag.textContent = "Available";
+      note.textContent = `Needs ${getShipPoints(typeId)} command points; you have ${getCommandCapacity(state) - getCommandUsed(state)} free. Expand command or sell a ship.`;
+    } else if (check.reason === "Not enough credits") {
+      tag.textContent = "Available";
+      note.textContent = `Need ${formatNumber(shipType.cost - state.credits)} more cr.`;
     } else {
       tag.textContent = "Available";
-      button.hidden = false;
-      button.disabled = !check.ok;
-      button.textContent = `Buy — ${formatNumber(shipType.cost)} cr`;
-
-      if (check.ok) {
-        note.textContent = "Ready to buy. New ships dock at home, awaiting orders.";
-        anythingToBuy = true;
-      } else {
-        const shortBy = shipType.cost - state.credits;
-        note.textContent = `Need ${formatNumber(shortBy)} more cr.`;
-      }
+      note.textContent = "Ready to buy. New ships dock at home, awaiting orders.";
+      anythingToBuy = true;
     }
   }
 
-  // Light up the Ships nav button when something can be bought,
-  // so the player notices without having to check.
+  // Light up the Ships nav button when something can be bought
+  // (a ship or a command upgrade), so the player notices.
   const shipsNav = document.querySelector('.nav-btn[data-screen="ships"]');
-  shipsNav.classList.toggle("has-alert", anythingToBuy);
+  shipsNav.classList.toggle("has-alert", anythingToBuy || canBuyUpgrade(state).ok);
 }
 
 
@@ -557,7 +766,10 @@ function renderSkills(state) {
 
     // Mark each unlock as done or still to come.
     for (const line of card.querySelectorAll("[data-unlock]")) {
-      const unlocked = isShipTypeUnlocked(state, line.dataset.unlock);
+      // The key is "ship:excavator" or "field:outer_belt";
+      // .split(":") breaks it into its two halves.
+      const [kind, id] = line.dataset.unlock.split(":");
+      const unlocked = kind === "ship" ? isShipTypeUnlocked(state, id) : isFieldUnlocked(state, id);
       line.classList.toggle("unlocked", unlocked);
       part(line, "state").textContent = unlocked ? "Unlocked" : "Locked";
     }
@@ -575,7 +787,7 @@ function renderSkills(state) {
 // "kind" picks a coloured tag at the start of the line, so
 // different events are easy to tell apart:
 //   "trip"   a ship came home        "trade"  something sold
-//   "level"  a level-up or unlock    "fleet"  ship bought / recalled
+//   "level"  a level-up or unlock    "fleet"  ships and command
 //   "system" anything else
 // -------------------------------------------------------------
 const LOG_TAGS = {
