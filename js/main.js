@@ -13,9 +13,9 @@
 //   5. Start autosaving.
 // =============================================================
 
-import { RULES, ITEMS, FIELDS, SHIP_TYPES, SKILLS } from "../data/content.js";
+import { RULES, ITEMS, FIELDS, SHIP_TYPES, SKILLS, HUB, HAUL_MODES } from "../data/content.js";
 import { createNewGame, findShip } from "./state.js";
-import { startMiningJob, cancelJob, getJobForShip, processJobs } from "./jobs.js";
+import { startMiningJob, startHaulJob, cancelJob, getJobForShip, processJobs } from "./jobs.js";
 import { sellAll, sellEverything } from "./trade.js";
 import { buyShip, sellShip } from "./shipyard.js";
 import { buyUpgrade, getCommandCapacity } from "./command.js";
@@ -61,9 +61,20 @@ const actions = {
 
   dispatchShip(shipId) {
     const ship = findShip(state, shipId);
-    const job = startMiningJob(state, shipId, ship.destination, Date.now());
-    if (job) {
-      addLog(`${ship.name} departs for ${FIELDS[ship.destination].name}.`, "fleet");
+
+    // Freighters go on hub runs; everything else goes mining.
+    if (SHIP_TYPES[ship.type].role === "freight") {
+      const job = startHaulJob(state, shipId, Date.now());
+      if (job && job.status === "travelling") {
+        addLog(`${ship.name} loads ${describeCargo(job.cargo)} and departs for the ${HUB.name.toLowerCase()}.`, "fleet");
+      } else if (job) {
+        addLog(`${ship.name} starts hub runs. Waiting at the dock for ore to load.`, "fleet");
+      }
+    } else {
+      const job = startMiningJob(state, shipId, ship.destination, Date.now());
+      if (job) {
+        addLog(`${ship.name} departs for ${FIELDS[ship.destination].name}.`, "fleet");
+      }
     }
     refresh();
   },
@@ -71,9 +82,27 @@ const actions = {
   recallShip(shipId) {
     const job = getJobForShip(state, shipId);
     if (job) {
+      // Note the cargo BEFORE cancelling (cancelling empties it).
+      const unsoldCargo = job.type === "haul" && job.cargo && !job.sold;
       cancelJob(state, job.id);
-      addLog(`${findShip(state, shipId).name} recalled. Partial cargo dumped.`, "fleet");
+      const name = findShip(state, shipId).name;
+      if (job.type === "haul") {
+        addLog(unsoldCargo
+          ? `${name} recalled. Its cargo goes back into the home hold.`
+          : `${name} recalled and stood down.`, "fleet");
+      } else {
+        addLog(`${name} recalled. Partial cargo dumped.`, "fleet");
+      }
     }
+    refresh();
+  },
+
+  // Full loads or constant runs - can be changed any time; the
+  // freighter uses the new setting the next time it loads.
+  setHaulMode(shipId, mode) {
+    const ship = findShip(state, shipId);
+    if (!ship || !HAUL_MODES[mode]) return;
+    ship.haulMode = mode;
     refresh();
   },
 
@@ -143,10 +172,13 @@ function tick() {
   // Finish any trips that are due and log what came back.
   const results = processJobs(state, now);
   for (const result of results) {
-    if (!result.itemId) continue;   // skip anything that produced nothing
     const ship = findShip(state, result.shipId);
-    const itemName = ITEMS[result.itemId].name.toLowerCase();
-    addLog(`${ship.name} docked with ${result.amount} ${itemName} (+${result.xpGained} ${SKILLS[result.skillId].name} XP).`, "trip");
+    if (result.kind === "mining") {
+      const itemName = ITEMS[result.itemId].name.toLowerCase();
+      addLog(`${ship.name} docked with ${result.amount} ${itemName} (+${formatXp(result.xpGained)} Mining XP).`, "trip");
+    } else if (result.kind === "haul") {
+      addLog(`${ship.name} sold ${describeCargo(result.cargo)} at the ${HUB.name.toLowerCase()} for ${formatNumber(result.credits)} cr (+${formatXp(result.xpGained)} Trade XP).`, "trade");
+    }
     logLevelUps(result.skillId, result.newLevels);
   }
 
@@ -158,6 +190,18 @@ function tick() {
 function refresh() {
   render(state, Date.now());
   saveGame(state);
+}
+
+
+// -------------------------------------------------------------
+// describeCargo(cargo)
+// { nickel_ore: 20, iron_ore: 40 } -> "20 nickel ore and 40 iron ore"
+// -------------------------------------------------------------
+function describeCargo(cargo) {
+  const parts = Object.entries(cargo).map(
+    ([itemId, amount]) => `${formatNumber(amount)} ${ITEMS[itemId].name.toLowerCase()}`
+  );
+  return parts.join(" and ");
 }
 
 
@@ -196,21 +240,31 @@ function reportOfflineProgress(report) {
     message += ` (Only ${RULES.offlineCapHours}h counted.)`;
   }
 
-  // Add up everything gained while away, item by item.
-  const gained = {};   // e.g. { iron_ore: 240, nickel_ore: 36 }
-  let totalXp = 0;
+  // Add up everything gained while away.
+  const mined = {};      // ore brought home, e.g. { iron_ore: 240 }
+  let miningXp = 0;
+  const hauled = {};     // ore sold at the hub
+  let hubCredits = 0;
+  let tradeXp = 0;
+
   for (const result of report.results) {
-    if (!result.itemId) continue;
-    gained[result.itemId] = (gained[result.itemId] || 0) + result.amount;
-    totalXp += result.xpGained;
+    if (result.kind === "mining") {
+      mined[result.itemId] = (mined[result.itemId] || 0) + result.amount;
+      miningXp += result.xpGained;
+    } else if (result.kind === "haul") {
+      for (const [itemId, amount] of Object.entries(result.cargo)) {
+        hauled[itemId] = (hauled[itemId] || 0) + amount;
+      }
+      hubCredits += result.credits;
+      tradeXp += result.xpGained;
+    }
   }
 
-  // Turn it into words: "240 iron ore and 36 nickel ore"
-  const parts = Object.entries(gained).map(
-    ([itemId, amount]) => `${formatNumber(amount)} ${ITEMS[itemId].name.toLowerCase()}`
-  );
-  if (parts.length > 0) {
-    message += ` Your fleet brought back ${parts.join(" and ")}, earning ${formatNumber(totalXp)} Mining XP.`;
+  if (Object.keys(mined).length > 0) {
+    message += ` Your barges brought back ${describeCargo(mined)}, earning ${formatXp(miningXp)} Mining XP.`;
+  }
+  if (Object.keys(hauled).length > 0) {
+    message += ` Your freighters sold ${describeCargo(hauled)} at the ${HUB.name.toLowerCase()} for ${formatNumber(hubCredits)} cr, earning ${formatXp(tradeXp)} Trade XP.`;
   }
   addLog(message, "system");
 

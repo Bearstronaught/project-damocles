@@ -22,7 +22,7 @@
 import assert from "node:assert/strict";
 import { SHIP_TYPES, ITEMS, COMMAND } from "../data/content.js";
 import { createNewGame } from "../js/state.js";
-import { startMiningJob, processJobs, cancelJob, getJobProgress, getJobPhase, getTripPlan } from "../js/jobs.js";
+import { startMiningJob, startHaulJob, processJobs, cancelJob, getJobProgress, getJobPhase, getTripPlan, getHaulPlan, loadCargo } from "../js/jobs.js";
 import { sellAll, sellEverything, getCargoValue, sellAtHub, getTradeXp, getPrice } from "../js/trade.js";
 import { parseSave, applyOfflineProgress } from "../js/save.js";
 import { XP_TABLE, getLevelForXp, getLevel, getLevelProgress, addXp, isShipTypeUnlocked, MAX_LEVEL } from "../js/skills.js";
@@ -31,7 +31,8 @@ import { getCommandCapacity, getCommandUsed, getNextUpgradeCost, buyUpgrade } fr
 import { isFieldUnlocked } from "../js/skills.js";
 
 const SECOND = 1000;                 // milliseconds in a second
-const HOUR = 60 * 60 * SECOND;
+const MINUTE = 60 * SECOND;
+const HOUR = 60 * MINUTE;
 const START = 1_000_000_000_000;     // a fixed pretend "start" time
 
 // The two ships' trips to the Inner Belt, straight from the data.
@@ -700,6 +701,247 @@ test("A version 4 save gains the Trade skill at 0 XP, keeping its Mining XP", ()
   assert.equal(state.version, 5);
   assert.deepEqual(state.skills, { mining: { xp: 900 }, trade: { xp: 0 } });
   assert.equal(state.credits, 1200);
+});
+
+// =============================================================
+// HAULING (the Courier)
+// =============================================================
+
+const HAUL = getHaulPlan("courier");   // one Courier hub run
+
+// A game at Trade 3 that owns a Courier as ship-2, docked.
+function gameWithCourier(mode = "full") {
+  const state = createNewGame();
+  state.skills.trade.xp = XP_TABLE[3];
+  state.credits = SHIP_TYPES.courier.cost;
+  const courier = buyShip(state, "courier");
+  courier.haulMode = mode;
+  return state;
+}
+
+test("The Courier is locked until Trade 3, then costs 2,500 cr", () => {
+  const state = createNewGame();
+  state.credits = 1_000_000;
+  state.skills.trade.xp = XP_TABLE[3] - 1;
+  assert.deepEqual(canBuyShip(state, "courier"), { ok: false, reason: "Locked" });
+  state.skills.trade.xp = XP_TABLE[3];
+  const ship = buyShip(state, "courier");
+  assert.equal(state.credits, 1_000_000 - 2500);
+  assert.equal(ship.haulMode, "full");           // starts on full loads
+  assert.equal(ship.destination, undefined);     // freighters don't mine
+});
+
+test("Hub run: 3m out, 30s trading, 3m back = 6m 30s, 60 unit hold", () => {
+  assert.equal(HAUL.outboundMs, 180 * SECOND);
+  assert.equal(HAUL.tradeMs, 30 * SECOND);
+  assert.equal(HAUL.durationMs, 390 * SECOND);
+  assert.equal(HAUL.capacity, 60);
+});
+
+test("A Courier can't mine, and a barge can't haul", () => {
+  const state = gameWithCourier();
+  assert.equal(startMiningJob(state, "ship-2", "inner_belt", START), null);
+  assert.equal(startHaulJob(state, "ship-1", START), null);
+});
+
+test("Full loads: with 59 ore the Courier waits; at 60 it leaves", () => {
+  const state = gameWithCourier("full");
+  state.inventory.iron_ore = 59;
+  const job = startHaulJob(state, "ship-2", START);
+  assert.equal(job.status, "waiting");
+  assert.equal(state.inventory.iron_ore, 59);    // nothing loaded
+
+  state.inventory.iron_ore = 60;
+  processJobs(state, START + SECOND);
+  assert.equal(job.status, "travelling");
+  assert.deepEqual(job.cargo, { iron_ore: 60 });
+  assert.equal(state.inventory.iron_ore, 0);
+});
+
+test("Loading takes the most valuable ore first (nickel before iron)", () => {
+  const state = createNewGame();
+  state.inventory.iron_ore = 100;
+  state.inventory.nickel_ore = 25;
+  const cargo = loadCargo(state, 60, "full");
+  assert.deepEqual(cargo, { nickel_ore: 25, iron_ore: 35 });
+  assert.equal(state.inventory.nickel_ore, 0);
+  assert.equal(state.inventory.iron_ore, 65);
+});
+
+test("Constant runs: leaves with whatever there is (5 units)", () => {
+  const state = gameWithCourier("constant");
+  state.inventory.iron_ore = 5;
+  const job = startHaulJob(state, "ship-2", START);
+  assert.equal(job.status, "travelling");
+  assert.deepEqual(job.cargo, { iron_ore: 5 });
+});
+
+test("Constant runs still wait when the hold is empty", () => {
+  const state = gameWithCourier("constant");
+  const job = startHaulJob(state, "ship-2", START);
+  assert.equal(job.status, "waiting");
+});
+
+test("Paid at the END of trading: 480 cr and 108 Trade XP for 60 iron", () => {
+  const state = gameWithCourier();
+  state.inventory.iron_ore = 60;
+  startHaulJob(state, "ship-2", START);
+  const tradeXpBefore = state.skills.trade.xp;
+
+  processJobs(state, START + HAUL.outboundMs + HAUL.tradeMs - 1);
+  assert.equal(state.credits, 0);                // still selling
+
+  const results = processJobs(state, START + HAUL.outboundMs + HAUL.tradeMs);
+  assert.equal(state.credits, 480);
+  assert.equal(state.skills.trade.xp - tradeXpBefore, 108);
+  assert.equal(results[0].kind, "haul");
+  assert.deepEqual(results[0].cargo, { iron_ore: 60 });
+});
+
+test("Phases read outbound, trading, returning, then waiting at home", () => {
+  const state = gameWithCourier();
+  state.inventory.iron_ore = 60;
+  const job = startHaulJob(state, "ship-2", START);
+  assert.equal(getJobPhase(job, START + 1).phase, "outbound");
+  assert.equal(getJobPhase(job, START + HAUL.outboundMs + 1).phase, "trading");
+  assert.equal(getJobPhase(job, START + HAUL.outboundMs + HAUL.tradeMs + 1).phase, "returning");
+
+  processJobs(state, START + HAUL.durationMs);   // docks, hold empty
+  assert.equal(job.status, "waiting");
+  assert.equal(getJobPhase(job, START + HAUL.durationMs).phase, "waiting");
+  assert.equal(getJobProgress(job, START + HAUL.durationMs), 0);
+});
+
+test("Back home, it reloads and leaves straight away if ore is waiting", () => {
+  const state = gameWithCourier();
+  state.inventory.iron_ore = 120;                // two loads
+  const job = startHaulJob(state, "ship-2", START);
+  processJobs(state, START + HAUL.durationMs);
+  assert.equal(job.status, "travelling");
+  assert.equal(job.startedAt, START + HAUL.durationMs);
+  assert.equal(state.inventory.iron_ore, 0);
+});
+
+test("Recall before selling puts the cargo back in the home hold", () => {
+  const state = gameWithCourier();
+  state.inventory.iron_ore = 60;
+  const job = startHaulJob(state, "ship-2", START);
+  cancelJob(state, job.id);
+  assert.equal(state.inventory.iron_ore, 60);
+  assert.equal(state.jobs.length, 0);
+});
+
+test("Recall after selling keeps the money and returns nothing", () => {
+  const state = gameWithCourier();
+  state.inventory.iron_ore = 60;
+  const job = startHaulJob(state, "ship-2", START);
+  processJobs(state, START + HAUL.outboundMs + HAUL.tradeMs);   // sold
+  cancelJob(state, job.id);
+  assert.equal(state.credits, 480);
+  assert.equal(state.inventory.iron_ore, 0);
+});
+
+test("Switching a waiting Courier to constant runs sends it off", () => {
+  const state = gameWithCourier("full");
+  state.inventory.iron_ore = 10;
+  const job = startHaulJob(state, "ship-2", START);
+  assert.equal(job.status, "waiting");
+  state.ships[1].haulMode = "constant";
+  processJobs(state, START + SECOND);
+  assert.equal(job.status, "travelling");
+  assert.deepEqual(job.cargo, { iron_ore: 10 });
+});
+
+test("Two Couriers waiting for ore: the one bought first loads first", () => {
+  const state = gameWithCourier("full");
+  state.credits = SHIP_TYPES.courier.cost;
+  buyShip(state, "courier");                     // ship-3
+  const first = startHaulJob(state, "ship-2", START);
+  const second = startHaulJob(state, "ship-3", START);
+  state.inventory.iron_ore = 60;                 // only one load
+  processJobs(state, START + SECOND);
+  assert.equal(first.status, "travelling");
+  assert.equal(second.status, "waiting");
+});
+
+test("In time order: a full-load Courier leaves on the 5th Prospector trip", () => {
+  // One Prospector brings 12 iron every 2m 30s, so the 60 units
+  // for a full load are home after exactly 5 trips (12m 30s).
+  const state = gameWithCourier("full");
+  startMiningJob(state, "ship-1", "inner_belt", START);
+  const haul = startHaulJob(state, "ship-2", START);
+
+  processJobs(state, START + TRIP * 5 - 1);
+  assert.equal(haul.status, "waiting");
+
+  // One jump to a minute after that: it must have left at
+  // 12m 30s exactly, not at the end of the jump.
+  processJobs(state, START + TRIP * 5 + MINUTE);
+  assert.equal(haul.startedAt, START + TRIP * 5);
+
+  // One jump to 30 minutes: by then it has sold, come home
+  // (19m), waited, and left again with the next 60 units -
+  // ready on the 10th Prospector trip, at 25m exactly.
+  processJobs(state, START + 30 * MINUTE);
+  assert.equal(haul.startedAt, START + TRIP * 10);
+});
+
+test("Barges + Courier: ticking for 2 hours equals one 2-hour jump", () => {
+  // The big one: this is what makes offline hauling fair.
+  const setup = () => {
+    const state = gameWithCourier("full");
+    state.credits = SHIP_TYPES.prospector.cost * 2;
+    buyShip(state, "prospector");                // ship-3
+    buyShip(state, "prospector");                // ship-4
+    startMiningJob(state, "ship-1", "inner_belt", START);
+    startMiningJob(state, "ship-3", "inner_belt", START + 7 * SECOND);
+    startMiningJob(state, "ship-4", "inner_belt", START + 61 * SECOND);
+    startHaulJob(state, "ship-2", START);
+    return state;
+  };
+  const ticking = setup();
+  const jumping = setup();
+
+  for (let t = 0; t <= 2 * HOUR; t += 250) {
+    processJobs(ticking, START + t);
+  }
+  processJobs(jumping, START + 2 * HOUR);
+
+  assert.equal(ticking.credits, jumping.credits);
+  assert.equal(ticking.inventory.iron_ore, jumping.inventory.iron_ore);
+  assert.equal(ticking.skills.trade.xp, jumping.skills.trade.xp);
+  assert.equal(ticking.skills.mining.xp, jumping.skills.mining.xp);
+  assert.deepEqual(ticking.jobs, jumping.jobs);
+  assert.ok(jumping.credits > 0, "the Courier should have sold something");
+});
+
+test("Offline: an hour away with a barge and a Courier sells at the hub", () => {
+  const state = gameWithCourier("full");
+  startMiningJob(state, "ship-1", "inner_belt", START);
+  startHaulJob(state, "ship-2", START);
+  state.lastSavedAt = START;
+  const report = applyOfflineProgress(state, START + HOUR);
+  const haul = report.results.find((r) => r.kind === "haul");
+  // 24 Prospector trips = 288 iron. Full loads leave at 12m 30s,
+  // 25m, 37m 30s and 50m. Each sells 3m 30s after leaving, so
+  // the 4th sells at 53m 30s - inside the hour. 4 x 60 = 240.
+  assert.equal(haul.units, 240);
+  assert.equal(haul.credits, 240 * 8);
+  assert.equal(haul.trips, 4);
+  assert.equal(state.inventory.iron_ore, 288 - 240);   // 48 still at home
+});
+
+test("With 3 Prospectors, a Courier earns more than a 4th Prospector would", () => {
+  // Same command point, two ways to spend it.
+  const ironPerHour = 3 * PROSPECTOR.orePerTrip * (HOUR / TRIP);    // 864
+  const courierGain = ironPerHour * (ITEMS.iron_ore.hubPrice - ITEMS.iron_ore.sellPrice);
+  const fourthProspector = PROSPECTOR.orePerTrip * (HOUR / TRIP) * ITEMS.iron_ore.sellPrice;
+  const runsNeeded = ironPerHour / HAUL.capacity;                    // 14.4 per hour
+  const runsPossible = HOUR / HAUL.durationMs;                        // 9.2 per hour
+  assert.ok(courierGain > fourthProspector, `${courierGain} vs ${fourthProspector}`);
+  // ...but one Courier can't keep up with 3 Prospectors' ore
+  // alone, so a second Courier (or a Hauler) has a real job too.
+  assert.ok(runsNeeded > runsPossible);
 });
 
 // -------------------------------------------------------------

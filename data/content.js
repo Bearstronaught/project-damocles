@@ -95,6 +95,10 @@ export const SELL_RATE = 0.5;
 // A ship TYPE is like a blueprint. Each actual ship the player
 // owns (in state.js) points at one of these by its ID.
 //
+// role says what kind of work the ship does:
+//   "mining"   flies to asteroid fields and brings ore home
+//   "freight"  hauls ore from home to the merchant hub and sells it
+//
 // The three working stats decide how long a mining trip takes:
 //   cargoCapacity  units of ore the hold carries home per trip
 //   miningRate     units mined per minute at the field
@@ -102,6 +106,8 @@ export const SELL_RATE = 0.5;
 //                  with a slow drill spends longer at the rock)
 //   speed          how fast the drive is, as a multiplier:
 //                  1.0 = normal, 0.75 = takes a third longer
+// (Freighters have no drill, so no miningRate. Their
+//  cargoCapacity is how much ore they haul per trip.)
 //
 // And the shipyard details:
 //   size           hull size, from HULL_SIZES (sets command points)
@@ -114,6 +120,7 @@ export const SELL_RATE = 0.5;
 export const SHIP_TYPES = {
   prospector: {
     name: "Prospector-class barge",
+    role: "mining",
     description: "Small, quick and cheap to run. Your first barge, and a cheap way to grow the fleet early on.",
     cargoCapacity: 12,
     miningRate: 12,
@@ -126,6 +133,7 @@ export const SHIP_TYPES = {
   },
   excavator: {
     name: "Excavator-class barge",
+    role: "mining",
     description: "Heavy hauler with twin drill heads. Slow to get there, but brings back over three times the ore.",
     cargoCapacity: 40,
     miningRate: 20,
@@ -135,6 +143,18 @@ export const SHIP_TYPES = {
     unlockLevel: 10,
     cost: 3000,
     art: "hull_excavator",
+  },
+  courier: {
+    name: "Courier-class freighter",
+    role: "freight",
+    description: "Small, quick freighter. Hauls ore to the merchant hub for better prices and bonus Trade XP.",
+    cargoCapacity: 60,
+    speed: 1.0,
+    size: "small",
+    skill: "trade",
+    unlockLevel: 3,
+    cost: 2500,
+    art: "hull_courier",
   },
 };
 
@@ -195,11 +215,22 @@ export const TRADE = {
 // THE MERCHANT HUB: where freighters sell for better prices.
 // The name is a placeholder until the lore names it.
 //   travelSeconds  one way, for a ship with speed 1.0
-//                  (used by freighters, coming next)
+//   tradeSeconds   time spent docked at the hub, selling
 export const HUB = {
   name: "Merchant hub",
   description: "A busy trading post a few minutes' flight from home. Pays well for ore you bring in.",
   travelSeconds: 180,
+  tradeSeconds: 30,
+};
+
+// HAUL MODES: how a freighter decides when to leave home.
+//   full      waits until it can fill its whole hold
+//   constant  leaves as soon as there's any ore, with whatever
+//             is there (it still waits if the hold is empty -
+//             flying to the hub with nothing to sell is pointless)
+export const HAUL_MODES = {
+  full: { name: "Full loads" },
+  constant: { name: "Constant runs" },
 };
 
 

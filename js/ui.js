@@ -17,12 +17,12 @@
 // flicker and sometimes swallow clicks.)
 // =============================================================
 
-import { ITEMS, SHIP_TYPES, FIELDS, SKILLS, HULL_SIZES, COMMAND, HUB } from "../data/content.js";
-import { getJobForShip, getJobPhase, getTripPlan } from "./jobs.js";
+import { ITEMS, SHIP_TYPES, FIELDS, SKILLS, HULL_SIZES, COMMAND, HUB, HAUL_MODES } from "../data/content.js";
+import { getJobForShip, getJobPhase, getTripPlan, getHaulPlan, getOreInHold } from "./jobs.js";
 import { getLevel, getLevelProgress, isShipTypeUnlocked, isFieldUnlocked } from "./skills.js";
 import { canBuyShip, canSellShip, getSellValue } from "./shipyard.js";
 import { getShipPoints, getCommandCapacity, getCommandUsed, getNextUpgradeCost, canBuyUpgrade } from "./command.js";
-import { getCargoValue } from "./trade.js";
+import { getCargoValue, getTradeXp } from "./trade.js";
 import { getSchematic } from "./art.js";
 
 // The screens that exist, in nav order. The first is the default.
@@ -32,7 +32,9 @@ const SCREENS = ["command", "ships", "skills"];
 const PHASE_LABELS = {
   outbound: "Outbound",
   mining: "Mining",
+  trading: "Trading",
   returning: "Returning",
+  waiting: "Waiting for cargo",
 };
 
 
@@ -194,6 +196,9 @@ function setupResetButton(actions) {
 // -------------------------------------------------------------
 function statsList(typeId) {
   const shipType = SHIP_TYPES[typeId];
+  if (shipType.role === "freight") {
+    return freighterStats(typeId);
+  }
   const sizeName = HULL_SIZES[shipType.size].name;
 
   // One row per field: trip length, income and XP per hour.
@@ -234,8 +239,51 @@ function statsList(typeId) {
 
 
 // -------------------------------------------------------------
+// freighterStats(typeId)
+// A freighter's stat block: its hull, then what ONE full run to
+// the hub earns for each kind of ore, compared with selling the
+// same load at home.
+// -------------------------------------------------------------
+function freighterStats(typeId) {
+  const shipType = SHIP_TYPES[typeId];
+  const sizeName = HULL_SIZES[shipType.size].name;
+  const plan = getHaulPlan(typeId);
+
+  const oreRows = Object.entries(ITEMS).map(([itemId, item]) => {
+    const hubCredits = plan.capacity * item.hubPrice;
+    const homeCredits = plan.capacity * item.sellPrice;
+    return `
+      <tr>
+        <td>${item.name}</td>
+        <td class="stat-hot">${formatNumber(hubCredits)}</td>
+        <td>+${formatNumber(hubCredits - homeCredits)}</td>
+        <td>${formatXp(getTradeXp(hubCredits, plan.capacity))}</td>
+      </tr>
+    `;
+  }).join("");
+
+  return `
+    <div class="stat-block">
+      <dl class="stats">
+        <dt>Hull</dt>         <dd>${sizeName} · ${getShipPoints(typeId)} cmd pt${getShipPoints(typeId) === 1 ? "" : "s"}</dd>
+        <dt>Cargo hold</dt>   <dd>${shipType.cargoCapacity} units</dd>
+        <dt>Drive speed</dt>  <dd>${shipType.speed.toFixed(2)}×</dd>
+        <dt>Hub run</dt>      <dd>${formatDuration(plan.durationMs)} round trip</dd>
+      </dl>
+      <table class="trip-table">
+        <thead>
+          <tr><th>Full load of</th><th>cr</th><th>vs home</th><th>XP</th></tr>
+        </thead>
+        <tbody>${oreRows}</tbody>
+      </table>
+    </div>
+  `;
+}
+
+
+// -------------------------------------------------------------
 // routeTracker()
-// The three-part bar showing a trip: out, mine, back.
+// The three-part bar showing a trip: out, mine (or trade), back.
 // Each segment's width is set later to match how long that
 // phase takes, so a long mining stop LOOKS long.
 // -------------------------------------------------------------
@@ -271,6 +319,23 @@ function destinationPicker() {
   `).join("");
 
   return `<div class="dest-picker" data-part="dest">${buttons}</div>`;
+}
+
+
+// -------------------------------------------------------------
+// haulModePicker()
+// Two buttons for a freighter: wait for full loads, or run
+// constantly with whatever ore is in the hold.
+// (Same look as the destination buttons.)
+// -------------------------------------------------------------
+function haulModePicker() {
+  const buttons = Object.entries(HAUL_MODES).map(([modeId, mode]) => `
+    <button class="dest-btn" data-mode="${modeId}">
+      <span class="dest-name">${mode.name}</span>
+    </button>
+  `).join("");
+
+  return `<div class="dest-picker" data-part="modes">${buttons}</div>`;
 }
 
 
@@ -324,9 +389,16 @@ function buildFleetCards(state, actions) {
   for (const ship of state.ships) {
     const shipType = SHIP_TYPES[ship.type];
 
+    const isFreighter = shipType.role === "freight";
+
     const card = document.createElement("div");
     card.className = "ship-card";
     card.id = "ship-" + ship.id;
+
+    // Barges pick a field; freighters pick a haul mode.
+    // (Freighters have no drill, so their specs skip it.)
+    const picker = isFreighter ? haulModePicker() : destinationPicker();
+    const drill = isFreighter ? "" : ` · Drill <b>${shipType.miningRate}/min</b>`;
 
     // The card's layout. Parts we update later get a
     // "data-part" label so we can find them again.
@@ -337,24 +409,33 @@ function buildFleetCards(state, actions) {
           <span class="card-name">${ship.name}</span>
           <span class="card-sub">${shipType.name}</span>
         </div>
-        ${destinationPicker()}
+        ${picker}
         ${routeTracker()}
         <div class="ship-status" data-part="status">Idle</div>
         <div class="ship-specs">
-          Hold <b>${shipType.cargoCapacity}</b>
-          · Drill <b>${shipType.miningRate}/min</b>
+          Hold <b>${shipType.cargoCapacity}</b>${drill}
           · Drive <b>${shipType.speed.toFixed(2)}×</b>
         </div>
         <button class="btn" data-part="button">Dispatch</button>
       </div>
     `;
 
-    // Choosing a destination (only while docked: a ship can't
-    // change course mid-trip).
-    for (const destButton of part(card, "dest").querySelectorAll(".dest-btn")) {
-      destButton.addEventListener("click", () => {
-        actions.setDestination(ship.id, destButton.dataset.field);
-      });
+    if (isFreighter) {
+      // Choosing a haul mode (allowed any time; it's used the
+      // next time the freighter loads).
+      for (const modeButton of part(card, "modes").querySelectorAll(".dest-btn")) {
+        modeButton.addEventListener("click", () => {
+          actions.setHaulMode(ship.id, modeButton.dataset.mode);
+        });
+      }
+    } else {
+      // Choosing a destination (only while docked: a ship can't
+      // change course mid-trip).
+      for (const destButton of part(card, "dest").querySelectorAll(".dest-btn")) {
+        destButton.addEventListener("click", () => {
+          actions.setDestination(ship.id, destButton.dataset.field);
+        });
+      }
     }
 
     // When this ship's button is clicked, either send it out
@@ -564,6 +645,12 @@ function renderFleet(state, now) {
     const card = byId("ship-" + ship.id);
     if (!card) continue;   // (not built yet - skip this time)
 
+    // Freighters have their own card logic (below).
+    if (SHIP_TYPES[ship.type].role === "freight") {
+      renderFreighterCard(state, ship, card, now);
+      continue;
+    }
+
     const job = getJobForShip(state, ship.id);
 
     // A busy ship shows where it's actually going; a docked one
@@ -594,7 +681,7 @@ function renderFleet(state, now) {
     const button = part(card, "button");
 
     // Remove last frame's phase class before adding this one's.
-    card.classList.remove("phase-outbound", "phase-mining", "phase-returning", "busy");
+    card.classList.remove(...ALL_PHASE_CLASSES);
 
     if (job) {
       const phase = getJobPhase(job, now);
@@ -620,6 +707,72 @@ function renderFleet(state, now) {
 }
 
 
+// Every phase class a card can have, so each frame can clear
+// last frame's before adding the current one.
+const ALL_PHASE_CLASSES = ["phase-outbound", "phase-mining", "phase-trading",
+  "phase-returning", "phase-waiting", "busy"];
+
+
+// -------------------------------------------------------------
+// renderFreighterCard(state, ship, card, now)
+// A freighter's card: haul mode buttons, the Home -> Hub -> Home
+// tracker, and what it's doing.
+// -------------------------------------------------------------
+function renderFreighterCard(state, ship, card, now) {
+  const job = getJobForShip(state, ship.id);
+  const capacity = SHIP_TYPES[ship.type].cargoCapacity;
+  const mode = ship.haulMode || "full";
+
+  // Highlight the chosen haul mode.
+  for (const modeButton of part(card, "modes").querySelectorAll(".dest-btn")) {
+    modeButton.classList.toggle("selected", modeButton.dataset.mode === mode);
+  }
+
+  // The tracker's middle stop is the hub; its segments are
+  // sized from the job, or from a planned run while docked.
+  part(card, "route-field").textContent = HUB.name;
+  const timing = job || getHaulPlan(ship.type);
+  part(card, "seg-out").style.flexGrow = timing.outboundMs;
+  part(card, "seg-mine").style.flexGrow = timing.tradeMs;
+  part(card, "seg-back").style.flexGrow = timing.returnMs;
+
+  const fills = part(card, "route").querySelectorAll(".seg-fill");
+  const status = part(card, "status");
+  const button = part(card, "button");
+  card.classList.remove(...ALL_PHASE_CLASSES);
+
+  if (!job) {
+    fills.forEach((fill) => { fill.style.width = "0%"; });
+    status.textContent = "Docked at home — awaiting orders";
+    button.textContent = "Start hub runs";
+    return;
+  }
+
+  const phase = getJobPhase(job, now);
+  phase.fills.forEach((amount, i) => {
+    fills[i].style.width = (amount * 100) + "%";
+  });
+
+  const timeLeft = formatDuration(phase.msLeftInPhase);
+  const units = job.cargo ? Object.values(job.cargo).reduce((a, b) => a + b, 0) : 0;
+  let text;
+  if (phase.phase === "waiting") {
+    // Say what it's waiting for, so the player knows why it's idle.
+    const ore = getOreInHold(state);
+    text = mode === "full"
+      ? `Waiting for a full hold — ${Math.min(ore, capacity)}/${capacity} units ready`
+      : `Waiting for ore to load`;
+  }
+  if (phase.phase === "outbound") text = `Hauling ${units} units to the hub — arrives in ${timeLeft}`;
+  if (phase.phase === "trading") text = `Selling at the hub — done in ${timeLeft}`;
+  if (phase.phase === "returning") text = `Returning home — docks in ${timeLeft}`;
+
+  status.textContent = text;
+  button.textContent = "Recall";
+  card.classList.add("busy", "phase-" + phase.phase);
+}
+
+
 // Each ship's row on the Ships screen
 function renderOwnedList(state) {
   const now = Date.now();
@@ -630,8 +783,15 @@ function renderOwnedList(state) {
     const job = getJobForShip(state, ship.id);
     if (job) {
       const phase = getJobPhase(job, now);
-      part(row, "status").textContent =
-        PHASE_LABELS[phase.phase] + " · " + FIELDS[job.fieldId].name + " · " + formatDuration(phase.msLeftInPhase);
+      if (job.type === "haul") {
+        // e.g. "Trading · Merchant hub · 12s", or just "Waiting for cargo"
+        part(row, "status").textContent = phase.phase === "waiting"
+          ? PHASE_LABELS.waiting
+          : PHASE_LABELS[phase.phase] + " · " + HUB.name + " · " + formatDuration(phase.msLeftInPhase);
+      } else {
+        part(row, "status").textContent =
+          PHASE_LABELS[phase.phase] + " · " + FIELDS[job.fieldId].name + " · " + formatDuration(phase.msLeftInPhase);
+      }
     } else {
       part(row, "status").textContent = "Docked at home";
     }

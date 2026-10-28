@@ -59,8 +59,14 @@ export function buyShip(state, shipTypeId) {
     id: "ship-" + number,
     name: pickShipName(number),
     type: shipTypeId,
-    destination: "inner_belt",   // where it mines until told otherwise
   };
+
+  // What the ship does until told otherwise, by its role:
+  if (SHIP_TYPES[shipTypeId].role === "freight") {
+    ship.haulMode = "full";              // wait for a full hold
+  } else {
+    ship.destination = "inner_belt";     // mine the nearest field
+  }
 
   state.ships.push(ship);
   return ship;

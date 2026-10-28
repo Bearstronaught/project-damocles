@@ -71,6 +71,32 @@ const SCHEMATICS = {
       <polygon class="accent" points="116,24 132,30 116,36" />
       <polygon class="accent" points="116,44 132,50 116,56" />
     </svg>`,
+
+  // --- Courier: a spine with two rows of cargo pods clamped on
+  //     each side, cockpit at the nose, one engine at the back.
+  //     (Like the freighter builder: more rows = longer ship.) ---
+  hull_courier: `
+    <svg viewBox="0 0 140 80" class="schematic" aria-hidden="true">
+      <!-- drive flame -->
+      <polygon class="engine" points="16,35 2,40 16,45" />
+      <!-- engine block -->
+      <rect class="hull" x="16" y="30" width="14" height="20" />
+      <!-- the spine running down the middle -->
+      <rect class="hull" x="30" y="36" width="74" height="8" />
+      <!-- cargo pods: two rows, one either side of the spine -->
+      <rect class="accent" x="38" y="18" width="26" height="16" />
+      <rect class="accent" x="38" y="46" width="26" height="16" />
+      <rect class="accent" x="70" y="18" width="26" height="16" />
+      <rect class="accent" x="70" y="46" width="26" height="16" />
+      <!-- clamp arms holding the pods to the spine -->
+      <line class="detail" x1="51" y1="34" x2="51" y2="36" />
+      <line class="detail" x1="51" y1="44" x2="51" y2="46" />
+      <line class="detail" x1="83" y1="34" x2="83" y2="36" />
+      <line class="detail" x1="83" y1="44" x2="83" y2="46" />
+      <!-- cockpit at the nose -->
+      <polygon class="hull" points="104,32 122,34 130,40 122,46 104,48" />
+      <rect class="detail" x="112" y="37" width="8" height="6" />
+    </svg>`,
 };
 
 
