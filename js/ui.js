@@ -1022,10 +1022,14 @@ function buildStationHold(actions) {
       <td>${item.name}</td>
       <td data-part="amount">0 t</td>
       <td class="bond-cell">
-        <input class="batch-input bond-input" type="number" min="0" step="1"
-               aria-label="Tonnes of ${item.name.toLowerCase()} to bond" data-part="bond">
-        <button class="btn btn-small" data-part="bond-button">Bond</button>
-        <button class="btn btn-small" data-part="release">Release</button>
+        <!-- A wrapping box: on a narrow screen the buttons drop
+             below the number instead of spilling out of the panel -->
+        <div class="bond-controls">
+          <input class="batch-input bond-input" type="number" min="0" step="1"
+                 aria-label="Tonnes of ${item.name.toLowerCase()} to bond" data-part="bond">
+          <button class="btn btn-small" data-part="bond-button">Bond</button>
+          <button class="btn btn-small" data-part="release">Release</button>
+        </div>
       </td>
     `;
     const input = part(row, "bond");

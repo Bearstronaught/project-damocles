@@ -167,57 +167,52 @@
     </section>
 
     <!-- ===================== INDUSTRY SCREEN ===================== -->
-    <!-- Making things at Anvil Station: the refinery (ore into
-         metal) and the workshop (metal into products). -->
-    <section class="screen layout" data-screen="industry" hidden>
+    <!-- Making things at Anvil Station, laid out in ONE column that
+         follows the goods down the page (Dan, 29 Oct):
+           1. Refinery      ore from the hold -> metal
+           2. Workshop      metal -> products
+           3. Station hold  what you have, and your bonds
+           4. Upgrades      spend products to improve 1 and 2
+         ("layout-flow" makes it one column, each panel full width.) -->
+    <section class="screen layout layout-flow" data-screen="industry" hidden>
 
-      <!-- Refinery: turns ore from the hold into metal. One box
+      <!-- 1. Refinery: turns ore from the hold into metal. One box
            per slot (built by ui.js); locked slots show when they open. -->
       <div class="panel">
         <div class="panel-head">
-          <h2 class="panel-title">Refinery</h2>
+          <h2 class="panel-title"><span class="flow-step">1</span>Refinery</h2>
           <span class="panel-tag" id="refinery-tag"></span>
         </div>
+        <p class="flow-note">Ore from the hold → metal</p>
         <!-- While the refinery is closed, this says when it opens -->
         <p class="price-note" id="refinery-note"></p>
-        <div id="refinery-slots"></div>
+        <div id="refinery-slots" class="slot-grid"></div>
       </div>
 
-      <!-- Workshop: turns metal into products through WORK ORDERS.
+      <!-- 2. Workshop: turns metal into products through WORK ORDERS.
            Each slot works through a short queue, then goes idle.
            One box per slot (built by ui.js). -->
       <div class="panel">
         <div class="panel-head">
-          <h2 class="panel-title">Workshop</h2>
+          <h2 class="panel-title"><span class="flow-step">2</span>Workshop</h2>
           <span class="panel-tag" id="workshop-tag"></span>
         </div>
+        <p class="flow-note">Metal → components and assemblies</p>
         <!-- While the workshop is closed, this says when it opens -->
         <p class="price-note" id="workshop-note"></p>
-        <div id="workshop-slots"></div>
+        <div id="workshop-slots" class="slot-grid"></div>
       </div>
 
-      <!-- Upgrades for the refinery and workshop, paid in products
-           and credits. A <details> box opens and closes on a click.
-           Only owned upgrades and the next tier of each line are
-           listed (built by ui.js). -->
-      <details class="panel upgrades-panel" id="upgrades-panel" open>
-        <summary class="panel-head">
-          <h2 class="panel-title">Upgrades</h2>
-          <span class="panel-tag" id="upgrades-tag"></span>
-        </summary>
-        <p class="order-message" id="upgrade-message" role="status"></p>
-        <div id="upgrades-list"></div>
-      </details>
-
-      <!-- What's in the station's hold, and BONDED stock: an amount
+      <!-- 3. What's in the station's hold, and BONDED stock: an amount
            of each item set aside so it's never sold (bonded.js).
            Selling itself is on the Command screen. -->
       <div class="panel">
         <div class="panel-head">
-          <h2 class="panel-title">Station hold</h2>
+          <h2 class="panel-title"><span class="flow-step">3</span>Station hold</h2>
           <span class="panel-tag" id="hold-name-tag"></span>
         </div>
-        <p class="price-note">Bonded stock is never sold, by freighters or the Sell buttons. The refinery and workshop can still use it.</p>
+        <p class="flow-note">What you have, and what's bonded</p>
+        <p class="price-note">Bonded stock is never sold, by freighters or the Sell buttons. The refinery, workshop and upgrades can still use it.</p>
         <table class="cargo-table hold-table">
           <thead>
             <tr><th>Item</th><th>Stock</th><th>Bond <small>t</small></th></tr>
@@ -225,6 +220,20 @@
           <tbody id="hold-body"></tbody>
         </table>
       </div>
+
+      <!-- 4. Upgrades for the refinery and workshop, paid in products
+           and credits. A <details> box opens and closes on a click.
+           Only owned upgrades and the next tier of each line are
+           listed (built by ui.js). -->
+      <details class="panel upgrades-panel" id="upgrades-panel" open>
+        <summary class="panel-head">
+          <h2 class="panel-title"><span class="flow-step">4</span>Upgrades</h2>
+          <span class="panel-tag" id="upgrades-tag"></span>
+        </summary>
+        <p class="flow-note">Products and credits → a faster refinery and workshop</p>
+        <p class="order-message" id="upgrade-message" role="status"></p>
+        <div id="upgrades-list"></div>
+      </details>
     </section>
 
     <!-- ===================== SKILLS SCREEN ===================== -->
