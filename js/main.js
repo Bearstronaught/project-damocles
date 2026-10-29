@@ -151,8 +151,7 @@ const actions = {
     // sale = { credits, xp, newLevels } (see trade.js)
     const sale = sellAll(state, itemId);
     if (sale.credits > 0) {
-      addLog(`Sold ${ITEMS[itemId].name.toLowerCase()} at ${HOME.name} for ${formatNumber(sale.credits)} cr (+${formatXp(sale.xp)} Trade XP).`, "trade");
-      logLevelUps("trade", sale.newLevels);
+      addLog(`Sold ${ITEMS[itemId].name.toLowerCase()} at ${HOME.name} for ${formatNumber(sale.credits)} cr.`, "trade");
     }
     refresh();
   },
@@ -160,8 +159,7 @@ const actions = {
   sellCargo() {
     const sale = sellEverything(state);
     if (sale.credits > 0) {
-      addLog(`Sold the whole hold at ${HOME.name} for ${formatNumber(sale.credits)} cr (+${formatXp(sale.xp)} Trade XP).`, "trade");
-      logLevelUps("trade", sale.newLevels);
+      addLog(`Sold the whole hold at ${HOME.name} for ${formatNumber(sale.credits)} cr.`, "trade");
     }
     refresh();
   },

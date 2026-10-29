@@ -73,7 +73,7 @@ export const SKILLS = {
   },
   trade: {
     name: "Trade",
-    description: "Sell goods for credits. Selling at home is instant; hauling to the merchant hub pays more and earns bonus XP. Levels unlock freighters.",
+    description: "Haul goods to markets for better prices. Trade XP comes from freighters: tonnes delivered times the distance flown. Selling at home is instant but earns no XP. Levels unlock bigger freighters.",
   },
   refining: {
     name: "Refining",
@@ -267,15 +267,20 @@ export const REFINERY = BALANCE.refinery;
 
 
 // -------------------------------------------------------------
-// TRADE: how selling earns Trade XP.
+// TRADE: how freighters earn Trade XP (Dan, 29 Oct).
 // -------------------------------------------------------------
+// Trade XP comes from hauling, measured like real freight:
+// tonnes delivered x distance flown. What the cargo is worth
+// doesn't matter, so better prices and metals don't speed up
+// Trade levels. Selling at the home dock earns no Trade XP.
 // From the balance sheet (Settings tab):
-//   creditsPerXp           every this-many credits earned from a
-//                          sale gives 1 Trade XP (100 = 1 XP per
-//                          100 cr). XP can be a fraction: 250 cr = 2.5 XP.
-//   hubTonnesPerBonusXp    1 extra XP for every this-many tonnes
-//                          delivered to the merchant hub, on top of
-//                          the sale XP, as a reward for the trip.
+//   tonneMinutesPerXp   1 Trade XP for every this-many "tonne-
+//                       minutes": tonnes x one-way flight minutes
+//                       at drive speed 1.00x. With 15, 600 t to
+//                       the hub (3 minutes away) = 600 x 3 / 15
+//                       = 120 XP before the fleet share.
+// Longer routes give more XP per trip but fewer trips per hour,
+// so XP per hour doesn't depend on which station you pick.
 export const TRADE = BALANCE.trade;
 
 // HOME: the player's starting station, where barges unload and

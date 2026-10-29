@@ -15,7 +15,7 @@ export const BALANCE = {
   ships: {
     prospector: { role: 'mining', size: 'small', skill: 'mining', unlockLevel: 1, cost: 5000, cargoCapacity: 120, miningRate: 120, speed: 1 },
     excavator: { role: 'mining', size: 'medium', skill: 'mining', unlockLevel: 10, cost: 60000, cargoCapacity: 480, miningRate: 240, speed: 0.75 },
-    courier: { role: 'freight', size: 'small', skill: 'trade', unlockLevel: 3, cost: 50000, cargoCapacity: 600, speed: 1 },
+    courier: { role: 'freight', size: 'small', skill: 'trade', unlockLevel: 1, cost: 50000, cargoCapacity: 600, speed: 1 },
   },
   fields: {
     inner_belt: { yields: 'iron_ore', travelSeconds: 45, tonnesPerXp: 10, unlockLevel: 1 },
@@ -36,7 +36,7 @@ export const BALANCE = {
   sellRate: 0.5,
   shipPriceGrowth: 1.6,
   fleetXpExponent: 0.6,
-  trade: { creditsPerXp: 100, hubTonnesPerBonusXp: 10 },
+  trade: { tonneMinutesPerXp: 15 },
   hub: { travelSeconds: 180, tradeSeconds: 30 },
   refinery: { slotLevels: [1, 10, 25], speedPerLevel: 0.005, openAtMiningLevel: 8 },
   rules: { offlineCapHours: 24 },

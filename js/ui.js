@@ -363,7 +363,7 @@ function freighterStats(typeId) {
         <td>${item.name}</td>
         <td class="stat-hot">${formatNumber(hubCredits)}</td>
         <td>+${formatNumber(hubCredits - homeCredits)}</td>
-        <td>${formatXp(getTradeXp(hubCredits, plan.capacity))}</td>
+        <td>${formatXp(getTradeXp(plan.capacity, HUB.travelSeconds))}</td>
       </tr>
     `;
   }).join("");
@@ -480,7 +480,7 @@ function buildCargoTable(actions) {
   // The note under the table explains the two prices.
   byId("hub-note").textContent =
     `Selling here is instant at the home price. The ${HUB.name.toLowerCase()} pays the hub price, ` +
-    `but needs a freighter to haul the ore there (freighters unlock with Trade levels).`;
+    `but needs a freighter to haul the ore there. Only freighters earn Trade XP.`;
 }
 
 

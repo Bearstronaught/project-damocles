@@ -6,17 +6,17 @@
 // There are two places to sell:
 //   HOME DOCK     instant, at each item's sellPrice
 //   MERCHANT HUB  better prices (hubPrice), but a freighter has
-//                 to fly the goods there. Each unit delivered
-//                 also earns bonus Trade XP for the trip.
+//                 to fly the goods there.
 //
-// Every sale, anywhere, earns Trade XP based on the credits it
-// made (TRADE.creditsPerXp in content.js).
+// Trade XP comes only from freighters: tonnes delivered x the
+// distance flown (TRADE.tonneMinutesPerXp in content.js).
+// Selling at the home dock earns credits but no Trade XP.
 //
 // Later, each station will have its own supply and demand
 // (design doc: "Markets"), and that logic will live here too.
 // =============================================================
 
-import { ITEMS, TRADE } from "../data/content.js";
+import { ITEMS, TRADE, HUB } from "../data/content.js";
 import { addXp } from "./skills.js";
 
 
@@ -34,26 +34,26 @@ export function getPrice(itemId, market) {
 
 
 // -------------------------------------------------------------
-// getTradeXp(credits, tonnesDeliveredToHub)
-// How much Trade XP a sale is worth:
-//   1 XP per 100 credits earned (TRADE.creditsPerXp)
-//   + 1 bonus XP per 10 tonnes delivered to the hub
-//     (TRADE.hubTonnesPerBonusXp)
-// e.g. 600 cr at home                    -> 6 XP
-//      4,800 cr for 600 t at the hub     -> 48 + 60 = 108 XP
+// getTradeXp(tonnes, travelSeconds)
+// Full Trade XP for delivering this many tonnes to a market
+// this far away (one-way flight seconds at drive speed 1.00x):
+//   tonnes x minutes of distance / TRADE.tonneMinutesPerXp
+// e.g. 600 t to the hub, 180 s (3 minutes) away:
+//   600 x 3 / 15 = 120 XP
+// The cargo's value doesn't matter: iron or steel, same XP.
 // -------------------------------------------------------------
-export function getTradeXp(credits, tonnesDeliveredToHub = 0) {
-  const saleXp = credits / TRADE.creditsPerXp;
-  const bonusXp = tonnesDeliveredToHub / TRADE.hubTonnesPerBonusXp;
-  return saleXp + bonusXp;
+export function getTradeXp(tonnes, travelSeconds) {
+  const minutes = travelSeconds / 60;
+  return (tonnes * minutes) / TRADE.tonneMinutesPerXp;
 }
 
 
 // -------------------------------------------------------------
 // sellAll(state, itemId)
-// Sells all of one item at the HOME dock.
+// Sells all of one item at the HOME dock. No Trade XP here:
+// that comes from freighters (Dan, 29 Oct).
 // Returns what happened, so the screen can report it:
-//   { credits: 600, xp: 6, newLevels: [] }
+//   { credits: 600, xp: 0, newLevels: [] }
 // -------------------------------------------------------------
 export function sellAll(state, itemId) {
   const amount = state.inventory[itemId] || 0;   // "|| 0" = treat missing as zero
@@ -68,11 +68,7 @@ export function sellAll(state, itemId) {
   state.inventory[itemId] = 0;   // the goods leave the hold...
   state.credits += earned;       // ...and the money arrives
 
-  // Selling earns Trade XP. addXp tells us about any level-ups.
-  const xp = getTradeXp(earned);
-  const newLevels = addXp(state, "trade", xp);
-
-  return { credits: earned, xp: xp, newLevels: newLevels };
+  return { credits: earned, xp: 0, newLevels: [] };
 }
 
 
@@ -96,15 +92,17 @@ export function sellEverything(state) {
 
 
 // -------------------------------------------------------------
-// sellAtHub(state, cargo)
+// sellAtHub(state, cargo, xpShare)
 // Sells a freighter's cargo at the MERCHANT HUB.
 // cargo lists what the ship carried, e.g.
 //   { iron_ore: 400, nickel_ore: 200 }   (tonnes)
+// xpShare is this freighter's share of its Trade XP when other
+// freighters are flying too (1 = all of it; see jobs.js).
 // The goods have already left the home hold when the ship was
 // loaded, so this only pays out - it doesn't touch the hold.
 // Returns { credits, xp, tonnes, newLevels }.
 // -------------------------------------------------------------
-export function sellAtHub(state, cargo) {
+export function sellAtHub(state, cargo, xpShare = 1) {
   let credits = 0;
   let tonnes = 0;
 
@@ -116,8 +114,8 @@ export function sellAtHub(state, cargo) {
 
   state.credits += credits;
 
-  // Sale XP plus the bonus for every unit hauled there.
-  const xp = getTradeXp(credits, tonnes);
+  // Trade XP for the haul: tonnes x distance, times the share.
+  const xp = getTradeXp(tonnes, HUB.travelSeconds) * xpShare;
   const newLevels = addXp(state, "trade", xp);
 
   return { credits: credits, xp: xp, tonnes: tonnes, newLevels: newLevels };

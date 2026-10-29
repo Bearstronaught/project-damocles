@@ -104,10 +104,33 @@ export function getMiningXpShare(state) {
   // Count the mining jobs: one per ship that's out working
   // (including ships turned for home with a part-load).
   const shipsMining = state.jobs.filter((job) => job.type === "mining").length;
-  if (shipsMining <= 1) {
+  return getFleetXpShare(shipsMining);
+}
+
+
+// -------------------------------------------------------------
+// getFreightXpShare(state)
+// The same rule for Trade XP: freighters out flying share it.
+// A freighter waiting at home for a load doesn't count.
+// -------------------------------------------------------------
+export function getFreightXpShare(state) {
+  const freightersFlying = state.jobs.filter(
+    (job) => job.type === "haul" && job.status === "travelling"
+  ).length;
+  return getFleetXpShare(freightersFlying);
+}
+
+
+// -------------------------------------------------------------
+// getFleetXpShare(shipsWorking)
+// Each ship's share of its XP when this many are working:
+// shipsWorking ^ (FLEET_XP_EXPONENT - 1). A lone ship gets 100%.
+// -------------------------------------------------------------
+function getFleetXpShare(shipsWorking) {
+  if (shipsWorking <= 1) {
     return 1;                      // a lone ship always gets full XP
   }
-  return shipsMining ** (FLEET_XP_EXPONENT - 1);
+  return shipsWorking ** (FLEET_XP_EXPONENT - 1);
 }
 
 
@@ -727,7 +750,8 @@ function runEvent(state, job, time) {
 
   // --- A freighter finishes trading at the hub: get paid ---
   if (job.type === "haul" && !job.sold) {
-    const sale = sellAtHub(state, job.cargo);   // credits + Trade XP
+    // Credits, plus Trade XP for the haul times this freighter's share
+    const sale = sellAtHub(state, job.cargo, getFreightXpShare(state));
     const cargo = job.cargo;
     job.sold = true;
     job.cargo = null;                           // the hold is empty now

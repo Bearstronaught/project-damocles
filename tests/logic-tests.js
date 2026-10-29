@@ -20,7 +20,7 @@
 // =============================================================
 
 import assert from "node:assert/strict";
-import { SHIP_TYPES, ITEMS, COMMAND, FIELDS, HULL_SIZES } from "../data/content.js";
+import { SHIP_TYPES, ITEMS, COMMAND, FIELDS, HULL_SIZES, HUB } from "../data/content.js";
 import { BALANCE } from "../data/balance.js";
 import { createNewGame, SAVE_VERSION } from "../js/state.js";
 import { getMiningXpShare, startMiningJob, startHaulJob, getJobForShip, processJobs, cancelJob, recallJob, resumeJob, getJobProgress, getJobPhase, getTripPlan, getHaulPlan, loadCargo } from "../js/jobs.js";
@@ -235,37 +235,37 @@ test("The hub pays about 60% more than home for each ore", () => {
   assert.equal(getPrice("nickel_ore", "hub"), 19);
 });
 
-test("Selling at home earns 1 Trade XP per 100 cr (120 t iron = 600 cr = 6 XP)", () => {
+test("Selling at home pays credits but earns no Trade XP (Dan, 29 Oct)", () => {
   const state = createNewGame();
   state.inventory.iron_ore = 120;
   const sale = sellAll(state, "iron_ore");
-  assert.equal(sale.xp, 6);
-  assert.equal(state.skills.trade.xp, 6);
+  assert.equal(sale.credits, 120 * ITEMS.iron_ore.sellPrice);
+  assert.equal(sale.xp, 0);
+  assert.equal(state.skills.trade.xp, 0);
   assert.equal(state.skills.mining.xp, 0);          // Mining XP untouched
 });
 
-test("Trade XP can be a fraction: 120 t nickel = 1,440 cr = 14.4 XP", () => {
-  const state = createNewGame();
-  state.inventory.nickel_ore = 120;
-  assert.equal(sellAll(state, "nickel_ore").xp, 14.4);
+test("Trade XP is tonnes x minutes of distance / 15: 600 t, 3 minutes away = 120 XP", () => {
+  assert.equal(getTradeXp(600, 180), 120);
+  assert.equal(getTradeXp(100, 90), 10);             // 100 t x 1.5 min / 15
 });
 
-test("A big home sale reports the Trade levels it reached", () => {
+test("A big home sale never levels Trade", () => {
   const state = createNewGame();
-  state.inventory.iron_ore = 4000;                  // 20,000 cr = 200 XP
+  state.inventory.iron_ore = 40000;
   const sale = sellAll(state, "iron_ore");
-  assert.equal(getLevel(state, "trade"), 3);        // level 3 starts at 174 XP
-  assert.deepEqual(sale.newLevels, [2, 3]);
+  assert.equal(getLevel(state, "trade"), 1);
+  assert.deepEqual(sale.newLevels, []);
 });
 
-test("Selling at the hub: 600 t iron pays 4,800 cr and 108 XP (48 sale + 60 bonus)", () => {
+test("Selling at the hub: 600 t iron pays 4,800 cr and 120 Trade XP", () => {
   const state = createNewGame();
   const sale = sellAtHub(state, { iron_ore: 600 });
   assert.equal(sale.credits, 4800);
   assert.equal(sale.tonnes, 600);
-  assert.equal(sale.xp, 108);
+  assert.equal(sale.xp, 120);
   assert.equal(state.credits, 4800);
-  assert.equal(state.skills.trade.xp, 108);
+  assert.equal(state.skills.trade.xp, 120);
 });
 
 test("The hub takes mixed cargo and doesn't touch the home hold", () => {
@@ -273,20 +273,32 @@ test("The hub takes mixed cargo and doesn't touch the home hold", () => {
   state.inventory.iron_ore = 990;                    // stays at home
   const sale = sellAtHub(state, { nickel_ore: 200, iron_ore: 400 });
   assert.equal(sale.credits, 200 * 19 + 400 * 8);    // 3,800 + 3,200 = 7,000
-  assert.equal(sale.xp, getTradeXp(7000, 600));    // 70 + 60 = 130
+  assert.equal(sale.xp, getTradeXp(600, HUB.travelSeconds));
   assert.equal(state.inventory.iron_ore, 990);
 });
 
-test("Hauling 600 t iron earns over 3x the Trade XP of selling it at home", () => {
-  const homeXp = getTradeXp(600 * ITEMS.iron_ore.sellPrice);       // 30
-  const hubXp = getTradeXp(600 * ITEMS.iron_ore.hubPrice, 600);    // 108
-  assert.ok(hubXp > homeXp * 3, `${hubXp} vs ${homeXp}`);
+test("Cargo value doesn't change Trade XP: 600 t of steel earns the same as 600 t of iron", () => {
+  const iron = sellAtHub(createNewGame(), { iron_ore: 600 });
+  const steel = sellAtHub(createNewGame(), { steel: 600 });
+  assert.ok(steel.credits > iron.credits);
+  assert.equal(steel.xp, iron.xp);
 });
 
-test("Trade 3 takes roughly an hour of one Prospector selling at home", () => {
-  const xpPerHour = getTradeXp(PROSPECTOR.orePerTrip * ITEMS.iron_ore.sellPrice) * (HOUR / TRIP);
-  const hours = XP_TABLE[3] / xpPerHour;
-  assert.ok(hours > 1 && hours < 1.5, hours.toFixed(2) + " hours");
+test("A route twice as far gives about the same Trade XP per hour", () => {
+  // Double the distance: double the XP per trip, but each trip
+  // takes about twice as long (only the 30 s of trading is fixed).
+  const perHour = (travelSeconds) => {
+    const tripSeconds = 2 * travelSeconds + HUB.tradeSeconds;
+    return getTradeXp(600, travelSeconds) * (3600 / tripSeconds);
+  };
+  const ratio = perHour(360) / perHour(180);
+  assert.ok(ratio > 1 && ratio < 1.1, ratio.toFixed(3));
+});
+
+test("One Courier on the hub run earns about 1,100 Trade XP an hour", () => {
+  const plan = getHaulPlan("courier");
+  const xpPerHour = getTradeXp(plan.capacity, HUB.travelSeconds) * (HOUR / plan.durationMs);
+  assert.ok(xpPerHour > 1000 && xpPerHour < 1200, xpPerHour.toFixed(0));
 });
 
 
@@ -783,7 +795,7 @@ test("Selling everything sells every item and adds it all up", () => {
   assert.equal(getCargoValue(state, "hub"), 10 * 8 + 10 * 19);
   const sale = sellEverything(state);
   assert.equal(sale.credits, expected);
-  assert.equal(sale.xp, expected / 100);
+  assert.equal(sale.xp, 0);                          // home sales earn no XP
   assert.equal(state.credits, expected);
   assert.equal(getCargoValue(state), 0);
 });
@@ -841,19 +853,15 @@ const HAUL = getHaulPlan("courier");   // one Courier hub run
 // A game at Trade 3 that owns a Courier as ship-2, docked.
 function gameWithCourier(mode = "full") {
   const state = createNewGame();
-  state.skills.trade.xp = XP_TABLE[3];
-  state.credits = SHIP_TYPES.courier.cost;
+  state.credits = SHIP_TYPES.courier.cost;       // the Courier is open from Trade 1
   const courier = buyShip(state, "courier");
   courier.haulMode = mode;
   return state;
 }
 
-test("The Courier is locked until Trade 3, then costs 50,000 cr", () => {
+test("The Courier is open from the start (Trade 1) and costs 50,000 cr", () => {
   const state = createNewGame();
   state.credits = 1_000_000;
-  state.skills.trade.xp = XP_TABLE[3] - 1;
-  assert.deepEqual(canBuyShip(state, "courier"), { ok: false, reason: "Locked" });
-  state.skills.trade.xp = XP_TABLE[3];
   const ship = buyShip(state, "courier");
   assert.equal(state.credits, 1_000_000 - 50000);
   assert.equal(ship.haulMode, "full");           // starts on full loads
@@ -911,7 +919,34 @@ test("Constant runs still wait when the hold is empty", () => {
   assert.equal(job.status, "waiting");
 });
 
-test("Paid at the END of trading: 4,800 cr and 108 Trade XP for 600 t iron", () => {
+test("Two Couriers flying at once each keep 76% of their Trade XP", () => {
+  const state = gameWithCourier("full");
+  state.credits = getShipPrice(state, "courier");
+  buyShip(state, "courier");                     // ship-3
+  state.inventory.iron_ore = 1200;               // a full load each
+  startHaulJob(state, "ship-2", START);
+  startHaulJob(state, "ship-3", START);
+  const before = state.skills.trade.xp;
+  processJobs(state, START + HAUL.outboundMs + HAUL.tradeMs);   // both sell
+  const each = getTradeXp(600, HUB.travelSeconds) * 2 ** (BALANCE.fleetXpExponent - 1);
+  const gained = state.skills.trade.xp - before;
+  assert.ok(Math.abs(gained - 2 * each) < 1e-9, String(gained));
+  assert.equal(state.credits, 2 * 4800);         // credits are not shared
+});
+
+test("A Courier waiting at home for ore doesn't reduce the flying one's XP", () => {
+  const state = gameWithCourier("full");
+  state.credits = getShipPrice(state, "courier");
+  buyShip(state, "courier");                     // ship-3, will wait: no ore left for it
+  state.inventory.iron_ore = 600;
+  startHaulJob(state, "ship-2", START);
+  startHaulJob(state, "ship-3", START);
+  const before = state.skills.trade.xp;
+  processJobs(state, START + HAUL.outboundMs + HAUL.tradeMs);
+  assert.equal(state.skills.trade.xp - before, getTradeXp(600, HUB.travelSeconds));
+});
+
+test("Paid at the END of trading: 4,800 cr and 120 Trade XP for 600 t iron", () => {
   const state = gameWithCourier();
   state.inventory.iron_ore = 600;
   startHaulJob(state, "ship-2", START);
@@ -922,7 +957,7 @@ test("Paid at the END of trading: 4,800 cr and 108 Trade XP for 600 t iron", () 
 
   const results = processJobs(state, START + HAUL.outboundMs + HAUL.tradeMs);
   assert.equal(state.credits, 4800);
-  assert.equal(state.skills.trade.xp - tradeXpBefore, 108);
+  assert.equal(state.skills.trade.xp - tradeXpBefore, 120);
   assert.equal(results[0].kind, "haul");
   assert.deepEqual(results[0].cargo, { iron_ore: 600 });
 });
