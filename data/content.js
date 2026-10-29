@@ -118,6 +118,13 @@ export const SELL_RATE = BALANCE.sellRate;
 // own right now. Selling one makes the next one cheaper again.
 export const SHIP_PRICE_GROWTH = BALANCE.shipPriceGrowth;
 
+// FLEET XP: a bigger mining fleet earns more Mining XP, but each
+// extra ship adds less than the last. The whole fleet earns
+// (ships working) ^ FLEET_XP_EXPONENT times one ship's XP:
+//   with 0.6:  1 ship = 1x,  4 ships = 2.3x,  12 ships = 4.4x
+// Credits are NOT affected - only XP. Smaller = slower levels.
+export const FLEET_XP_EXPONENT = BALANCE.fleetXpExponent;
+
 
 // -------------------------------------------------------------
 // ROLES: the jobs ships do. The Command screen groups ship

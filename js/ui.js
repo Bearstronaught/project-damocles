@@ -18,7 +18,7 @@
 // =============================================================
 
 import { ITEMS, SHIP_TYPES, FIELDS, SKILLS, HULL_SIZES, COMMAND, HUB, HOME, HAUL_MODES, RECIPES, REFINERY } from "../data/content.js";
-import { getJobForShip, getJobPhase, getTripPlan, getHaulPlan, getOreInHold } from "./jobs.js";
+import { getJobForShip, getJobPhase, getTripPlan, getHaulPlan, getOreInHold, getMiningXpShare } from "./jobs.js";
 import { getLevel, getLevelProgress, isShipTypeUnlocked, isFieldUnlocked } from "./skills.js";
 import { canBuyShip, canSellShip, getSellValue, getShipPrice, MAX_NAME_LENGTH } from "./shipyard.js";
 import { getShipPoints, getCommandCapacity, getCommandUsed, getNextUpgradeCost, canBuyUpgrade } from "./command.js";
@@ -924,6 +924,7 @@ function buildSkillCards() {
       <div class="skill-detail">
         <p class="skill-desc">${skill.description}</p>
         <p class="skill-total" data-part="total"></p>
+        ${skillId === "mining" ? `<p class="skill-total" data-part="share"></p>` : ""}
         <h3 class="sub-title">Unlocks</h3>
         <ul class="unlock-list">${unlockLines}</ul>
       </div>
@@ -1359,6 +1360,15 @@ function renderSkills(state) {
     part(card, "level").textContent = progress.level;
     part(card, "bar").style.width = (progress.fraction * 100) + "%";
     part(card, "total").textContent = formatNumber(progress.xp) + " XP total";
+
+    // Mining only: how much XP each ship keeps with today's fleet.
+    if (skillId === "mining") {
+      const working = state.jobs.filter((job) => job.type === "mining").length;
+      const share = Math.round(getMiningXpShare(state) * 100);
+      part(card, "share").textContent = working <= 1
+        ? "Fleet XP: a lone ship earns full XP. Each extra ship mining adds a little less than the last."
+        : `Fleet XP: ${working} ships mining, each earning ${share}% of its XP.`;
+    }
 
     if (progress.isMax) {
       part(card, "xp").textContent = "Max level";

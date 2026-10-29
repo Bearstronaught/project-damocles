@@ -23,7 +23,7 @@ import assert from "node:assert/strict";
 import { SHIP_TYPES, ITEMS, COMMAND, FIELDS, HULL_SIZES } from "../data/content.js";
 import { BALANCE } from "../data/balance.js";
 import { createNewGame, SAVE_VERSION } from "../js/state.js";
-import { startMiningJob, startHaulJob, getJobForShip, processJobs, cancelJob, recallJob, resumeJob, getJobProgress, getJobPhase, getTripPlan, getHaulPlan, loadCargo } from "../js/jobs.js";
+import { getMiningXpShare, startMiningJob, startHaulJob, getJobForShip, processJobs, cancelJob, recallJob, resumeJob, getJobProgress, getJobPhase, getTripPlan, getHaulPlan, loadCargo } from "../js/jobs.js";
 import { sellAll, sellEverything, getCargoValue, sellAtHub, getTradeXp, getPrice } from "../js/trade.js";
 import { parseSave, applyOfflineProgress, exportSave, importSave } from "../js/save.js";
 import { XP_TABLE, getLevelForXp, getLevel, getLevelProgress, addXp, isShipTypeUnlocked, MAX_LEVEL } from "../js/skills.js";
@@ -623,6 +623,64 @@ test("Buying a ship and selling it straight back loses half the price", () => {
   const ship = buyShip(state, "excavator");
   sellShip(state, ship.id);
   assert.equal(before - state.credits, price / 2);
+});
+
+
+// =============================================================
+// FLEET XP: EACH EXTRA SHIP EARNS A LITTLE LESS XP (Dan, 29 Oct)
+// =============================================================
+
+// A game with this many Prospectors, all out mining the Inner Belt
+function fleetMining(ships) {
+  const state = createNewGame();
+  state.credits = 1e9;
+  state.commandUpgrades = COMMAND.maxUpgrades;      // room for a big fleet
+  for (let i = 1; i < ships; i++) buyShip(state, "prospector");
+  for (const ship of state.ships) startMiningJob(state, ship.id, "inner_belt", START);
+  return state;
+}
+
+test("XP share per ship: 1 ship 100%, 2 ships 76%, 4 ships 57%, 12 ships 37%", () => {
+  const close = (actual, expected) => assert.ok(Math.abs(actual - expected) < 0.005, actual.toFixed(3));
+  close(getMiningXpShare(fleetMining(1)), 1);
+  close(getMiningXpShare(fleetMining(2)), 0.758);
+  close(getMiningXpShare(fleetMining(4)), 0.574);
+  close(getMiningXpShare(fleetMining(12)), 0.370);
+});
+
+test("A docked ship doesn't count: only ships out mining share the XP", () => {
+  const state = createNewGame();
+  state.credits = 1e9;
+  buyShip(state, "prospector");                     // ship-2 stays docked
+  startMiningJob(state, "ship-1", "inner_belt", START);
+  assert.equal(getMiningXpShare(state), 1);
+});
+
+test("Four Prospectors: same ore as before, but each trip earns 57% of its XP", () => {
+  const state = fleetMining(4);
+  processJobs(state, START + TRIP);                 // one trip each
+  assert.equal(state.inventory.iron_ore, 4 * PROSPECTOR.orePerTrip);      // ore (and so credits) untouched
+  const expected = 4 * PROSPECTOR.xpPerTrip * 4 ** (BALANCE.fleetXpExponent - 1);
+  assert.ok(Math.abs(state.skills.mining.xp - expected) < 1e-9, state.skills.mining.xp + " vs " + expected);
+});
+
+test("A bigger fleet still earns more XP in total, just not in proportion", () => {
+  const xpAfterAnHour = (ships) => {
+    const state = fleetMining(ships);
+    processJobs(state, START + HOUR);
+    return state.skills.mining.xp;
+  };
+  const one = xpAfterAnHour(1);
+  const four = xpAfterAnHour(4);
+  assert.ok(four > one * 2 && four < one * 2.5, (four / one).toFixed(2) + "x");
+});
+
+test("Fleet XP: ticking for 2 hours equals one 2-hour jump", () => {
+  const ticking = fleetMining(6);
+  const jumping = fleetMining(6);
+  for (let t = 0; t <= 2 * HOUR; t += 250) processJobs(ticking, START + t);
+  processJobs(jumping, START + 2 * HOUR);
+  assert.equal(ticking.skills.mining.xp, jumping.skills.mining.xp);
 });
 
 

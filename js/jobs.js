@@ -52,7 +52,7 @@
 //   }
 // =============================================================
 
-import { FIELDS, SHIP_TYPES, ITEMS, HUB } from "../data/content.js";
+import { FIELDS, SHIP_TYPES, ITEMS, HUB, FLEET_XP_EXPONENT } from "../data/content.js";
 import { addItem, findShip } from "./state.js";
 import { addXp, isFieldUnlocked } from "./skills.js";
 import { sellAtHub } from "./trade.js";
@@ -87,6 +87,27 @@ export function getTripPlan(shipTypeId, fieldId) {
     orePerTrip: shipType.cargoCapacity,
     xpPerTrip: shipType.cargoCapacity / field.tonnesPerXp,   // e.g. 120 t ÷ 10 = 12 XP
   };
+}
+
+
+// -------------------------------------------------------------
+// getMiningXpShare(state)
+// How much of a trip's Mining XP each ship keeps, given how many
+// ships are out mining right now (Dan, 29 Oct). Big fleets still
+// earn more XP in total, but each extra ship adds less:
+//     ships working:   1      2      4      12
+//     share each:     100%    76%    57%    37%
+// (the share is ships ^ (FLEET_XP_EXPONENT - 1)).
+// Credits are never reduced - only XP.
+// -------------------------------------------------------------
+export function getMiningXpShare(state) {
+  // Count the mining jobs: one per ship that's out working
+  // (including ships turned for home with a part-load).
+  const shipsMining = state.jobs.filter((job) => job.type === "mining").length;
+  if (shipsMining <= 1) {
+    return 1;                      // a lone ship always gets full XP
+  }
+  return shipsMining ** (FLEET_XP_EXPONENT - 1);
 }
 
 
@@ -652,7 +673,9 @@ function runEvent(state, job, time) {
 
     // A full hold - unless it was recalled before filling up.
     const amount = job.amountOverride ?? plan.orePerTrip;
-    const xp = amount / field.tonnesPerXp;
+    // Full XP for the ore, times this ship's share of the fleet's XP.
+    // Worked out BEFORE a recalled ship leaves the job list below.
+    const xp = (amount / field.tonnesPerXp) * getMiningXpShare(state);
     delete job.amountOverride;
 
     let newLevels = [];
