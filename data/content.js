@@ -95,12 +95,12 @@ export const ITEMS = {
 export const SKILLS = {
   mining: {
     name: "Mining",
-    description: "Send barges to asteroid fields to bring back ore. Levels unlock better mining ships, richer fields and ship refits, and every level makes your drills a little faster.",
+    description: "Send barges to asteroid fields to bring back ore. Levels unlock better mining ships, richer fields and ship components, and every level makes your drills a little faster.",
     perk: "drill speed",
   },
   trade: {
     name: "Trade",
-    description: "Haul goods to markets for better prices. Trade XP comes from freighters: tonnes delivered times the distance flown. Selling at home is instant but earns no XP. Levels unlock bigger freighters and freighter refits, and every level adds to what the hub pays.",
+    description: "Haul goods to markets for better prices. Trade XP comes from freighters: tonnes delivered times the distance flown. Selling at home is instant but earns no XP. Levels unlock bigger freighters and freighter components, and every level adds to what the hub pays.",
     perk: "hub prices",
   },
   refining: {

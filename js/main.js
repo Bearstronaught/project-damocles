@@ -291,13 +291,13 @@ const actions = {
     refresh();
   },
 
-  // A ship refit (ship-upgrades.js): fits every ship of a type.
+  // A ship component (ship-upgrades.js): fits every ship of a type.
   // Returns { ok } or { ok: false, reason } for the screen.
   buyShipUpgrade(upgradeId) {
     const result = buyShipUpgrade(state, upgradeId);
     if (result.ok) {
       const upgrade = SHIP_UPGRADES[upgradeId];
-      addLog(`Refit bought: ${getUpgradeName(upgrade)} (+${formatPercent(upgrade.bonus)} ${SHIP_PARTS[upgrade.part].says}). ` +
+      addLog(`Component fitted: ${getUpgradeName(upgrade)} (+${formatPercent(upgrade.bonus)} ${SHIP_PARTS[upgrade.part].says}). ` +
         `Every ${SHIP_TYPES[upgrade.hull].name} gets it from its next trip.`, "fleet");
       refresh();
     }
@@ -568,7 +568,7 @@ function getUnlockLines(skillId, level, withPerk = true) {
     lines.push("New upgrade to buy: " + UPGRADES[upgradeId].name);
   }
   for (const upgradeId of getShipUpgradeUnlocksAtLevel(skillId, level)) {
-    lines.push("New refit (Shipyard): " + getUpgradeName(SHIP_UPGRADES[upgradeId]));
+    lines.push("New ship component (Shipyard): " + getUpgradeName(SHIP_UPGRADES[upgradeId]));
   }
   if (skillId === "manufacturing") {
     for (const recipeId of getWorkshopRecipeUnlocksAtLevel(level)) {
@@ -636,7 +636,7 @@ function logLevelUps(skillId, levels, showBanners = true) {
       addLog(`New upgrade available: ${UPGRADES[upgradeId].name}. Find it under Upgrades on the Industry tab.`, "level");
     }
     for (const upgradeId of getShipUpgradeUnlocksAtLevel(skillId, level)) {
-      addLog(`New refit available: ${getUpgradeName(SHIP_UPGRADES[upgradeId])}. Find it under Refits on the Shipyard tab.`, "level");
+      addLog(`New ship component available: ${getUpgradeName(SHIP_UPGRADES[upgradeId])}. Find it under Ship components on the Shipyard tab.`, "level");
     }
     if (skillId === "manufacturing") {
       for (const recipeId of getWorkshopRecipeUnlocksAtLevel(level)) {

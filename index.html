@@ -241,19 +241,20 @@
         <p id="shipyard-note" class="price-note"></p>
       </div>
 
-      <!-- Refits: ship upgrades (ship-upgrades.js). One purchase fits
-           every ship of that type, now and later. One group per hull
-           type you own; one row per part (drill, hold, drive) showing
-           what's fitted and the next grade. Built by ui.js. -->
+      <!-- Ship components (ship-upgrades.js): drills, cargo holds and
+           drives, Mk I to Mk III. One purchase fits every ship of that
+           type, now and later. One collapsible section per hull type
+           you own, broken down by component, every grade listed.
+           Built by ui.js (buildComponents). -->
       <div class="panel panel-wide">
         <div class="panel-head">
-          <h2 class="panel-title">Refits</h2>
-          <span class="panel-tag" id="refits-tag"></span>
+          <h2 class="panel-title">Ship components</h2>
+          <span class="panel-tag" id="components-tag"></span>
         </div>
-        <p class="price-note">Each refit fits every ship of that type, including ones you buy later. Ships already out finish their trip first.</p>
-        <p class="order-message" id="refit-message" role="status"></p>
-        <div id="refits-list"></div>
-        <p class="price-note" id="refits-empty">Buy a ship to see its refits.</p>
+        <p class="price-note">A component fits every ship of that type, including ones you buy later. Ships already out finish their trip first. The markers on each drawing are its hardpoints: a dashed ring is a stock part, a numbered one shows the Mk fitted.</p>
+        <p class="order-message" id="component-message" role="status"></p>
+        <div id="components-list"></div>
+        <p class="price-note" id="components-empty">Buy a ship to see its components.</p>
       </div>
     </section>
 

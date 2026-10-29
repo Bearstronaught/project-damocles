@@ -27,7 +27,7 @@ import { canBuyShip, canSellShip, getSellValue, getShipPrice, MAX_NAME_LENGTH } 
 import { getShipPoints, getCommandCapacity, getCommandUsed, getNextUpgradeCost, canBuyUpgrade } from "./command.js";
 import { getCargoValue, getTradeXp } from "./trade.js";
 import { getBond, getSellable, getBondedInHold } from "./bonded.js";
-import { getSchematic } from "./art.js";
+import { getShipArt } from "./art.js";
 import { getRoleGroups, describeGroup } from "./fleet-groups.js";
 import { isRefineryOpen, getRefineJob, getSlotCount, getSlotUnlockLevel, isRecipeUnlocked, getBatchMs, getBatchOutput, hasInputs, describeInputs, getMaxSlots } from "./refinery.js";
 import { isWorkshopOpen, getWorkshopSlotCount, getWorkshopSlotUnlockLevel, getQueueLimit, isWorkshopRecipeUnlocked, getWorkshopBatchMs, getWorkshopJob, hasWorkshopInputs, describeWorkshopInputs, getMaxOrderBatches, getRunningIndex, hasSmartQueue, hasControlCentre, getStandingOrders, standingNeedsWork } from "./workshop.js";
@@ -103,7 +103,7 @@ export function setupUI(state, actions) {
   buildWorkshop(actions);
   buildUpgrades(actions);
   buildStationHold(actions);
-  buildRefits(actions);
+  buildComponents(actions);
   buildDevPanel(actions);
 }
 
@@ -331,6 +331,60 @@ function renderStatsBoxes(state) {
       box.innerHTML = statsList(state, typeId);
     }
   }
+
+  // Ship drawings (with hardpoint markers) and parts lists change
+  // only when a component is fitted, so their key is the grades.
+  for (const box of document.querySelectorAll("[data-art]")) {
+    const typeId = box.dataset.art;
+    const grades = getGrades(state, typeId);
+    const key = JSON.stringify(grades);
+    if (box.dataset.key !== key) {
+      box.dataset.key = key;
+      box.innerHTML = getShipArt(SHIP_TYPES[typeId].art, grades);
+    }
+  }
+  for (const box of document.querySelectorAll("[data-parts]")) {
+    const typeId = box.dataset.parts;
+    const key = JSON.stringify(getGrades(state, typeId));
+    if (box.dataset.key !== key) {
+      box.dataset.key = key;
+      box.innerHTML = partsList(state, typeId);
+    }
+  }
+}
+
+// -------------------------------------------------------------
+// getGrades(state, typeId)
+// The grade fitted to each of a hull's components, e.g.
+//   { drill: 1, hold: 0, drive: 2 }     (0 = stock)
+// -------------------------------------------------------------
+function getGrades(state, typeId) {
+  const grades = {};
+  for (const partId of getHullParts(typeId)) {
+    grades[partId] = getPartGrade(state, typeId, partId);
+  }
+  return grades;
+}
+
+// -------------------------------------------------------------
+// partsList(state, typeId)
+// A ship's components as a short list, e.g.
+//   Drill        Mk I    +15% mining rate
+//   Cargo hold   Stock
+// -------------------------------------------------------------
+function partsList(state, typeId) {
+  const rows = getHullParts(typeId).map((partId) => {
+    const grade = getPartGrade(state, typeId, partId);
+    const gradeName = grade === 0 ? "Stock" : findUpgrade(typeId, partId, grade).gradeName;
+    const bonus = getPartBonus(state, typeId, partId);
+    return `
+      <li class="${grade > 0 ? "fitted" : ""}">
+        <span class="part-name">${SHIP_PARTS[partId].name}</span>
+        <span class="part-grade">${gradeName}</span>
+        <span class="part-bonus">${bonus > 0 ? "+" + formatPercent(bonus) + " " + SHIP_PARTS[partId].says : ""}</span>
+      </li>`;
+  }).join("");
+  return `<ul class="parts-list">${rows}</ul>`;
 }
 
 // -------------------------------------------------------------
@@ -706,7 +760,7 @@ function buildShipCard(ship, actions) {
   // The card's layout. Parts we update later get a
   // "data-part" label so we can find them again.
   card.innerHTML = `
-    <div class="ship-art">${getSchematic(shipType.art)}</div>
+    <div class="ship-art" data-art="${ship.type}"></div>
     <div class="ship-body">
       <div class="card-header">
         <span class="card-name">${escapeHtml(ship.name)}</span>
@@ -771,7 +825,7 @@ function buildOwnedList(state, actions) {
     row.id = "owned-" + ship.id;
     row.innerHTML = `
       <summary class="owned-summary">
-        <div class="ship-art">${getSchematic(shipType.art)}</div>
+        <div class="ship-art" data-art="${ship.type}"></div>
         <div class="owned-main">
           <div class="card-header">
             <span class="card-name">${escapeHtml(ship.name)}</span>
@@ -794,6 +848,9 @@ function buildOwnedList(state, actions) {
           <div class="rename-note" data-part="rename-note"></div>
           <button class="btn btn-sell" data-part="sell"></button>
           <div class="sell-note" data-part="sell-note"></div>
+          <!-- The components fitted to this ship (filled in by render) -->
+          <h3 class="sub-title">Components</h3>
+          <div data-parts="${ship.type}"></div>
         </div>
         ${statsBox(ship.type)}
       </div>
@@ -1053,6 +1110,7 @@ function renderUpgrades(state) {
   panel.hidden = !isRefineryOpen(state);
 
   let owned = 0;
+  let ready = 0;   // shown, not owned, and can be bought right now
   for (const upgradeId of Object.keys(UPGRADES)) {
     const row = byId("upgrade-" + upgradeId);
     row.hidden = !isShown(state, upgradeId);
@@ -1074,11 +1132,19 @@ function renderUpgrades(state) {
     // A row that can't be bought yet says why under its cost,
     // e.g. "Need 12 t more hull plating."
     row.classList.toggle("blocked", !check.ok);
+    // A row you can buy now is lit up, so it stands out in the list.
+    row.classList.toggle("ready", check.ok && !row.hidden);
+    if (check.ok && !row.hidden && !panel.hidden) ready++;
     if (reason.textContent !== (check.ok ? "" : check.reason)) {
       reason.textContent = check.ok ? "" : check.reason;
     }
   }
-  byId("upgrades-tag").textContent = `${owned} of ${Object.keys(UPGRADES).length} owned`;
+  // e.g. "3 of 15 owned · 2 ready to buy" - shows on the header even
+  // when the Upgrades box is closed.
+  setText(byId("upgrades-tag"),
+    `${owned} of ${Object.keys(UPGRADES).length} owned` + (ready > 0 ? ` · ${ready} ready to buy` : ""));
+  panel.classList.toggle("has-ready", ready > 0);
+  return ready;
 }
 
 
@@ -1159,7 +1225,7 @@ function buildShipyard(actions) {
         <span class="card-name">${shipType.name}</span>
         <span class="card-tag" data-part="tag"></span>
       </div>
-      <div class="yard-art">${getSchematic(shipType.art)}</div>
+      <div class="yard-art" data-art="${typeId}"></div>
       <p class="ship-desc">${shipType.description}</p>
       ${statsBox(typeId)}
       <dl class="stats stats-yard">
@@ -1213,10 +1279,10 @@ function buildSkillCards() {
       });
       unlocks.push({ level: WORKSHOP.openAtRefiningLevel, name: "Workshop (Industry tab)", kind: "Station", key: "workshop:open" });
     }
-    // Ship refits this skill's levels make available to buy
+    // Ship components this skill's levels make available to buy
     for (const [upgradeId, upgrade] of Object.entries(SHIP_UPGRADES)) {
       if (upgrade.skill === skillId) {
-        unlocks.push({ level: upgrade.level, name: getUpgradeName(upgrade), kind: "Refit", key: "refit:" + upgradeId });
+        unlocks.push({ level: upgrade.level, name: getUpgradeName(upgrade), kind: "Component", key: "component:" + upgradeId });
       }
     }
     // Upgrades this skill's levels make available to buy
@@ -1304,8 +1370,22 @@ export function render(state, now) {
   renderSkills(state);
   renderRefinery(state, now);
   renderWorkshop(state, now);
-  renderUpgrades(state);
-  renderRefits(state);
+  const upgradesReady = renderUpgrades(state);
+  const componentsReady = renderComponents(state);
+
+  // Nav dots, so a ready upgrade isn't forgotten: Industry when a
+  // station upgrade can be bought; Shipyard (which already lights
+  // for a ship to buy) also for a ship component.
+  navAlert("industry", upgradesReady > 0);
+  if (componentsReady > 0) navAlert("shipyard", true);
+}
+
+// -------------------------------------------------------------
+// navAlert(screen, on)
+// Lights (or clears) the teal dot on a nav button.
+// -------------------------------------------------------------
+function navAlert(screen, on) {
+  document.querySelector(`.nav-btn[data-screen="${screen}"]`).classList.toggle("has-alert", on);
 }
 
 
@@ -1835,7 +1915,7 @@ function renderSkills(state) {
       else if (kind === "wslot") unlocked = Number(id) < getWorkshopSlotCount(state);
       else if (kind === "queue") unlocked = getLevel(state, "manufacturing") >= Number(id);
       else if (kind === "upgrade") unlocked = getLevel(state, UPGRADES[id].skill) >= UPGRADES[id].level;
-      else if (kind === "refit") unlocked = getLevel(state, SHIP_UPGRADES[id].skill) >= SHIP_UPGRADES[id].level;
+      else if (kind === "component") unlocked = getLevel(state, SHIP_UPGRADES[id].skill) >= SHIP_UPGRADES[id].level;
       else unlocked = Number(id) < getSlotCount(state);   // "slot:1" = the second slot
       line.classList.toggle("unlocked", unlocked);
       part(line, "state").textContent = unlocked ? "Unlocked" : "Locked";
@@ -2299,130 +2379,166 @@ export function formatDuration(ms) {
 
 
 // =============================================================
-// REFITS (ship upgrades, on the Shipyard tab)
+// SHIP COMPONENTS (on the Shipyard tab)
 // -------------------------------------------------------------
-// One group per hull type, shown once you own one of that type.
-// One row per part (drill, hold, drive), showing the grade fitted
-// as pips (●●○ = Mk II of III) and the next grade to buy, with
-// its cost and a Buy button. Rules live in ship-upgrades.js.
+// The upgrades in ship-upgrades.js, shown to players as "ship
+// components". One collapsible section per hull type you own,
+// headed by its drawing (with hardpoints) and a summary. Inside,
+// one block per component type (drill, cargo hold, drive), each
+// listing every grade, Mk I to Mk III:
+//   Mk I    Mining 2    +15% mining rate               Fitted
+//   Mk II   Mining 12   40 t wiring coils + 12,000 cr  [Buy]
+//   Mk III  Mining 25   ...                            Locked
+// Only the next grade can be bought.
 // =============================================================
 
 // -------------------------------------------------------------
-// buildRefits(actions)
-// Makes every group and row once; renderRefits fills them in.
+// buildComponents(actions)
+// Makes every section, block and row once; renderComponents
+// fills in the parts that change.
 // -------------------------------------------------------------
-function buildRefits(actions) {
-  const list = byId("refits-list");
+function buildComponents(actions) {
+  const list = byId("components-list");
   list.innerHTML = "";
 
   for (const hullId of Object.keys(SHIP_TYPES)) {
     const parts = getHullParts(hullId);
-    if (parts.length === 0) continue;   // a hull with no refits yet
+    if (parts.length === 0) continue;   // a hull with no components yet
 
-    const group = document.createElement("div");
-    group.className = "refit-group";
-    group.id = "refits-" + hullId;
-    group.innerHTML = `<h3 class="sub-title">${SHIP_TYPES[hullId].name}</h3>`;
+    // <details> opens and closes when its summary is clicked;
+    // rememberOpenState keeps it that way across redraws.
+    const section = document.createElement("details");
+    section.className = "component-group expandable";
+    section.id = "components-" + hullId;
+    section.innerHTML = `
+      <summary class="component-summary">
+        <div class="ship-art" data-art="${hullId}"></div>
+        <div class="component-head">
+          <span class="card-name">${SHIP_TYPES[hullId].name}</span>
+          <span class="component-tally" data-part="tally"></span>
+        </div>
+        <span class="expand-hint" aria-hidden="true"></span>
+      </summary>
+      <div class="component-body"></div>
+    `;
+    const body = section.querySelector(".component-body");
 
     for (const partId of parts) {
-      const row = document.createElement("div");
-      row.className = "upgrade-row";
-      row.id = `refit-${hullId}-${partId}`;
-      row.innerHTML = `
-        <div class="upgrade-text">
-          <div class="upgrade-name">${SHIP_PARTS[partId].name}<span class="grade-pips" data-part="pips"></span>
-            <span class="upgrade-level" data-part="level"></span></div>
-          <div class="upgrade-desc" data-part="desc"></div>
-          <div class="upgrade-cost" data-part="cost"></div>
-          <div class="upgrade-reason" data-part="reason"></div>
-        </div>
-        <button class="btn btn-small" data-part="buy">Buy</button>
+      const block = document.createElement("div");
+      block.className = "component-block";
+      block.innerHTML = `
+        <h3 class="sub-title">${SHIP_PARTS[partId].name}
+          <span class="component-total" data-part="total-${partId}"></span></h3>
       `;
-      // The button buys whatever the NEXT grade is at the time of
-      // the click, so it's looked up then, not now.
-      part(row, "buy").addEventListener("click", () => {
-        const state = actions.getState();
-        const next = getNextUpgrade(state, hullId, partId);
-        if (!next) return;
-        const result = actions.buyShipUpgrade(next.id);
-        byId("refit-message").textContent = result.ok ? "" : `${getUpgradeName(next)}: ${result.reason}`;
-      });
-      group.appendChild(row);
+
+      // One row per grade: Mk I, Mk II, Mk III...
+      for (let grade = 1; findUpgrade(hullId, partId, grade); grade++) {
+        const upgrade = findUpgrade(hullId, partId, grade);
+        // The cost, e.g. "40 t wiring coils + 12,000 cr"
+        const goods = Object.entries(upgrade.costs)
+          .map(([itemId, tonnes]) => `${formatTonnes(tonnes)} ${ITEMS[itemId].name.toLowerCase()}`);
+        const cost = [...goods, formatNumber(upgrade.credits) + " cr"].join(" + ");
+
+        const row = document.createElement("div");
+        row.className = "upgrade-row";
+        row.id = "component-" + upgrade.id;
+        row.innerHTML = `
+          <div class="upgrade-text">
+            <div class="upgrade-name">${upgrade.gradeName}
+              <span class="upgrade-level">${SKILLS[upgrade.skill].name} ${upgrade.level}</span></div>
+            <div class="upgrade-desc">+${formatPercent(upgrade.bonus)} ${SHIP_PARTS[partId].says}</div>
+            <div class="upgrade-cost">${cost}</div>
+            <div class="upgrade-reason" data-part="reason"></div>
+          </div>
+          <button class="btn btn-small" data-part="buy">Buy</button>
+        `;
+        part(row, "buy").addEventListener("click", () => {
+          const result = actions.buyShipUpgrade(upgrade.id);
+          byId("component-message").textContent = result.ok ? "" : `${getUpgradeName(upgrade)}: ${result.reason}`;
+        });
+        block.appendChild(row);
+      }
+      body.appendChild(block);
     }
-    list.appendChild(group);
+    rememberOpenState(section);
+    list.appendChild(section);
   }
 }
 
 // -------------------------------------------------------------
-// renderRefits(state)
-// Shows the groups for hull types you own, and fills each row:
-//   Drill ●○○  Mining 12
-//   Mk I fitted: +15% mining rate. Next: Mk II, another +15%.
-//   40 t wiring coils + 12,000 cr        [Buy]
+// renderComponents(state)
+// Shows the sections for hull types you own, and sets every
+// row: Fitted, ready to buy, or why not yet. Returns how many
+// components could be bought right now (for the nav dot).
 // -------------------------------------------------------------
-function renderRefits(state) {
-  let fitted = 0;
-  let total = 0;
+function renderComponents(state) {
+  let fittedAll = 0;
+  let totalAll = 0;
+  let readyAll = 0;
   let anyShown = false;
 
   for (const hullId of Object.keys(SHIP_TYPES)) {
-    const group = byId("refits-" + hullId);
-    if (!group) continue;
+    const section = byId("components-" + hullId);
+    if (!section) continue;
     const owned = state.ships.some((ship) => ship.type === hullId);
-    group.hidden = !owned;
+    section.hidden = !owned;
     if (owned) anyShown = true;
 
+    let fitted = 0;
+    let total = 0;
+    let ready = 0;
+
     for (const partId of getHullParts(hullId)) {
-      const row = byId(`refit-${hullId}-${partId}`);
-      const grade = getPartGrade(state, hullId, partId);
-      // How many grades this part has (3: Mk I to Mk III).
-      let maxGrade = 0;
-      while (findUpgrade(hullId, partId, maxGrade + 1)) maxGrade++;
-      fitted += grade;
-      total += maxGrade;
-
-      const says = SHIP_PARTS[partId].says;
+      const gradeNow = getPartGrade(state, hullId, partId);
       const bonus = getPartBonus(state, hullId, partId);
-      const next = getNextUpgrade(state, hullId, partId);
-      // ● for each grade fitted, ○ for each still to buy.
-      setText(part(row, "pips"), "●".repeat(grade) + "○".repeat(maxGrade - grade));
+      // The component's total so far, beside its heading
+      setText(part(section, "total-" + partId),
+        bonus > 0 ? `+${formatPercent(bonus)} ${SHIP_PARTS[partId].says}` : "Stock");
 
-      const nowText = grade === 0
-        ? "Stock part."
-        : `${findUpgrade(hullId, partId, grade).gradeName} fitted: +${Math.round(bonus * 100)}% ${says}.`;
-      const button = part(row, "buy");
-      const reason = part(row, "reason");
+      for (let grade = 1; findUpgrade(hullId, partId, grade); grade++) {
+        const upgrade = findUpgrade(hullId, partId, grade);
+        const row = byId("component-" + upgrade.id);
+        const button = part(row, "buy");
+        const reason = part(row, "reason");
+        total++;
 
-      if (!next) {
-        // Top grade reached
-        row.classList.add("owned");
-        row.classList.remove("blocked");
-        setText(part(row, "desc"), nowText + " Fully upgraded.");
-        setText(part(row, "cost"), "");
-        setText(part(row, "level"), "");
-        setText(reason, "");
-        setText(button, "Done");
-        button.disabled = true;
-        continue;
+        if (grade <= gradeNow) {
+          // Already fitted
+          fitted++;
+          row.classList.add("owned");
+          row.classList.remove("blocked", "ready");
+          setText(button, "Fitted");
+          button.disabled = true;
+          setText(reason, "");
+          continue;
+        }
+
+        row.classList.remove("owned");
+        const check = canBuyShipUpgrade(state, upgrade.id);
+        // Only the next grade can be bought; later ones say what
+        // comes first.
+        setText(button, grade === gradeNow + 1 ? "Buy" : "Locked");
+        button.disabled = !check.ok;
+        row.classList.toggle("blocked", !check.ok);
+        row.classList.toggle("ready", check.ok);
+        setText(reason, check.ok ? "" : check.reason);
+        if (check.ok && owned) ready++;
       }
-
-      row.classList.remove("owned");
-      setText(part(row, "level"), `${SKILLS[next.skill].name} ${next.level}`);
-      setText(part(row, "desc"), `${nowText} Next: ${next.gradeName}, +${Math.round(next.bonus * 100)}% ${says}.`);
-      // The cost, e.g. "40 t wiring coils + 12,000 cr"
-      const goods = Object.entries(next.costs)
-        .map(([itemId, tonnes]) => `${formatTonnes(tonnes)} ${ITEMS[itemId].name.toLowerCase()}`);
-      setText(part(row, "cost"), [...goods, formatNumber(next.credits) + " cr"].join(" + "));
-
-      const check = canBuyShipUpgrade(state, next.id);
-      setText(button, "Buy " + next.gradeName);
-      button.disabled = !check.ok;
-      row.classList.toggle("blocked", !check.ok);
-      setText(reason, check.ok ? "" : check.reason);
     }
+
+    // e.g. "3 of 9 fitted · 1 ready to buy"
+    setText(part(section, "tally"),
+      `${fitted} of ${total} fitted` + (ready > 0 ? ` · ${ready} ready to buy` : ""));
+    section.classList.toggle("has-ready", ready > 0);
+    fittedAll += fitted;
+    totalAll += total;
+    readyAll += ready;
   }
-  byId("refits-empty").hidden = anyShown;
-  byId("refits-tag").textContent = `${fitted} of ${total} fitted`;
+
+  byId("components-empty").hidden = anyShown;
+  setText(byId("components-tag"),
+    `${fittedAll} of ${totalAll} fitted` + (readyAll > 0 ? ` · ${readyAll} ready to buy` : ""));
+  return readyAll;
 }
 
 // -------------------------------------------------------------

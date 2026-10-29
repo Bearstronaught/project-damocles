@@ -32,6 +32,7 @@ import { devSetLevel, devAddCredits, devAddGoods, devSetSpeed, devJumpHour, HOUR
 import { getShipStats, getPartGrade, getNextUpgrade, canBuyShipUpgrade, buyShipUpgrade, getHullParts, getUpgradeName, getShipUpgradeUnlocksAtLevel } from "../js/ship-upgrades.js";
 import { getMiningDrillPerk, getTradeHubPerk, getLevelPerk } from "../js/skills.js";
 import { SHIP_UPGRADES } from "../data/content.js";
+import { getShipArt } from "../js/art.js";
 import { getBond, getSellable, getBondedInHold, setBond } from "../js/bonded.js";
 import { isOwned, getEffect, canBuyIndustryUpgrade, buyIndustryUpgrade, isShown } from "../js/upgrades.js";
 import { addItemWithCarry } from "../js/state.js";
@@ -2876,9 +2877,9 @@ test("Playtest: dropping a skill below its unlocks mid-run doesn't break the eng
 });
 
 // =============================================================
-// LEVEL PERKS, SHIP REFITS AND LOADING TIME
+// LEVEL PERKS, SHIP COMPONENTS AND LOADING TIME
 // Agreed with Dan 29 Oct: Mining +0.5% drill speed and Trade
-// +0.5% hub prices per level; refits per hull type (Mk I credits,
+// +0.5% hub prices per level; components per hull type (Mk I credits,
 // Mk II/III products too); loading by tonnes, rate by hull size.
 // =============================================================
 
@@ -2956,31 +2957,31 @@ test("Loading: a Courier recalled while still loading stands down, cargo back at
   assert.equal(state.jobs.length, 0);
 });
 
-test("Refits: every hull's parts - barges get a drill, freighters don't", () => {
+test("Components: every hull's parts - barges get a drill, freighters don't", () => {
   assert.deepEqual(getHullParts("prospector"), ["drill", "hold", "drive"]);
   assert.deepEqual(getHullParts("excavator"), ["drill", "hold", "drive"]);
   assert.deepEqual(getHullParts("courier"), ["hold", "drive"]);
   assert.equal(getUpgradeName(SHIP_UPGRADES.prospector_drill_2), "Prospector drill Mk II");
 });
 
-test("Refits: Mk I is credits only, Mk II and III also need workshop products", () => {
+test("Components: Mk I is credits only, Mk II and III also need workshop products", () => {
   for (const upgrade of Object.values(SHIP_UPGRADES)) {
     const hasGoods = Object.keys(upgrade.costs).length > 0;
     assert.equal(hasGoods, upgrade.grade > 1, upgrade.hull + " " + upgrade.part + " " + upgrade.grade);
   }
 });
 
-test("Refits: no two refits unlock at the same level of the same skill", () => {
+test("Components: no two components unlock at the same level of the same skill", () => {
   // Dan: spread unlocks out across the 99 levels.
   const seen = {};
   for (const upgrade of Object.values(SHIP_UPGRADES)) {
     const key = upgrade.skill + upgrade.level;
-    assert.ok(!seen[key], "two refits at " + key);
+    assert.ok(!seen[key], "two components at " + key);
     seen[key] = true;
   }
 });
 
-test("Refits: rules in order - level, then grades in order, then cost", () => {
+test("Components: rules in order - level, then grades in order, then cost", () => {
   const state = createNewGame();
   state.credits = 1_000_000;
   // Drill Mk I needs Mining 2
@@ -3005,7 +3006,7 @@ test("Refits: rules in order - level, then grades in order, then cost", () => {
   assert.equal(state.inventory.thruster_assembly, 60);   // a refused buy takes nothing
 });
 
-test("Refits: stats add up - Mk I hold 138 t, Mk II drill + Mining 11 = 120 x 1.35 t/min", () => {
+test("Components: stats add up - Mk I hold 138 t, Mk II drill + Mining 11 = 120 x 1.35 t/min", () => {
   const state = createNewGame();
   state.shipUpgrades = { prospector: { drill: 2, hold: 1, drive: 1 } };
   state.skills.mining.xp = XP_TABLE[11];             // +5% drill perk
@@ -3013,11 +3014,11 @@ test("Refits: stats add up - Mk I hold 138 t, Mk II drill + Mining 11 = 120 x 1.
   assert.equal(stats.cargoCapacity, 138);            // 120 x 1.15
   assert.ok(Math.abs(stats.miningRate - 120 * 1.35) < 1e-9);   // 1 + 0.15 + 0.15 + 0.05
   assert.ok(Math.abs(stats.speed - 1.1) < 1e-12);
-  // Other hulls are untouched: refits are per hull TYPE.
+  // Other hulls are untouched: components are per hull TYPE.
   assert.equal(getShipStats(state, "excavator").cargoCapacity, 480);
 });
 
-test("Refits: a hold refit always gives whole tonnes (Excavator 480 x 1.45 = 696)", () => {
+test("Components: a hold upgrade always gives whole tonnes (Excavator 480 x 1.45 = 696)", () => {
   const state = createNewGame();
   state.shipUpgrades = { excavator: { hold: 3 } };
   assert.equal(getShipStats(state, "excavator").cargoCapacity, 696);
@@ -3029,7 +3030,7 @@ test("Refits: a hold refit always gives whole tonnes (Excavator 480 x 1.45 = 696
   }
 });
 
-test("Refits: a ship mid-trip finishes it as it was; the NEXT trip uses the refit", () => {
+test("Components: a ship mid-trip finishes it as it was; the NEXT trip uses the new component", () => {
   const state = createNewGame();
   state.skills.mining.xp = XP_TABLE[3];
   state.credits = 10_000;
@@ -3042,30 +3043,30 @@ test("Refits: a ship mid-trip finishes it as it was; the NEXT trip uses the refi
   assert.ok(job.durationMs > firstTrip);             // which takes longer to fill and unload
 });
 
-test("Refits: one purchase fits ships bought later too", () => {
+test("Components: one purchase fits ships bought later too", () => {
   const state = createNewGame();
   state.skills.mining.xp = XP_TABLE[3];
   state.credits = 1_000_000;
   buyShipUpgrade(state, "prospector_hold_1");
-  buyShip(state, "prospector");                       // bought after the refit
+  buyShip(state, "prospector");                       // bought after the component
   const job = startMiningJob(state, "ship-2", "inner_belt", START);
   assert.equal(job.orePerTrip, 138);
 });
 
-test("Refits: a refit unlock shows at its exact level (for the level-up banner)", () => {
+test("Components: a component unlock shows at its exact level (for the level-up banner)", () => {
   assert.deepEqual(getShipUpgradeUnlocksAtLevel("mining", 2), ["prospector_drill_1"]);
   assert.deepEqual(getShipUpgradeUnlocksAtLevel("trade", 2), ["courier_hold_1"]);
   assert.deepEqual(getShipUpgradeUnlocksAtLevel("mining", 4), []);
 });
 
-test("Refits: Prospector drill Mk I is an early goal - affordable within about 15 minutes", () => {
+test("Components: Prospector drill Mk I is an early goal - affordable within about 15 minutes", () => {
   // Design doc, early cadence: a next goal every 10 to 20 minutes.
   const creditsPerHour = PROSPECTOR.orePerTrip * ITEMS.iron_ore.sellPrice * (HOUR / TRIP);
   const minutes = SHIP_UPGRADES.prospector_drill_1.credits / creditsPerHour * 60;
   assert.ok(minutes > 5 && minutes < 20, minutes.toFixed(1) + " minutes");
 });
 
-test("Save: a version 13 save gets no refits, and trips in flight finish on time", () => {
+test("Save: a version 13 save gets no components, and trips in flight finish on time", () => {
   const old = createNewGame();
   startMiningJob(old, "ship-1", "inner_belt", START);
   // What version 13 saved: no unload time, no stored load.
@@ -3087,8 +3088,8 @@ test("Save: a version 13 save gets no refits, and trips in flight finish on time
   assert.equal(state.jobs[0].durationMs, 156 * SECOND);
 });
 
-test("Engine: with refits bought part way, ticking and jumping still end identical", () => {
-  // A refit is an action at a moment; the engine must still give
+test("Engine: with components bought part way, ticking and jumping still end identical", () => {
+  // A component purchase is an action at a moment; the engine must still give
   // the same result however that time is played.
   function play(stepMs) {
     const state = busyEmpire();
@@ -3096,7 +3097,7 @@ test("Engine: with refits bought part way, ticking and jumping still end identic
     state.skills.trade.xp = XP_TABLE[12];
     for (let t = stepMs; t <= 2 * HOUR; t += stepMs) {
       advanceTo(state, START + t);
-      if (t === HOUR) {                              // buy refits at the 1 hour mark
+      if (t === HOUR) {                              // buy components at the 1 hour mark
         buyShipUpgrade(state, "prospector_drill_1");
         buyShipUpgrade(state, "excavator_hold_1");
         buyShipUpgrade(state, "courier_drive_1");
@@ -3108,6 +3109,20 @@ test("Engine: with refits bought part way, ticking and jumping still end identic
   const jumped = play(HOUR);
   assert.equal(getPartGrade(jumped, "courier", "drive"), 1);
   assert.deepEqual(ticked, jumped);
+});
+
+test("Hardpoints: a marker per component, numbered by Mk; no drill marker on a freighter", () => {
+  // Prospector with drill Mk II, stock hold, drive Mk I
+  const art = getShipArt("hull_prospector", { drill: 2, hold: 0, drive: 1 });
+  assert.equal((art.match(/class="hardpoint /g) || []).length, 3);
+  assert.equal((art.match(/hardpoint fitted/g) || []).length, 2);
+  assert.equal((art.match(/hardpoint stock/g) || []).length, 1);
+  assert.ok(art.includes(">II<") && art.includes(">I<"));
+  assert.ok(art.trim().endsWith("</svg>"));            // markers sit inside the drawing
+  // Courier: hold and drive only
+  const courier = getShipArt("hull_courier", { hold: 3, drive: 0 });
+  assert.equal((courier.match(/class="hardpoint /g) || []).length, 2);
+  assert.ok(courier.includes(">III<"));
 });
 
 // -------------------------------------------------------------

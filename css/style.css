@@ -2081,18 +2081,6 @@ body {
   background: repeating-linear-gradient(135deg, var(--amber) 0 3px, var(--amber-dim) 3px 6px);
 }
 
-/* Refits: one heading per hull type */
-.refit-group + .refit-group {
-  margin-top: 16px;
-}
-
-/* The grade pips beside a part's name: filled = fitted */
-.grade-pips {
-  margin-left: 6px;
-  letter-spacing: 2px;
-  color: var(--teal);
-  font-size: 11px;
-}
 
 /* The perk line on a skill card: what EVERY level gives */
 .skill-perk {
@@ -2113,4 +2101,130 @@ body {
 .dev-hint {
   font-size: 11px;
   color: var(--steel-dim);
+}
+
+
+/* ================================================================
+   SHIP COMPONENTS, HARDPOINTS AND "READY TO BUY"
+   ================================================================ */
+
+/* Hardpoint markers on a ship drawing: a dashed ring for a stock
+   part, a solid teal ring with I / II / III for the Mk fitted. */
+.schematic .hardpoint circle {
+  fill: var(--bg);
+  stroke-width: 1.4;
+}
+
+.schematic .hardpoint.stock circle {
+  stroke: var(--steel-dim);
+  stroke-dasharray: 2 2;
+}
+
+.schematic .hardpoint.fitted circle {
+  stroke: var(--teal);
+}
+
+.schematic .hardpoint text {
+  fill: var(--teal);
+  font-size: 8px;
+  font-weight: 700;
+  text-anchor: middle;      /* centre the numeral on the point */
+}
+
+/* One collapsible section per hull type */
+.component-group {
+  border: 1px solid var(--line);
+  margin-bottom: 10px;
+}
+
+.component-summary {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  cursor: pointer;
+  list-style: none;           /* no default triangle */
+}
+
+.component-summary::-webkit-details-marker {
+  display: none;
+}
+
+.component-summary .ship-art {
+  width: 140px;
+  flex: none;
+}
+
+/* On a phone, a smaller drawing leaves room for the name */
+@media (max-width: 480px) {
+  .component-summary .ship-art {
+    width: 96px;
+  }
+}
+
+.component-head {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.component-tally {
+  font-size: 12px;
+  color: var(--steel-dim);
+}
+
+/* A section or panel with something ready to buy: its tally is lit */
+.has-ready .component-tally,
+.has-ready > .panel-head .panel-tag {
+  color: var(--teal);
+}
+
+.component-body {
+  padding: 0 12px 10px;
+}
+
+.component-block + .component-block {
+  margin-top: 12px;
+}
+
+/* The component's total so far, beside its heading */
+.component-total {
+  margin-left: 8px;
+  color: var(--teal);
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+/* An upgrade or component that can be bought right now */
+.upgrade-row.ready {
+  border-left: 2px solid var(--teal);
+  padding-left: 8px;
+}
+
+/* The parts list on a ship (Fleet tab) */
+.parts-list {
+  list-style: none;
+  margin: 0 0 8px;
+  padding: 0;
+  font-size: 12px;
+}
+
+.parts-list li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 10px;
+  padding: 3px 0;
+  border-top: 1px solid var(--line);
+  color: var(--steel-dim);
+}
+
+.parts-list .part-name {
+  width: 84px;
+  color: var(--steel);
+}
+
+.parts-list li.fitted .part-grade {
+  color: var(--teal);
 }

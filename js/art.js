@@ -100,6 +100,69 @@ const SCHEMATICS = {
 };
 
 
+// =============================================================
+// HARDPOINTS: where each ship component sits on a drawing.
+// -------------------------------------------------------------
+// One [x, y] point per component, in the drawing's own units
+// (every drawing is 140 wide by 80 tall). getShipArt() puts a
+// small marker at each one, showing the grade fitted there:
+//   dashed ring          stock (nothing fitted)
+//   teal ring + I/II/III that Mk fitted
+// Like the drawings, these are looked up by art NAME, so new
+// art brings its own hardpoints.
+// =============================================================
+const HARDPOINTS = {
+  hull_prospector: {
+    drive: [19, 40],      // the engine block
+    hold:  [42, 40],      // the cargo bay
+    drill: [105, 40],     // the drill arm
+  },
+  hull_excavator: {
+    drive: [17, 40],      // between the twin engines
+    hold:  [43, 33],      // the cargo bay
+    drill: [108, 40],     // between the twin drill arms
+  },
+  hull_courier: {
+    drive: [23, 40],      // the engine block
+    hold:  [67, 40],      // the spine, between the pods
+  },
+};
+
+// Roman numerals for the grade inside a marker.
+const GRADE_MARKS = { 1: "I", 2: "II", 3: "III" };
+
+
+// -------------------------------------------------------------
+// getShipArt(artName, grades)
+// The drawing with a hardpoint marker on each component.
+// "grades" says what's fitted, e.g. { drill: 1, hold: 0, drive: 2 }.
+// Parts the hull doesn't have (a freighter's drill) are skipped.
+// -------------------------------------------------------------
+export function getShipArt(artName, grades) {
+  const drawing = getSchematic(artName);
+  const points = HARDPOINTS[artName];
+  if (!points) {
+    return drawing;   // no hardpoints known for this art yet
+  }
+
+  let markers = "";
+  for (const [partId, [x, y]] of Object.entries(points)) {
+    if (!(partId in grades)) continue;
+    const grade = grades[partId];
+    // <g> groups the ring and its label so they move together;
+    // "translate" moves the group to the hardpoint.
+    markers += `
+      <g class="hardpoint ${grade > 0 ? "fitted" : "stock"}" transform="translate(${x} ${y})">
+        <circle r="7.5" />
+        ${grade > 0 ? `<text y="2.8">${GRADE_MARKS[grade]}</text>` : ""}
+      </g>`;
+  }
+  // Slip the markers in just before the drawing's closing tag,
+  // so they're drawn on top of the ship.
+  return drawing.replace("</svg>", markers + "\n    </svg>");
+}
+
+
 // -------------------------------------------------------------
 // getSchematic(artName)
 // Returns the drawing for a name, or a plain placeholder box if
