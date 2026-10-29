@@ -143,28 +143,32 @@
           <span class="panel-tag" id="home-name-tag"></span>
         </div>
         <!-- One row per item (built by ui.js from content.js) -->
-        <table class="cargo-table">
-          <thead>
-            <tr>
-              <th>Item</th>
-              <th>Stock</th>
-              <!-- Prices are per tonne: the unit sits in the header so
-                   each price cell stays short enough for a phone. -->
-              <th>Home <small>cr/t</small></th>
-              <th>Hub <small>cr/t</small></th>
-              <th>Value</th>
-              <th><span class="visually-hidden">Sell</span></th>
-            </tr>
-          </thead>
-          <tbody id="cargo-body"></tbody>
-          <tfoot>
-            <tr>
-              <td colspan="4">Total</td>
-              <td id="cargo-total">0 cr</td>
-              <td></td>
-            </tr>
-          </tfoot>
-        </table>
+        <!-- If the table ever can't fit, it scrolls sideways inside
+             the panel instead of spilling over the border -->
+        <div class="table-scroll">
+          <table class="cargo-table">
+            <thead>
+              <tr>
+                <th>Item</th>
+                <th>Stock</th>
+                <!-- Prices are per tonne: the unit sits in the header so
+                     each price cell stays short enough for a phone. -->
+                <th>Home <small>cr/t</small></th>
+                <th>Hub <small>cr/t</small></th>
+                <th>Value</th>
+                <th><span class="visually-hidden">Sell</span></th>
+              </tr>
+            </thead>
+            <tbody id="cargo-body"></tbody>
+            <tfoot>
+              <tr>
+                <td colspan="4">Total</td>
+                <td id="cargo-total">0 cr</td>
+                <td></td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
         <!-- Explains the two prices (text written by ui.js) -->
         <p class="price-note" id="hub-note"></p>
         <!-- ui.js adds the station's name; "Sell all" shows if it can't -->
@@ -278,12 +282,16 @@
         </div>
         <p class="flow-note">What you have, and what's bonded</p>
         <p class="price-note">Bonded stock is never sold, by freighters or the Sell buttons. The refinery, workshop and upgrades can still use it.</p>
-        <table class="cargo-table hold-table">
-          <thead>
-            <tr><th>Item</th><th>Stock</th><th>Bond <small>t</small></th></tr>
-          </thead>
-          <tbody id="hold-body"></tbody>
-        </table>
+        <!-- If the table ever can't fit, it scrolls sideways inside
+             the panel instead of spilling over the border -->
+        <div class="table-scroll">
+          <table class="cargo-table hold-table">
+            <thead>
+              <tr><th>Item</th><th>Stock</th><th>Bond <small>t</small></th></tr>
+            </thead>
+            <tbody id="hold-body"></tbody>
+          </table>
+        </div>
       </div>
 
       <!-- 4. Upgrades for the refinery and workshop, paid in products

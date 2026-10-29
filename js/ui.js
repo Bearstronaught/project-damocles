@@ -470,7 +470,12 @@ function buildCargoTable(actions) {
     row.id = "cargo-" + itemId;
     row.innerHTML = `
       <td>${item.name}</td>
-      <td data-part="amount">0</td>
+      <td>
+        <!-- The stock, with the bonded amount on its own small line
+             underneath (when there is one), so the column stays narrow -->
+        <span data-part="stock">0 t</span>
+        <span class="bonded-note" data-part="bonded" hidden></span>
+      </td>
       <td class="cargo-price">${item.sellPrice}</td>
       <td class="cargo-price cargo-hub">${item.hubPrice}</td>
       <td data-part="value">0 cr</td>
@@ -1022,7 +1027,10 @@ function buildStationHold(actions) {
     row.id = "hold-" + itemId;
     row.innerHTML = `
       <td>${item.name}</td>
-      <td data-part="amount">0 t</td>
+      <td>
+        <span data-part="stock">0 t</span>
+        <span class="bonded-note" data-part="bonded" hidden></span>
+      </td>
       <td class="bond-cell">
         <!-- A wrapping box: on a narrow screen the buttons drop
              below the number instead of spilling out of the panel -->
@@ -1218,6 +1226,19 @@ export function render(state, now) {
 }
 
 
+// -------------------------------------------------------------
+// showStock(row, amount, bonded)
+// Fills a cargo row's Stock cell: the amount, plus a small
+// "100 t bonded" line under it, hidden when nothing is bonded.
+// Used by both the Command cargo hold and the Industry hold.
+// -------------------------------------------------------------
+function showStock(row, amount, bonded) {
+  part(row, "stock").textContent = formatTonnes(amount);
+  const note = part(row, "bonded");
+  note.hidden = bonded === 0;
+  note.textContent = formatTonnes(bonded) + " bonded";
+}
+
 // Credits and the cargo hold
 function renderCargo(state) {
   byId("credits").textContent = formatNumber(state.credits) + " cr";
@@ -1228,20 +1249,21 @@ function renderCargo(state) {
     const sellable = getSellable(state, itemId);         // above the bond
     const bonded = getBondedInHold(state, itemId);       // held back by it
 
-    // "120 t (100 t bonded)" when some of it is bonded
-    const stockText = bonded > 0
-      ? `${formatTonnes(amount)} (${formatTonnes(bonded)} bonded)`
-      : formatTonnes(amount);
-    part(row, "amount").textContent = stockText;
+    // The stock, e.g. "120 t", and under it "100 t bonded" when
+    // some of it is bonded. (Once these were on one line, which
+    // made the column too wide and pushed the Value and Sell
+    // columns out of the panel.)
+    showStock(row, amount, bonded);
     // Only the part that can be sold is worth anything here.
-    part(row, "value").textContent = formatNumber(sellable * item.sellPrice) + " cr";
+    // Short form ("2.4M cr") so big values fit the narrow panel.
+    part(row, "value").textContent = formatCreditsShort(sellable * item.sellPrice);
     part(row, "sell").disabled = sellable === 0;
     // Dim rows for items you have none of
     row.classList.toggle("empty", amount === 0);
 
     // The same on the Industry screen's station hold, with its bond
     const holdRow = byId("hold-" + itemId);
-    part(holdRow, "amount").textContent = stockText;
+    showStock(holdRow, amount, bonded);
     holdRow.classList.toggle("empty", amount === 0 && getBond(state, itemId) === 0);
     const input = part(holdRow, "bond");
     if (!input.dataset.editing && document.activeElement !== input) {
@@ -1252,7 +1274,7 @@ function renderCargo(state) {
   }
 
   const total = getCargoValue(state);
-  byId("cargo-total").textContent = formatNumber(total) + " cr";
+  byId("cargo-total").textContent = formatCreditsShort(total);
   byId("sell-all").disabled = total === 0;
 }
 
@@ -2080,6 +2102,25 @@ export function addLog(message, kind = "system") {
 // 12345 -> "12,345"
 export function formatNumber(number) {
   return Math.floor(number).toLocaleString("en-GB");
+}
+
+// Credits in a short form for tight spaces like the cargo table,
+// in the same style as tonnes. Below 100,000 they're shown in
+// full; above, with k (thousands), M (millions) or B (billions):
+//   9,500 -> "9,500 cr"     250,000 -> "250k cr"
+//   2,404,336 -> "2.4M cr"  1,250,000,000 -> "1.25B cr"
+// (The Treasury at the top always shows the full number.)
+export function formatCreditsShort(credits) {
+  if (credits < 100_000) {
+    return formatNumber(credits) + " cr";
+  }
+  if (credits < 1_000_000) {
+    return threeFigures(credits / 1000) + "k cr";
+  }
+  if (credits < 1_000_000_000) {
+    return threeFigures(credits / 1_000_000) + "M cr";
+  }
+  return threeFigures(credits / 1_000_000_000) + "B cr";
 }
 
 // Cargo in tonnes, switching to bigger units as it grows, with

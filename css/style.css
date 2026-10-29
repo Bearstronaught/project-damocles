@@ -269,6 +269,15 @@ body {
   }
 }
 
+/* The Command screen stays in one column up to 1000 px: side by
+   side any narrower, the cargo panel is too thin for its table
+   (six columns of numbers). Fleet goes on top, cargo below it. */
+@media (max-width: 999px) {
+  .layout[data-screen="command"] {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 /* A panel: thin steel border, with amber "brackets" on two
    corners, like a targeting frame. The brackets are drawn by
    ::before and ::after - extra boxes CSS can add to any element. */
@@ -1259,8 +1268,13 @@ body {
   text-transform: none;
 }
 
-/* On a narrow phone: smaller text and tighter columns */
-@media (max-width: 480px) {
+/* When the TABLE is short of room: smaller text and tighter
+   columns. This is a "container query": it asks how wide the
+   table's own box is (.table-scroll, set up as a container
+   below), not how wide the screen is. That matters because the
+   Command screen's cargo panel is narrow on a desktop too: it
+   has the same room there as on a phone. */
+@container (max-width: 380px) {
   .cargo-table {
     font-size: 12px;
   }
@@ -2020,4 +2034,32 @@ body {
   color: var(--amber);
   border-color: var(--amber);
   background: var(--amber-faint);
+}
+
+
+/* "100 t bonded" on its own small line under a cargo row's stock.
+   display: block puts it on a new line; the [hidden] rule keeps
+   it gone when nothing is bonded (display: block would otherwise
+   override the hidden attribute). */
+.bonded-note {
+  display: block;
+  white-space: normal;        /* may wrap: "123 kt" / "bonded" */
+  font-size: 11px;
+  color: var(--steel-dim);
+}
+
+.bonded-note[hidden] {
+  display: none;
+}
+
+/* The safety net round each cargo table: if the table is ever
+   wider than its panel (a huge number, a tiny screen), it scrolls
+   sideways inside the panel rather than spilling over the border
+   or making the whole page scroll. */
+.table-scroll {
+  overflow-x: auto;
+  max-width: 100%;
+  /* Makes this box a "container", so the @container rule for
+     .cargo-table above can check how much room it has. */
+  container-type: inline-size;
 }
