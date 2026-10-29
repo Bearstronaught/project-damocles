@@ -26,6 +26,7 @@ import { createNewGame, SAVE_VERSION } from "../js/state.js";
 import { getMiningXpShare, startMiningJob, startHaulJob, getJobForShip, processJobs, cancelJob, recallJob, resumeJob, getJobProgress, getJobPhase, getTripPlan, getHaulPlan, loadCargo } from "../js/jobs.js";
 import { sellAll, sellEverything, getCargoValue, sellAtHub, getTradeXp, getPrice } from "../js/trade.js";
 import { parseSave, applyOfflineProgress, exportSave, importSave } from "../js/save.js";
+import { advanceTo } from "../js/simulation.js";
 import { XP_TABLE, getLevelForXp, getLevel, getLevelProgress, addXp, isShipTypeUnlocked, MAX_LEVEL } from "../js/skills.js";
 import { canBuyShip, buyShip, canSellShip, sellShip, getSellValue, renameShip, getShipPrice } from "../js/shipyard.js";
 import { getCommandCapacity, getCommandUsed, getNextUpgradeCost, buyUpgrade } from "../js/command.js";
@@ -321,7 +322,7 @@ test("A broken save is rejected safely instead of crashing", () => {
 test("Offline: 1 hour away pays every trip that fitted (24 trips)", () => {
   const state = createNewGame();
   startMiningJob(state, "ship-1", "inner_belt", START);
-  state.lastSavedAt = START;
+  state.simulatedUpTo = START;
   const report = applyOfflineProgress(state, START + 1 * HOUR);
   assert.equal(state.inventory.iron_ore, 24 * PROSPECTOR.orePerTrip);
   assert.equal(report.secondsAway, 3600);
@@ -331,7 +332,7 @@ test("Offline: 1 hour away pays every trip that fitted (24 trips)", () => {
 test("Offline: 3 days away only counts the 24 hour cap", () => {
   const state = createNewGame();
   startMiningJob(state, "ship-1", "inner_belt", START);
-  state.lastSavedAt = START;
+  state.simulatedUpTo = START;
   const now = START + 72 * HOUR;
   const report = applyOfflineProgress(state, now);
 
@@ -1084,7 +1085,7 @@ test("Offline: an hour away with a barge and a Courier sells at the hub", () => 
   const state = gameWithCourier("full");
   startMiningJob(state, "ship-1", "inner_belt", START);
   startHaulJob(state, "ship-2", START);
-  state.lastSavedAt = START;
+  state.simulatedUpTo = START;
   const report = applyOfflineProgress(state, START + HOUR);
   const haul = report.results.find((r) => r.kind === "haul");
   // 24 Prospector trips = 2,880 t iron. Full loads leave at 12m 30s,
@@ -1440,9 +1441,9 @@ test("A recalled ship's trip survives a save and time away", () => {
   const state = createNewGame();
   const job = startMiningJob(state, "ship-1", "inner_belt", START);
   recallJob(state, job.id, START + 75 * SECOND);
-  state.lastSavedAt = START + 75 * SECOND;
+  state.simulatedUpTo = START + 75 * SECOND;
   const loaded = importSave(exportSave(state)).state;
-  loaded.lastSavedAt = START + 75 * SECOND;          // (export stamps "now")
+  // (the export carries simulatedUpTo with it, so time away counts from there)
   applyOfflineProgress(loaded, START + HOUR);
   assert.equal(loaded.inventory.iron_ore, 60);       // just the part-load
   assert.equal(loaded.jobs.length, 0);
@@ -1706,7 +1707,7 @@ test("Offline: a barge feeds the refinery for an hour, and no ore is lost or mad
   const state = gameWithRefinery();
   startMiningJob(state, "ship-1", "inner_belt", START);
   setRecipe(state, 0, "iron_bar", START);
-  state.lastSavedAt = START;
+  state.simulatedUpTo = START;
   applyOfflineProgress(state, START + HOUR);
 
   // Every tonne mined is either still ore, in the furnace, or became bars (2 t ore -> 1 t bar).
@@ -1721,9 +1722,9 @@ test("A batch in the furnace survives saving, and finishes while away", () => {
   const state = gameWithRefinery();
   state.inventory.iron_ore = 60;
   setRecipe(state, 0, "iron_bar", START);
-  state.lastSavedAt = START + 10 * SECOND;
+  state.simulatedUpTo = START + 10 * SECOND;
   const loaded = importSave(exportSave(state)).state;
-  loaded.lastSavedAt = START + 10 * SECOND;            // (export stamps "now")
+  // (the export carries simulatedUpTo with it, so time away counts from there)
   applyOfflineProgress(loaded, START + HOUR);
   assert.equal(loaded.inventory.iron_bar, 30);
 });
@@ -1747,6 +1748,133 @@ test("Every recipe uses items that exist", () => {
       assert.ok(ITEMS[itemId], `${recipeId} uses unknown item "${itemId}"`);
     }
   }
+});
+
+
+// =============================================================
+// THE SIMULATION ENGINE (js/simulation.js)
+// The design doc's test: "an hour away must give the same
+// result as an hour played". These play a busy economy - barges
+// on both fields, two freighters, two refinery slots, fleet XP
+// sharing, a Refining level-up part way - in different ways and
+// compare EVERY number in the save, not just a few.
+// =============================================================
+
+// A busy mid-game empire, everything running from START.
+function busyEmpire() {
+  const state = createNewGame();
+  state.simulatedUpTo = START;
+  state.lastSavedAt = 0;                         // (differs per run, so ignored)
+  state.skills.mining.xp = XP_TABLE[12];         // both fields and the refinery open
+  state.skills.refining.xp = XP_TABLE[14];       // reaches 15 during the run
+  state.credits = 10_000_000;
+  state.commandUpgrades = 5;
+  buyShip(state, "prospector");                  // ship-2
+  buyShip(state, "excavator");                   // ship-3
+  buyShip(state, "courier").haulMode = "constant";   // ship-4
+  buyShip(state, "courier").haulMode = "full";       // ship-5
+  startMiningJob(state, "ship-1", "inner_belt", START);
+  startMiningJob(state, "ship-2", "outer_belt", START);
+  startMiningJob(state, "ship-3", "inner_belt", START);
+  startHaulJob(state, "ship-4", START);
+  startHaulJob(state, "ship-5", START);
+  setRecipe(state, 0, "iron_bar", START);
+  setRecipe(state, 1, "nickel_bar", START);
+  return state;
+}
+
+test("Engine: 6 hours of 250 ms ticks, random ticks and one big jump end identical", () => {
+  // 1. One jump, like coming back after 6 hours.
+  const jumped = busyEmpire();
+  advanceTo(jumped, START + 6 * HOUR);
+
+  // 2. Ticking 4 times a second, like playing for 6 hours.
+  const ticked = busyEmpire();
+  for (let t = 250; t <= 6 * HOUR; t += 250) {
+    advanceTo(ticked, START + t);
+  }
+
+  // 3. Uneven gaps from 0 to 20 minutes, like a player who keeps
+  //    popping in and out. A fixed "seed" makes the same gaps
+  //    every run, so a failure can be repeated.
+  let seed = 42;
+  const randomFraction = () => (seed = (seed * 1103515245 + 12345) % 2 ** 31) / 2 ** 31;
+  const random = busyEmpire();
+  for (let t = 0; t < 6 * HOUR; ) {
+    t = Math.min(6 * HOUR, t + Math.floor(randomFraction() * 20 * MINUTE));
+    advanceTo(random, START + t);
+  }
+
+  // Something actually happened (so we're not comparing empty games)...
+  assert.ok(jumped.skills.trade.xp > 0 && jumped.skills.refining.xp > XP_TABLE[15]);
+  // ...and every credit, tonne, XP point and job timer matches.
+  assert.deepEqual(ticked, jumped);
+  assert.deepEqual(random, jumped);
+});
+
+test("Engine: a laptop asleep for 3 days with the game open only counts 24 hours", () => {
+  // Before simulation.js, live play had no cap, so this earned
+  // all 3 days while closing the game earned 24 hours.
+  const awake = createNewGame();
+  const closed = createNewGame();
+  for (const state of [awake, closed]) {
+    startMiningJob(state, "ship-1", "inner_belt", START);
+    state.simulatedUpTo = START;
+  }
+  advanceTo(awake, START + 72 * HOUR);              // the game loop waking up
+  applyOfflineProgress(closed, START + 72 * HOUR);  // loading after time away
+
+  const tripsIn24h = Math.floor(24 * HOUR / TRIP);
+  assert.equal(awake.inventory.iron_ore, tripsIn24h * PROSPECTOR.orePerTrip);
+  assert.equal(awake.inventory.iron_ore, closed.inventory.iron_ore);
+});
+
+test("Engine: the clock set back an hour awards nothing, and ships don't freeze", () => {
+  const state = createNewGame();
+  startMiningJob(state, "ship-1", "inner_belt", START);
+  state.simulatedUpTo = START;
+
+  advanceTo(state, START + TRIP / 2);                   // half a trip in
+  const report = advanceTo(state, START + TRIP / 2 - HOUR);   // clock jumps back 1 hour
+  assert.equal(report.secondsCounted, 0);
+  assert.equal(state.inventory.iron_ore, 0);
+
+  // Half a trip later (by the new clock) the ship docks, as it
+  // would have done anyway. Without the slide it would sit
+  // frozen for a whole hour.
+  advanceTo(state, START + TRIP - HOUR);
+  assert.equal(state.inventory.iron_ore, PROSPECTOR.orePerTrip);
+});
+
+test("Engine: playing to the same moment twice earns nothing the second time", () => {
+  const state = createNewGame();
+  startMiningJob(state, "ship-1", "inner_belt", START);
+  state.simulatedUpTo = START;
+  advanceTo(state, START + HOUR);
+  const ore = state.inventory.iron_ore;
+  advanceTo(state, START + HOUR);
+  assert.equal(state.inventory.iron_ore, ore);
+});
+
+test("Engine: the run clock counts only time actually played (3 days away = 24 hours)", () => {
+  const state = createNewGame();
+  state.simulatedUpTo = START;
+  advanceTo(state, START + 2 * HOUR);
+  advanceTo(state, START + 2 * HOUR + 72 * HOUR);
+  assert.equal(state.simulatedMs, 26 * HOUR);
+});
+
+test("A version 7 save gains the simulation clock, starting from when it was saved", () => {
+  const oldSave = {
+    version: 7, credits: 100, inventory: { iron_ore: 0 }, commandUpgrades: 0, nextShipNumber: 2,
+    ships: [{ id: "ship-1", name: "Rusty Pick", type: "prospector", destination: "inner_belt" }],
+    skills: { mining: { xp: 0 }, trade: { xp: 0 }, refining: { xp: 0 } },
+    jobs: [], lastSavedAt: START,
+  };
+  const state = parseSave(JSON.stringify(oldSave));
+  assert.equal(state.version, SAVE_VERSION);
+  assert.equal(state.simulatedUpTo, START);
+  assert.equal(state.simulatedMs, 0);
 });
 
 // -------------------------------------------------------------

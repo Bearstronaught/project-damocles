@@ -15,7 +15,8 @@
 
 import { RULES, ITEMS, FIELDS, SHIP_TYPES, SKILLS, HUB, HOME, HAUL_MODES, RECIPES, REFINERY } from "../data/content.js";
 import { createNewGame, findShip } from "./state.js";
-import { startMiningJob, startHaulJob, recallJob, resumeJob, getJobForShip, processJobs } from "./jobs.js";
+import { startMiningJob, startHaulJob, recallJob, resumeJob, getJobForShip } from "./jobs.js";
+import { advanceTo } from "./simulation.js";
 import { sellAll, sellEverything } from "./trade.js";
 import { buyShip, sellShip, renameShip } from "./shipyard.js";
 import { buyUpgrade, getCommandCapacity } from "./command.js";
@@ -241,14 +242,62 @@ const actions = {
 
 
 // -------------------------------------------------------------
+// Every action catches up first.
+// -------------------------------------------------------------
+// Before any button does anything, the game is played up to this
+// exact moment. Otherwise a click could land just after a ship
+// was due to dock but before the loop had noticed (up to 250 ms
+// later, or much longer if the computer had been asleep), and
+// the action would see an out-of-date fleet.
+//
+// This loop wraps each action in a small function that runs
+// tick() and THEN the original action. getState is left alone:
+// it only reads.
+for (const name of Object.keys(actions)) {
+  if (name === "getState") continue;
+  const originalAction = actions[name];
+  // "...args" passes along whatever the button gave the action
+  // (a ship ID, a recipe, and so on), however many there are.
+  actions[name] = (...args) => {
+    tick();
+    return originalAction(...args);
+  };
+}
+
+
+// A gap at least this long gets the "welcome back" summary.
+const WELCOME_BACK_SECONDS = 60;
+
+// -------------------------------------------------------------
 // tick() - one turn of the game loop.
 // -------------------------------------------------------------
 function tick() {
+  // While the tab is hidden, do nothing at all: no catching up,
+  // no drawing (design doc safeguard - drawing in a hidden tab
+  // wastes phone battery). Nothing is lost: the game remembers
+  // how far it got (state.simulatedUpTo), and the first tick
+  // after you come back plays out the whole gap in one go.
+  if (document.hidden) {
+    return;
+  }
+
   const now = Date.now();
 
-  // Finish any trips that are due and log what came back.
-  const results = processJobs(state, now);
-  for (const result of results) {
+  // Play the game forward to now (simulation.js). This is the
+  // same call the game makes on load after time away.
+  const report = advanceTo(state, now);
+
+  // A big gap while the page was open - the computer was asleep,
+  // or the browser paused a background tab - reads better as one
+  // "welcome back" summary than as dozens of log lines.
+  if (report.secondsAway >= WELCOME_BACK_SECONDS) {
+    reportOfflineProgress(report);
+    render(state, now);
+    return;
+  }
+
+  // Log what came back.
+  for (const result of report.results) {
     // Refinery batches have no ship.
     if (result.kind === "refine") {
       const batches = result.trips === 1 ? "" : ` in ${result.trips} batches`;

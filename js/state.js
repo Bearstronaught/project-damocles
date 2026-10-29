@@ -21,7 +21,8 @@
 //   Version 5: added the Trade skill
 //   Version 6: cargo in tonnes - all amounts and credits x10
 //   Version 7: added the Refining skill (and refinery jobs)
-export const SAVE_VERSION = 7;
+//   Version 8: one simulation clock (simulatedUpTo, simulatedMs)
+export const SAVE_VERSION = 8;
 
 
 // -------------------------------------------------------------
@@ -76,8 +77,16 @@ export function createNewGame() {
     jobs: [],
 
     // When the game was last saved, as a timestamp.
-    // Used to work out how long the player was away.
     lastSavedAt: Date.now(),
+
+    // How far the game has been PLAYED up to, as a timestamp.
+    // simulation.js plays from here to "now" every tick, and on
+    // load after time away - see advanceTo().
+    simulatedUpTo: Date.now(),
+
+    // The run clock: total time actually played, in ms. Time
+    // past the offline cap doesn't count (it isn't played).
+    simulatedMs: 0,
   };
 }
 

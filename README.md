@@ -33,7 +33,8 @@ data/content.js     game content: names and descriptions of items, ships, fields
 data/balance.js     every balance number, written by the balance sheet (don't edit by hand)
 js/main.js          starting point: loads the save, runs the game loop, autosaves
 js/state.js         what the player owns: credits, cargo, ships, jobs
-js/jobs.js          timed work (mining trips) and finishing jobs that are due
+js/simulation.js    the one way time moves forward: plays the game up to "now"
+js/jobs.js          timed work (trips, hauls) and the engine that replays events in order
 js/skills.js        XP, levels, and which ships each level unlocks
 js/shipyard.js      buying and selling ships
 js/command.js       command capacity: points per hull, upgrades
@@ -47,13 +48,13 @@ js/art.js           code-drawn ship schematics, looked up by name
 tests/              automated checks for the game rules
 ```
 
-A good reading order for learning: `data/content.js` → `js/state.js` → `js/jobs.js` → `js/main.js`.
+A good reading order for learning: `data/content.js` → `js/state.js` → `js/jobs.js` → `js/simulation.js` → `js/main.js`.
 
 **Changing the balance:** every number (prices, trip times, ship stats, XP rates, unlock levels) lives in the [Project Damocles balance sheet](https://docs.google.com/spreadsheets/d/1IPg6oD1_G3p275AcyR5mKDotaMjmbSYgu1fl5WvXvbk/edit) on Google Sheets. Change a blue number there and its calculation tabs show the effect straight away: trip times, credits and XP per hour, payback times, and how long each level takes. To put the new numbers in the game, copy column A of the sheet's Export tab over everything in `data/balance.js`, then run the tests.
 
 Words (names, descriptions) stay in `data/content.js`. Adding a new ship, field or ore means a row in the sheet *and* an entry in `content.js`; the tests check the two files list the same things. Most tests read the numbers rather than hard-coding them, but the first few in `tests/logic-tests.js` record today's exact pacing on purpose, so update those when you change it.
 
-**The key idea:** a job never counts down. It stores *when it started* and *how long it takes*, and the game compares that with the clock. That's why the same code handles both live play and time spent away.
+**The key idea:** a job never counts down. It stores *when it started* and *how long it takes*, and the game compares that with the clock. That's why the same code handles both live play and time spent away: `js/simulation.js` plays the game from where it got to up to "now", whether that's 250 ms later (the game loop) or 8 hours later (loading the game). It also applies the 24-hour cap and ignores a clock set backwards. The tests prove it by playing a busy empire for 6 hours three ways (tiny ticks, random gaps, one jump) and checking every number matches.
 
 ## Design
 

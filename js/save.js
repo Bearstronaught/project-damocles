@@ -11,7 +11,8 @@
 
 import { RULES } from "../data/content.js";
 import { SAVE_VERSION } from "./state.js";
-import { processJobs, getTripPlan } from "./jobs.js";
+import { getTripPlan } from "./jobs.js";
+import { advanceTo } from "./simulation.js";
 
 // The label our save is stored under in localStorage.
 const SAVE_KEY = "project-damocles-save";
@@ -120,7 +121,9 @@ const EXPORT_PREFIX = "DAMOCLES:";
 // Turns the game into one line of text for the player to keep.
 // -------------------------------------------------------------
 export function exportSave(state) {
-  state.lastSavedAt = Date.now();   // so time away counts from NOW
+  state.lastSavedAt = Date.now();
+  // (Time away after importing counts from state.simulatedUpTo,
+  // which the game loop keeps at "now" while you play.)
   const json = JSON.stringify(state);
   return EXPORT_PREFIX + textToBase64(json);
 }
@@ -190,7 +193,9 @@ function looksLikeASave(state) {
     Array.isArray(state.ships) && state.ships.length > 0 &&
     Array.isArray(state.jobs) &&
     typeof state.skills === "object" && state.skills !== null &&
-    typeof state.lastSavedAt === "number"
+    typeof state.lastSavedAt === "number" &&
+    typeof state.simulatedUpTo === "number" &&
+    typeof state.simulatedMs === "number"
   );
 }
 
@@ -311,7 +316,17 @@ function upgradeSave(state) {
     state.version = 7;
   }
 
-  // (Future: if (state.version === 7) { ...; state.version = 8; })
+  // --- Version 7 -> 8: one simulation clock ---
+  // Older saves only knew when they were last SAVED. The game is
+  // always played up to the moment it saves, so that's also how
+  // far it had been played. The run clock starts at 0.
+  if (state.version === 7) {
+    state.simulatedUpTo = state.lastSavedAt;
+    state.simulatedMs = 0;
+    state.version = 8;
+  }
+
+  // (Future: if (state.version === 8) { ...; state.version = 9; })
 
   if (state.version > SAVE_VERSION) {
     // A save from a NEWER version of the game than this one.
@@ -325,37 +340,14 @@ function upgradeSave(state) {
 // applyOfflineProgress(state, now)
 // Catches the game up on time spent away.
 //
-// The 24-hour cap: if the player was away longer, only 24 hours
-// count. We process jobs up to (last save + 24h), then slide
-// every job's start time forward by the extra time, so the
-// ships carry on from "now" rather than having a huge backlog.
+// This is no longer special: it's the same advanceTo() the game
+// loop calls 4 times a second (see simulation.js), which also
+// applies the 24-hour cap and the clock guards. It's kept as its
+// own name because "apply offline progress" says what it's FOR.
 //
 // Returns a summary for the "welcome back" message:
 //   { secondsAway, secondsCounted, results }
 // -------------------------------------------------------------
 export function applyOfflineProgress(state, now) {
-  const awayMs = now - state.lastSavedAt;
-  const capMs = RULES.offlineCapHours * 60 * 60 * 1000;   // hours -> ms
-
-  // Count whichever is smaller: actual time away, or the cap.
-  const countedMs = Math.min(awayMs, capMs);
-  const countUpTo = state.lastSavedAt + countedMs;
-
-  // Same function the game uses every tick - just with a
-  // bigger jump in time.
-  const results = processJobs(state, countUpTo);
-
-  // Time beyond the cap is skipped: push jobs forward by it.
-  const skippedMs = awayMs - countedMs;
-  if (skippedMs > 0) {
-    for (const job of state.jobs) {
-      job.startedAt += skippedMs;
-    }
-  }
-
-  return {
-    secondsAway: Math.floor(awayMs / 1000),
-    secondsCounted: Math.floor(countedMs / 1000),
-    results: results,
-  };
+  return advanceTo(state, now);
 }
