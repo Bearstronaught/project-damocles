@@ -198,7 +198,8 @@ function looksLikeASave(state) {
     typeof state.simulatedMs === "number" &&
     typeof state.bonded === "object" && state.bonded !== null &&
     typeof state.upgrades === "object" && state.upgrades !== null &&
-    typeof state.carry === "object" && state.carry !== null
+    typeof state.carry === "object" && state.carry !== null &&
+    typeof state.standingOrders === "object" && state.standingOrders !== null
   );
 }
 
@@ -353,7 +354,13 @@ function upgradeSave(state) {
     state.version = 11;
   }
 
-  // (Future: if (state.version === 11) { ...; state.version = 12; })
+  // --- Version 11 -> 12: standing orders ---
+  if (state.version === 11) {
+    state.standingOrders = {};
+    state.version = 12;
+  }
+
+  // (Future: if (state.version === 12) { ...; state.version = 13; })
 
   if (state.version > SAVE_VERSION) {
     // A save from a NEWER version of the game than this one.

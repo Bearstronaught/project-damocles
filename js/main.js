@@ -23,7 +23,7 @@ import { buyShip, sellShip, renameShip } from "./shipyard.js";
 import { buyUpgrade, getCommandCapacity } from "./command.js";
 import { getUnlocksAtLevel, getFieldUnlocksAtLevel, isFieldUnlocked } from "./skills.js";
 import { setRecipe, getRefineJob, getRecipeUnlocksAtLevel, getSlotUnlocksAtLevel } from "./refinery.js";
-import { addOrder, cancelOrder, getWorkshopJob, getWorkshopRecipeUnlocksAtLevel, getWorkshopSlotUnlocksAtLevel, isQueueUnlockLevel, getQueueLimit } from "./workshop.js";
+import { addOrder, cancelOrder, getWorkshopJob, getWorkshopRecipeUnlocksAtLevel, getWorkshopSlotUnlocksAtLevel, isQueueUnlockLevel, getQueueLimit, addStandingOrder, removeStandingOrder, getStandingOrders } from "./workshop.js";
 import { buyIndustryUpgrade, getUpgradeUnlocksAtLevel } from "./upgrades.js";
 import { saveGame, loadGame, deleteSave, applyOfflineProgress, exportSave, importSave } from "./save.js";
 import { showLevelBanner } from "./banner.js";
@@ -176,6 +176,24 @@ const actions = {
       if (returning) {
         addLog(`The unfinished batch's ${describeCargo(returning)} went back into the hold.`, "make");
       }
+    }
+    refresh();
+  },
+
+  // "Keep [target] t of [product] in stock" on a workshop slot.
+  addStandingOrder(slot, recipeId, target) {
+    const result = addStandingOrder(state, slot, recipeId, target, Date.now());
+    if (result.ok) {
+      addLog(`Workshop slot ${slot + 1}: standing order to keep ${formatTonnes(target)} of ${WORKSHOP_RECIPES[recipeId].name.toLowerCase()} in stock.`, "make");
+    }
+    refresh();
+    return result;
+  },
+
+  removeStandingOrder(slot, index) {
+    const order = getStandingOrders(state, slot)[index];
+    if (order && removeStandingOrder(state, slot, index, Date.now())) {
+      addLog(`Workshop slot ${slot + 1}: standing order for ${WORKSHOP_RECIPES[order.recipeId].name.toLowerCase()} removed.`, "make");
     }
     refresh();
   },

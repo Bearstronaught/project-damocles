@@ -32,7 +32,7 @@ import { isOwned, getEffect, canBuyIndustryUpgrade, buyIndustryUpgrade, isShown 
 import { addItemWithCarry } from "../js/state.js";
 import { UPGRADES } from "../data/content.js";
 import { getMaxSlots, getBatchOutput } from "../js/refinery.js";
-import { getMaxOrderBatches } from "../js/workshop.js";
+import { getMaxOrderBatches, addStandingOrder, removeStandingOrder, getStandingOrders } from "../js/workshop.js";
 import { XP_TABLE, getLevelForXp, getLevel, getLevelProgress, addXp, isShipTypeUnlocked, MAX_LEVEL } from "../js/skills.js";
 import { canBuyShip, buyShip, canSellShip, sellShip, getSellValue, renameShip, getShipPrice } from "../js/shipyard.js";
 import { getCommandCapacity, getCommandUsed, getNextUpgradeCost, buyUpgrade } from "../js/command.js";
@@ -2466,6 +2466,141 @@ test("Engine: 6 hours with every upgrade and a smart queue, ticked or jumped, en
     advanceTo(ticked, START + t);
   }
   assert.ok(jumped.skills.manufacturing.xp > XP_TABLE[14]);  // the workshop really ran
+  assert.deepEqual(ticked, jumped);
+});
+
+
+// =============================================================
+// STANDING ORDERS (the Control centre)
+// "Keep X t of a product in stock": runs when no work order can,
+// while the stock is below target. Never finishes.
+// =============================================================
+
+// A workshop with the Control centre built and plenty of bars.
+function gameWithControlCentre() {
+  const state = gameWithWorkshop(30);
+  state.upgrades.control_centre = true;
+  state.inventory.iron_bar = 1000;
+  return state;
+}
+
+test("Standing orders need the Control centre", () => {
+  const state = gameWithWorkshop(30);
+  assert.match(addStandingOrder(state, 0, "hull_plating", 60, START).reason, /Control centre/);
+  assert.deepEqual(state.standingOrders, {});
+});
+
+test("A standing order tops stock up to its target, then stops", () => {
+  const state = gameWithControlCentre();
+  assert.equal(addStandingOrder(state, 0, "hull_plating", 60, START).ok, true);
+  assert.equal(getWorkshopJob(state, 0).status, "working");
+  advanceTo(state, START + 10 * PLATING_MS);                  // time for 10 batches...
+  assert.equal(state.inventory.hull_plating, 60);            // ...but it stopped at 60 t (2 batches)
+  assert.equal(state.inventory.iron_bar, 940);
+  assert.equal(getWorkshopJob(state, 0).status, "waiting");   // the slot keeps its job, ready
+});
+
+test("When stock is used or sold, the standing order tops it back up", () => {
+  const state = gameWithControlCentre();
+  addStandingOrder(state, 0, "hull_plating", 60, START);
+  advanceTo(state, START + 3 * PLATING_MS);
+  sellAll(state, "hull_plating");                            // stock drops to 0
+  advanceTo(state, START + 3 * PLATING_MS + SECOND);         // the slot notices...
+  advanceTo(state, START + 6 * PLATING_MS);                  // ...and makes it again
+  assert.equal(state.inventory.hull_plating, 60);
+});
+
+test("Work orders come first; the standing order waits until the queue is done", () => {
+  const state = gameWithControlCentre();
+  addStandingOrder(state, 0, "hull_plating", 60, START);     // starts at once
+  addOrder(state, 0, "hull_plating", 3, START + PLATING_MS / 2);
+  advanceTo(state, START + PLATING_MS);                      // the standing batch finishes
+  const job = getWorkshopJob(state, 0);
+  assert.equal(job.standingIndex, null);                     // now the work order runs
+  assert.equal(job.orders[0].done, 0);
+  advanceTo(state, START + 4 * PLATING_MS);                  // the 3-batch order is done
+  assert.equal(state.inventory.hull_plating, 120);           // 30 standing + 90 ordered
+  assert.equal(job.orders.length, 0);
+  assert.equal(job.status, "waiting");                       // above target: nothing to top up
+});
+
+test("Standing orders are refused when full, doubled, locked or a bad amount", () => {
+  const state = gameWithControlCentre();
+  assert.match(addStandingOrder(state, 0, "hull_plating", 0, START).reason, /1 or more/);
+  assert.match(addStandingOrder(state, 0, "hull_plating", 2.5, START).reason, /1 or more/);
+  addStandingOrder(state, 0, "hull_plating", 60, START);
+  assert.match(addStandingOrder(state, 0, "hull_plating", 90, START).reason, /already keeps/);
+  addStandingOrder(state, 0, "wiring_coils", 30, START);
+  assert.match(addStandingOrder(state, 0, "cargo_pod", 30, START).reason, /already has 2/);
+  const low = gameWithControlCentre();
+  low.skills.manufacturing.xp = XP_TABLE[4];
+  assert.match(addStandingOrder(low, 0, "wiring_coils", 30, START).reason, /Manufacturing 5/);
+});
+
+test("Removing a standing order mid-batch hands the metal back, and an empty slot goes idle", () => {
+  const state = gameWithControlCentre();
+  addStandingOrder(state, 0, "hull_plating", 60, START);
+  assert.equal(state.inventory.iron_bar, 970);
+  removeStandingOrder(state, 0, 0, START + SECOND);
+  assert.equal(state.inventory.iron_bar, 1000);
+  assert.deepEqual(state.standingOrders, {});
+  assert.equal(getWorkshopJob(state, 0), undefined);
+});
+
+test("Cancelling a work order while a standing batch runs leaves the standing batch alone", () => {
+  // (A bug caught while building: the cancel used to think the
+  // running batch belonged to the first work order.)
+  const state = gameWithControlCentre();
+  addStandingOrder(state, 0, "hull_plating", 60, START);     // standing batch running
+  state.inventory.iron_bar = 0;                              // so the work order can't start
+  addOrder(state, 0, "hull_plating", 2, START);
+  cancelOrder(state, 0, 0, START + SECOND);
+  const job = getWorkshopJob(state, 0);
+  assert.equal(job.status, "working");                       // still making the standing batch
+  assert.equal(job.standingIndex, 0);
+  assert.equal(job.startedAt, START);                        // not restarted: no progress lost
+  assert.equal(state.inventory.iron_bar, 0);                 // no metal wrongly handed back
+});
+
+test("Standing orders survive saving, and keep working while away", () => {
+  const state = gameWithControlCentre();
+  addStandingOrder(state, 0, "hull_plating", 90, START);
+  const loaded = importSave(exportSave(state)).state;
+  applyOfflineProgress(loaded, START + HOUR);
+  assert.equal(loaded.inventory.hull_plating, 90);
+  assert.equal(getStandingOrders(loaded, 0).length, 1);
+});
+
+test("A version 11 save gains an empty set of standing orders", () => {
+  const oldSave = {
+    version: 11, credits: 100, inventory: { iron_bar: 30 }, bonded: {}, upgrades: {}, carry: {},
+    commandUpgrades: 0, nextShipNumber: 2,
+    ships: [{ id: "ship-1", name: "Rusty Pick", type: "prospector", destination: "inner_belt" }],
+    skills: { mining: { xp: 0 }, trade: { xp: 0 }, refining: { xp: 0 }, manufacturing: { xp: 0 } },
+    jobs: [], lastSavedAt: START, simulatedUpTo: START, simulatedMs: 0,
+  };
+  const state = parseSave(JSON.stringify(oldSave));
+  assert.equal(state.version, SAVE_VERSION);
+  assert.deepEqual(state.standingOrders, {});
+});
+
+test("Engine: standing orders with freighters selling the product, ticked or jumped, end identical", () => {
+  // The busy empire's constant-run Courier keeps selling plating,
+  // so the standing order keeps topping it up: a production line.
+  function standingEmpire() {
+    const state = busyEmpire();
+    state.skills.manufacturing.xp = XP_TABLE[30];
+    state.upgrades.control_centre = true;
+    addStandingOrder(state, 0, "hull_plating", 60, START);
+    return state;
+  }
+  const jumped = standingEmpire();
+  advanceTo(jumped, START + 6 * HOUR);
+  const ticked = standingEmpire();
+  for (let t = 250; t <= 6 * HOUR; t += 250) {
+    advanceTo(ticked, START + t);
+  }
+  assert.ok(jumped.skills.manufacturing.xp > XP_TABLE[30] + 1000);   // it kept working
   assert.deepEqual(ticked, jumped);
 });
 

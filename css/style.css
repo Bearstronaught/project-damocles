@@ -1867,3 +1867,27 @@ body {
   white-space: nowrap;
   display: inline-block;
 }
+
+
+/* =============================================================
+   STANDING ORDERS (inside a workshop slot, with the Control centre)
+   ============================================================= */
+.standing {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--line-strong);
+}
+
+.standing-title {
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--steel-dim);
+}
+
+/* The Keep menu shares a line with "In stock" and the button,
+   unlike the order form's menu, which gets a line to itself */
+.standing .order-form .dest-select-row:first-child {
+  flex: 1 1 160px;
+  min-width: 0;
+}

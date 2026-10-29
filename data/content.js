@@ -342,6 +342,8 @@ export const WORKSHOP_RECIPES = {
 //   maxOrderBatches      the most batches one order can ask for
 //   speedPerLevel        each level above 1 makes batches this much
 //                        faster (0.005 = 0.5% per level)
+//   standingPerSlot      with the Control centre, how many standing
+//                        orders each slot can hold
 export const WORKSHOP = BALANCE.workshop;
 
 
@@ -366,6 +368,7 @@ export const WORKSHOP = BALANCE.workshop;
 //     workshopScrap  this share of a workshop batch's metal back
 //     orderSize      this many more batches allowed in one order
 //     smartQueue     a blocked work order can be skipped
+//     standingOrders the Control centre: standing orders unlocked
 //   value     how much of the effect (see above)
 export const UPGRADES = {
   furnace_lining_1: {
@@ -437,6 +440,10 @@ export const UPGRADES = {
     name: "Precision tooling III",
     description: "Workshop batches another 10% faster.",
     ...BALANCE.upgrades.precision_tooling_3,
+  },  control_centre: {
+    name: "Control centre",
+    description: "Unlocks standing orders: each workshop slot can keep a product topped up to a set amount whenever it has no work orders to run.",
+    ...BALANCE.upgrades.control_centre,
   },
 };
 

@@ -53,6 +53,7 @@ export const BALANCE = {
     scrap_recovery_2: { building: 'workshop', skill: 'manufacturing', level: 28, requires: 'scrap_recovery_1', costs: { cargo_pod: 120 }, credits: 150000, effect: 'workshopScrap', value: 0.05 },
     bigger_orders_2: { building: 'workshop', skill: 'manufacturing', level: 32, requires: 'bigger_orders_1', costs: { cargo_pod: 240 }, credits: 250000, effect: 'orderSize', value: 20 },
     precision_tooling_3: { building: 'workshop', skill: 'manufacturing', level: 40, requires: 'precision_tooling_2', costs: { thruster_assembly: 300 }, credits: 400000, effect: 'workshopSpeed', value: 0.1 },
+    control_centre: { building: 'workshop', skill: 'manufacturing', level: 30, requires: null, costs: { thruster_assembly: 120, cargo_pod: 120 }, credits: 300000, effect: 'standingOrders', value: 1 },
   },
   hullSizes: {
     small: { commandPoints: 1 },
@@ -67,6 +68,6 @@ export const BALANCE = {
   trade: { tonneMinutesPerXp: 15 },
   hub: { travelSeconds: 180, tradeSeconds: 30 },
   refinery: { slotLevels: [1, 10, 25], speedPerLevel: 0.005, openAtMiningLevel: 8 },
-  workshop: { openAtRefiningLevel: 8, slotLevels: [1, 12, 35], queueLevels: [8, 25], baseQueue: 3, maxOrderBatches: 20, speedPerLevel: 0.005 },
+  workshop: { openAtRefiningLevel: 8, slotLevels: [1, 12, 35], queueLevels: [8, 25], baseQueue: 3, maxOrderBatches: 20, speedPerLevel: 0.005, standingPerSlot: 2 },
   rules: { offlineCapHours: 24 },
 };

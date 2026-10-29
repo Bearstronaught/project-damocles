@@ -25,7 +25,8 @@
 //   Version 9: added the Manufacturing skill (and workshop jobs)
 //   Version 10: bonded stock (goods set aside, never sold)
 //   Version 11: refinery and workshop upgrades, and part-tonnes
-export const SAVE_VERSION = 11;
+//   Version 12: standing orders (the Control centre)
+export const SAVE_VERSION = 12;
 
 
 // -------------------------------------------------------------
@@ -81,6 +82,10 @@ export function createNewGame() {
     // tonnes, so the half waits here until the next one tops it
     // up. See addItemWithCarry below.
     carry: {},
+
+    // Workshop standing orders, per slot, e.g.
+    // { 0: [{ recipeId: "cargo_pod", target: 50 }] }. (workshop.js)
+    standingOrders: {},
 
     // How many Fleet command upgrades have been bought.
     // The total command points are worked out from this (command.js).

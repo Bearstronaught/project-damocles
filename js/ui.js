@@ -28,7 +28,7 @@ import { getBond, getSellable, getBondedInHold } from "./bonded.js";
 import { getSchematic } from "./art.js";
 import { getRoleGroups, describeGroup } from "./fleet-groups.js";
 import { isRefineryOpen, getRefineJob, getSlotCount, getSlotUnlockLevel, isRecipeUnlocked, getBatchMs, getBatchOutput, hasInputs, describeInputs, getMaxSlots } from "./refinery.js";
-import { isWorkshopOpen, getWorkshopSlotCount, getWorkshopSlotUnlockLevel, getQueueLimit, isWorkshopRecipeUnlocked, getWorkshopBatchMs, getWorkshopJob, hasWorkshopInputs, describeWorkshopInputs, getMaxOrderBatches, getRunningIndex, hasSmartQueue } from "./workshop.js";
+import { isWorkshopOpen, getWorkshopSlotCount, getWorkshopSlotUnlockLevel, getQueueLimit, isWorkshopRecipeUnlocked, getWorkshopBatchMs, getWorkshopJob, hasWorkshopInputs, describeWorkshopInputs, getMaxOrderBatches, getRunningIndex, hasSmartQueue, hasControlCentre, getStandingOrders, standingNeedsWork } from "./workshop.js";
 
 // The screens that exist, in nav order. The first is the default.
 const SCREENS = ["command", "fleet", "shipyard", "industry", "skills"];
@@ -849,6 +849,21 @@ function buildWorkshop(actions) {
       </div>
       <div class="ship-specs" data-part="specs"></div>
       <div class="order-message" data-part="message" role="status"></div>
+      <div class="standing" data-part="standing" hidden>
+        <div class="standing-title">Standing orders</div>
+        <ul class="order-queue standing-list" data-part="standing-list"></ul>
+        <div class="order-form" data-part="standing-form">
+          <label class="dest-select-row">
+            <span class="dest-label">Keep</span>
+            <select class="dest-select" data-part="standing-recipe">${options}</select>
+          </label>
+          <label class="dest-select-row">
+            <span class="dest-label">In stock</span>
+            <input class="batch-input" type="number" min="1" step="1" value="60" data-part="standing-target">
+          </label>
+          <button class="btn" data-part="standing-button">Add standing order</button>
+        </div>
+      </div>
     `;
 
     const select = part(box, "recipe");
@@ -869,6 +884,21 @@ function buildWorkshop(actions) {
       const button = event.target.closest("[data-cancel]");
       if (button) {
         actions.cancelOrder(slot, Number(button.dataset.cancel));
+        message.textContent = "";
+      }
+    });
+
+    // Standing orders: Add, and the remove (x) buttons in the list
+    // (one listener for the whole list, like the queue's).
+    part(box, "standing-button").addEventListener("click", () => {
+      const result = actions.addStandingOrder(slot, part(box, "standing-recipe").value,
+                                              Number(part(box, "standing-target").value));
+      message.textContent = result.ok ? "" : result.reason;
+    });
+    part(box, "standing-list").addEventListener("click", (event) => {
+      const button = event.target.closest("[data-remove]");
+      if (button) {
+        actions.removeStandingOrder(slot, Number(button.dataset.remove));
         message.textContent = "";
       }
     });
@@ -1782,6 +1812,7 @@ function renderWorkshop(state, now) {
     const locked = slot >= unlockedSlots;
     box.classList.toggle("locked", locked);
     form.hidden = locked;
+    part(box, "standing").hidden = locked || !hasControlCentre(state);
     if (locked) {
       tag.textContent = "Locked";
       status.textContent = (!open && slot === 0)
@@ -1817,6 +1848,13 @@ function renderWorkshop(state, now) {
 
     const job = getWorkshopJob(state, slot);
     setQueueList(queue, job);
+    renderStanding(state, box, slot, job);
+
+    // The standing-order recipe menu greys out locked recipes too.
+    for (const option of part(box, "standing-recipe").options) {
+      const unlocked = isWorkshopRecipeUnlocked(state, option.value);
+      if (option.disabled === unlocked) option.disabled = !unlocked;
+    }
 
     // --- Idle: no orders at all ---
     if (!job) {
@@ -1828,6 +1866,34 @@ function renderWorkshop(state, now) {
       return;
     }
     box.classList.remove("idle");
+
+    // A STANDING order's batch is running
+    const standingIndex = job.status === "working" ? job.standingIndex ?? null : null;
+    if (standingIndex !== null) {
+      const standing = getStandingOrders(state, slot)[standingIndex];
+      const standingRecipe = WORKSHOP_RECIPES[standing.recipeId];
+      const stock = state.inventory[standingRecipe.output] || 0;
+      const elapsed = Math.min(Math.max(now - job.startedAt, 0), job.durationMs);
+      bar.style.width = (elapsed / job.durationMs * 100) + "%";
+      tag.textContent = `Working · ${job.orders.length}/${queueLimit}`;
+      status.textContent = `Standing order: ${standingRecipe.name.toLowerCase()} (${formatTonnes(stock)} of ${formatTonnes(standing.target)}) — ${formatDuration(job.durationMs - elapsed)} left`;
+      box.classList.add("busy");
+      box.classList.remove("waiting");
+      return;   // (inside forEach, "return" moves on to the next slot)
+    }
+
+    // No work orders, only standing orders, and none running
+    if (job.orders.length === 0) {
+      bar.style.width = "0%";
+      tag.textContent = `Standing by · 0/${queueLimit}`;
+      const needy = getStandingOrders(state, slot).find((order) => standingNeedsWork(state, order));
+      status.textContent = needy
+        ? `Waiting for ${describeWorkshopInputs(needy.recipeId, formatTonnes)} (standing order)`
+        : "Standing orders all stocked. Queue an order, or wait for stock to drop.";
+      box.classList.toggle("waiting", Boolean(needy));
+      box.classList.remove("busy");
+      return;   // (inside forEach, "return" moves on to the next slot)
+    }
 
     // The order being worked on. Usually the first; with the smart
     // queue it can be a later one while the first waits for metal.
@@ -1859,6 +1925,44 @@ function renderWorkshop(state, now) {
     }
   });
 }
+
+// -------------------------------------------------------------
+// renderStanding(state, box, slot, job)
+// A slot's standing orders, one line each:
+//   Keep 60 t hull plating · 32 t now          [x]
+// The list is only rebuilt when the orders change (so the remove
+// buttons don't swallow clicks); the "now" amounts are updated
+// every redraw.
+// -------------------------------------------------------------
+function renderStanding(state, box, slot, job) {
+  const list = part(box, "standing-list");
+  const standing = getStandingOrders(state, slot);
+  const running = job && job.status === "working" ? job.standingIndex ?? null : null;
+
+  const signature = JSON.stringify(standing) + running;
+  if (list.dataset.signature !== signature) {
+    list.dataset.signature = signature;
+    list.innerHTML = standing.map((order, index) => {
+      const recipe = WORKSHOP_RECIPES[order.recipeId];
+      return `
+        <li class="order-line${index === running ? " running" : ""}">
+          <span class="order-name">Keep ${formatTonnes(order.target)} ${recipe.name.toLowerCase()}
+            <span class="order-done" data-stock="${recipe.output}"></span></span>
+          <button class="btn btn-small order-cancel" data-remove="${index}"
+                  title="Remove this standing order" aria-label="Remove ${recipe.name} standing order">✕</button>
+        </li>
+      `;
+    }).join("");
+  }
+  // The stock right now, beside each line: "· 32 t now"
+  for (const span of list.querySelectorAll("[data-stock]")) {
+    const text = `· ${formatTonnes(state.inventory[span.dataset.stock] || 0)} now`;
+    if (span.textContent !== text) span.textContent = text;
+  }
+  // Hide the Add form once the slot holds as many as it can.
+  part(box, "standing-form").hidden = standing.length >= WORKSHOP.standingPerSlot;
+}
+
 
 // -------------------------------------------------------------
 // setQueueList(list, job)

@@ -51,6 +51,18 @@
 // So the job also remembers WHICH order its batch belongs to:
 //     runningIndex: 0     (0 = the first order; with the smart
 //                          queue it can be 1, 2, ...)
+//
+// STANDING ORDERS (the Control centre upgrade) sit beside the
+// queue, not in it: "keep 50 t of cargo pods in stock". They
+// never finish. Whenever a slot has NO work order it can run,
+// it runs a batch for the first standing order whose product is
+// below its target (and whose metal is in the hold). So work
+// orders always come first, and standing orders fill the gaps.
+// They're stored per slot, outside the job:
+//     state.standingOrders = { 0: [{ recipeId: "cargo_pod", target: 50 }] }
+// and a slot with standing orders keeps its job even when its
+// queue is empty. While a standing batch runs, the job says which:
+//     standingIndex: 0    (null when a work order's batch runs)
 // =============================================================
 
 import { WORKSHOP_RECIPES, WORKSHOP, ITEMS } from "../data/content.js";
@@ -116,6 +128,16 @@ export function getMaxOrderBatches(state) {
 // True if the player owns the Smart queue upgrade.
 export function hasSmartQueue(state) {
   return getEffect(state, "smartQueue") > 0;
+}
+
+// True if the player has built the Control centre (standing orders).
+export function hasControlCentre(state) {
+  return getEffect(state, "standingOrders") > 0;
+}
+
+// A slot's standing orders (an empty list if it has none).
+export function getStandingOrders(state, slot) {
+  return state.standingOrders[slot] || [];
 }
 
 // True if the player's Manufacturing level allows this recipe.
@@ -253,11 +275,15 @@ export function cancelOrder(state, slot, index, now) {
     return false;
   }
 
-  const running = getRunningIndex(job);
+  // Which work order's batch is running (-1 if none is: the slot
+  // is waiting, or running a STANDING order's batch instead).
+  const running = job.status === "working" && (job.standingIndex ?? null) === null
+    ? getRunningIndex(job)
+    : -1;
 
   // Cancelling the order whose batch is RUNNING: give the metal
   // back and stop the batch.
-  if (job.status === "working" && index === running) {
+  if (index === running) {
     for (const [itemId, amount] of Object.entries(job.inputs)) {
       addItem(state, itemId, amount);
     }
@@ -271,16 +297,124 @@ export function cancelOrder(state, slot, index, now) {
 
   // Cancelling an order IN FRONT of the running one moves the
   // running one up a place (from 2nd to 1st, say).
-  if (job.status === "working" && index < running) {
+  if (running !== -1 && index < running) {
     job.runningIndex = running - 1;
   }
 
-  if (job.orders.length === 0) {
+  if (job.orders.length === 0 && getStandingOrders(state, slot).length === 0 && job.status !== "working") {
     removeJob(state, job);              // nothing left: the slot is idle
   } else {
     startWaitingOrders(state, now);     // the next order may start now
   }
   return true;
+}
+
+
+// =============================================================
+// STANDING ORDERS (needs the Control centre)
+// =============================================================
+
+// -------------------------------------------------------------
+// addStandingOrder(state, slot, recipeId, target, now)
+// "Keep [target] t of [product] in stock" on one slot.
+// Returns { ok: true } or { ok: false, reason }.
+// -------------------------------------------------------------
+export function addStandingOrder(state, slot, recipeId, target, now) {
+  if (!hasControlCentre(state)) {
+    return { ok: false, reason: "Standing orders need the Control centre (Upgrades)." };
+  }
+  if (slot < 0 || slot >= getWorkshopSlotCount(state)) {
+    return { ok: false, reason: "That slot isn't unlocked yet." };
+  }
+  const recipe = WORKSHOP_RECIPES[recipeId];
+  if (!recipe) {
+    return { ok: false, reason: "Pick a recipe first." };
+  }
+  if (!isWorkshopRecipeUnlocked(state, recipeId)) {
+    return { ok: false, reason: `${recipe.name} needs Manufacturing ${recipe.unlockLevel}.` };
+  }
+  if (!Number.isInteger(target) || target < 1) {
+    return { ok: false, reason: "The stock to keep is a whole number of tonnes, 1 or more." };
+  }
+  const standing = getStandingOrders(state, slot);
+  if (standing.length >= WORKSHOP.standingPerSlot) {
+    return { ok: false, reason: `This slot already has ${WORKSHOP.standingPerSlot} standing orders.` };
+  }
+  // .some is true if ANY standing order matches
+  if (standing.some((order) => order.recipeId === recipeId)) {
+    return { ok: false, reason: `This slot already keeps ${recipe.name.toLowerCase()} in stock.` };
+  }
+
+  // --- All good ---
+  state.standingOrders[slot] = [...standing, { recipeId: recipeId, target: target }];
+  if (!getWorkshopJob(state, slot)) {
+    // The slot needs a job to work on standing orders. It starts
+    // with an empty queue, waiting.
+    state.jobs.push({
+      id: "workshop-slot-" + slot,
+      type: "workshop",
+      slot: slot,
+      orders: [],
+      status: "waiting",
+      startedAt: now,
+      durationMs: 0,
+      inputs: null,
+    });
+  }
+  startWaitingOrders(state, now);
+  return { ok: true };
+}
+
+// -------------------------------------------------------------
+// removeStandingOrder(state, slot, index, now)
+// Removes one standing order. If its batch is running, the metal
+// comes back, as when cancelling a work order.
+// Returns true if one was removed.
+// -------------------------------------------------------------
+export function removeStandingOrder(state, slot, index, now) {
+  const standing = getStandingOrders(state, slot);
+  if (index < 0 || index >= standing.length) {
+    return false;
+  }
+  const job = getWorkshopJob(state, slot);
+  const runningStanding = job && job.status === "working" ? job.standingIndex ?? null : null;
+
+  if (runningStanding === index) {
+    // Its batch is running: hand the metal back and stop it.
+    for (const [itemId, amount] of Object.entries(job.inputs)) {
+      addItem(state, itemId, amount);
+    }
+    job.status = "waiting";
+    job.inputs = null;
+    job.standingIndex = null;
+  } else if (runningStanding !== null && runningStanding > index) {
+    job.standingIndex = runningStanding - 1;   // the running one moved up a place
+  }
+
+  // A new list without that one (.filter keeps every other index)
+  const left = standing.filter((order, i) => i !== index);
+  if (left.length === 0) {
+    delete state.standingOrders[slot];
+  } else {
+    state.standingOrders[slot] = left;
+  }
+
+  if (job && job.orders.length === 0 && left.length === 0 && job.status !== "working") {
+    removeJob(state, job);                 // nothing left: idle
+  } else {
+    startWaitingOrders(state, now);
+  }
+  return true;
+}
+
+// -------------------------------------------------------------
+// standingNeedsWork(state, order)
+// True if a standing order's product is below its target. Stock
+// is everything in the hold, bonded included.
+// -------------------------------------------------------------
+export function standingNeedsWork(state, order) {
+  const output = WORKSHOP_RECIPES[order.recipeId].output;
+  return (state.inventory[output] || 0) < order.target;
 }
 
 // Which order the job's current batch belongs to (0 = the first).
@@ -323,13 +457,18 @@ export function startWaitingOrders(state, time) {
     .sort((a, b) => a.slot - b.slot);
 
   for (const job of waiting) {
-    // Normally only the first order can run. With the smart
-    // queue, the first order that HAS its metal runs instead.
+    // 1. Work orders first. Normally only the first order can
+    //    run; with the smart queue, the first one that HAS its
+    //    metal runs instead.
     const index = pickOrderToRun(state, job);
-    if (index === -1) {
+    // 2. If no work order can run, a standing order fills the gap.
+    const standingIndex = index === -1 ? pickStandingToRun(state, job.slot) : -1;
+    if (index === -1 && standingIndex === -1) {
       continue;   // nothing can run yet: keep waiting
     }
-    const recipeId = job.orders[index].recipeId;
+    const recipeId = index !== -1
+      ? job.orders[index].recipeId
+      : getStandingOrders(state, job.slot)[standingIndex].recipeId;
 
     // Take the metal out of the hold for this batch.
     const inputs = { ...WORKSHOP_RECIPES[recipeId].inputs };   // a copy
@@ -338,7 +477,8 @@ export function startWaitingOrders(state, time) {
     }
 
     job.status = "working";
-    job.runningIndex = index;
+    job.runningIndex = index === -1 ? 0 : index;
+    job.standingIndex = index === -1 ? standingIndex : null;
     job.startedAt = time;
     job.durationMs = getWorkshopBatchMs(state, recipeId);
     job.inputs = inputs;
@@ -353,6 +493,9 @@ export function startWaitingOrders(state, time) {
 //   With it: the first order that has its metal in the hold.
 // -------------------------------------------------------------
 function pickOrderToRun(state, job) {
+  if (job.orders.length === 0) {
+    return -1;                     // only standing orders on this slot
+  }
   if (hasWorkshopInputs(state, job.orders[0].recipeId)) {
     return 0;
   }
@@ -362,6 +505,21 @@ function pickOrderToRun(state, job) {
   // .findIndex gives the position of the first order that passes
   // the check, or -1 if none do.
   return job.orders.findIndex((order) => hasWorkshopInputs(state, order.recipeId));
+}
+
+// -------------------------------------------------------------
+// pickStandingToRun(state, slot)
+// The first standing order on this slot that's below its target
+// and has its metal in the hold, or -1 if none.
+// (Without the Control centre, standing orders never run.)
+// -------------------------------------------------------------
+function pickStandingToRun(state, slot) {
+  if (!hasControlCentre(state)) {
+    return -1;
+  }
+  return getStandingOrders(state, slot).findIndex(
+    (order) => standingNeedsWork(state, order) && hasWorkshopInputs(state, order.recipeId)
+  );
 }
 
 // -------------------------------------------------------------
@@ -375,8 +533,11 @@ function pickOrderToRun(state, job) {
 // Returns a result for the log, like the ships' results.
 // -------------------------------------------------------------
 export function finishWorkshopBatch(state, job) {
+  // Whose batch was this: a standing order's, or a work order's?
+  const standingIndex = job.standingIndex ?? null;
+  const isStanding = standingIndex !== null;
   const index = getRunningIndex(job);
-  const order = job.orders[index];
+  const order = isStanding ? getStandingOrders(state, job.slot)[standingIndex] : job.orders[index];
   const recipe = WORKSHOP_RECIPES[order.recipeId];
 
   addItem(state, recipe.output, recipe.outputAmount);
@@ -391,18 +552,23 @@ export function finishWorkshopBatch(state, job) {
     }
   }
 
-  order.done += 1;
-  const orderFinished = order.done >= order.batches;
-  if (orderFinished) {
-    job.orders.splice(index, 1);   // this order is done: out of the queue
+  // A work order counts its batches; a standing order never ends.
+  let orderFinished = false;
+  if (!isStanding) {
+    order.done += 1;
+    orderFinished = order.done >= order.batches;
+    if (orderFinished) {
+      job.orders.splice(index, 1);   // this order is done: out of the queue
+    }
   }
 
   job.status = "waiting";
   job.inputs = null;
   job.runningIndex = 0;
+  job.standingIndex = null;
 
-  // Queue empty: the slot is idle.
-  const idle = job.orders.length === 0;
+  // Queue empty and no standing orders: the slot is idle.
+  const idle = job.orders.length === 0 && getStandingOrders(state, job.slot).length === 0;
   if (idle) {
     removeJob(state, job);
   }
@@ -415,6 +581,7 @@ export function finishWorkshopBatch(state, job) {
     amount: recipe.outputAmount,
     trips: 1,                          // (batches; "trips" so results add up the same way)
     ordersFinished: orderFinished ? 1 : 0,
+    standing: isStanding,              // made for a standing order?
     slotIdle: idle,                    // true if this batch emptied the queue
     skillId: "manufacturing",
     xpGained: recipe.xp,
