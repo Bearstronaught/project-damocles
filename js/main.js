@@ -13,7 +13,7 @@
 //   5. Start autosaving.
 // =============================================================
 
-import { RULES, ITEMS, FIELDS, SHIP_TYPES, SKILLS, HUB, HOME, HAUL_MODES, RECIPES } from "../data/content.js";
+import { RULES, ITEMS, FIELDS, SHIP_TYPES, SKILLS, HUB, HOME, HAUL_MODES, RECIPES, REFINERY } from "../data/content.js";
 import { createNewGame, findShip } from "./state.js";
 import { startMiningJob, startHaulJob, recallJob, resumeJob, getJobForShip, processJobs } from "./jobs.js";
 import { sellAll, sellEverything } from "./trade.js";
@@ -313,6 +313,9 @@ function getUnlockLines(skillId, level) {
     for (const fieldId of getFieldUnlocksAtLevel(level)) {
       lines.push("New field: " + FIELDS[fieldId].name);
     }
+    if (level === REFINERY.openAtMiningLevel) {
+      lines.push("New: the refinery (Industry tab)");
+    }
   }
   if (skillId === "refining") {
     for (const recipeId of getRecipeUnlocksAtLevel(level)) {
@@ -343,6 +346,9 @@ function logLevelUps(skillId, levels, showBanners = true) {
     if (skillId === "mining") {
       for (const fieldId of getFieldUnlocksAtLevel(level)) {
         addLog(`New field unlocked: ${FIELDS[fieldId].name}. Pick it on a docked ship's card.`, "level");
+      }
+      if (level === REFINERY.openAtMiningLevel) {
+        addLog(`The ${HOME.name} refinery is open. Find it on the Industry tab.`, "level");
       }
     }
     if (skillId === "refining") {

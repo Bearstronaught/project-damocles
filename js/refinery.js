@@ -47,12 +47,25 @@ import { getLevel, addXp } from "./skills.js";
 // =============================================================
 
 // -------------------------------------------------------------
+// isRefineryOpen(state)
+// The refinery stays shut until a MINING milestone (Mining 8 to
+// start with), so early on the player has to sell their ore.
+// -------------------------------------------------------------
+export function isRefineryOpen(state) {
+  return getLevel(state, "mining") >= REFINERY.openAtMiningLevel;
+}
+
+// -------------------------------------------------------------
 // getSlotCount(state)
 // How many refinery slots the player can use at their current
 // Refining level. With slotLevels [1, 10, 25]: level 1-9 = 1,
 // level 10-24 = 2, level 25+ = 3.
 // -------------------------------------------------------------
 export function getSlotCount(state) {
+  // A closed refinery has no slots to use at all.
+  if (!isRefineryOpen(state)) {
+    return 0;
+  }
   const level = getLevel(state, "refining");
   // .filter keeps the slot levels the player has reached;
   // .length counts them.
@@ -200,8 +213,13 @@ export function hasInputs(state, recipeId) {
 // Every waiting slot checks whether the hold has the ore for a
 // batch. Those that do take it and start at "time".
 // Slots are checked in order, so slot 1 gets first pick.
+// (Nothing starts while the refinery is closed.)
 // -------------------------------------------------------------
 export function startWaitingBatches(state, time) {
+  if (!isRefineryOpen(state)) {
+    return;
+  }
+
   // Copy the list and sort it by slot, so the order is the same
   // every time (it matters when two slots want the same ore).
   const waiting = state.jobs

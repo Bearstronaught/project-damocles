@@ -36,6 +36,6 @@ export const BALANCE = {
   sellRate: 0.5,
   trade: { creditsPerXp: 100, hubTonnesPerBonusXp: 10 },
   hub: { travelSeconds: 180, tradeSeconds: 30 },
-  refinery: { slotLevels: [1, 10, 25], speedPerLevel: 0.005 },
+  refinery: { slotLevels: [1, 10, 25], speedPerLevel: 0.005, openAtMiningLevel: 8 },
   rules: { offlineCapHours: 24 },
 };

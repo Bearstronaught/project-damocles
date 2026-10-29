@@ -31,8 +31,8 @@ import { canBuyShip, buyShip, canSellShip, sellShip, getSellValue, renameShip } 
 import { getCommandCapacity, getCommandUsed, getNextUpgradeCost, buyUpgrade } from "../js/command.js";
 import { isFieldUnlocked } from "../js/skills.js";
 import { getRoleGroups, describeGroup, getShipActivity } from "../js/fleet-groups.js";
-import { setRecipe, getRefineJob, getSlotCount, getBatchMs, isRecipeUnlocked, getRecipeUnlocksAtLevel, getSlotUnlocksAtLevel } from "../js/refinery.js";
-import { RECIPES } from "../data/content.js";
+import { setRecipe, getRefineJob, isRefineryOpen, getSlotCount, getBatchMs, isRecipeUnlocked, getRecipeUnlocksAtLevel, getSlotUnlocksAtLevel } from "../js/refinery.js";
+import { RECIPES, REFINERY } from "../data/content.js";
 
 const SECOND = 1000;                 // milliseconds in a second
 const MINUTE = 60 * SECOND;
@@ -1417,15 +1417,33 @@ test("Every field mines an item that exists", () => {
 const IRON_BATCH = RECIPES.iron_bar;                 // 60 t ore -> 30 t bars
 const IRON_BATCH_MS = IRON_BATCH.seconds * SECOND;   // at Refining level 1
 
-// A game at a chosen Refining level.
-function gameAtRefining(level) {
+// A new game that has just reached Mining 8, so the refinery is open.
+function gameWithRefinery() {
   const state = createNewGame();
+  state.skills.mining.xp = XP_TABLE[REFINERY.openAtMiningLevel];
+  return state;
+}
+
+// The same, at a chosen Refining level.
+function gameAtRefining(level) {
+  const state = gameWithRefinery();
   state.skills.refining.xp = XP_TABLE[level];
   return state;
 }
 
-test("A new game has 1 refinery slot and only the iron bar recipe", () => {
-  const state = createNewGame();
+test("The refinery is closed until Mining 8: no slots, and recipes can't be set", () => {
+  const state = gameWithRefinery();
+  state.skills.mining.xp = XP_TABLE[REFINERY.openAtMiningLevel] - 1;   // Mining 7
+  assert.equal(isRefineryOpen(state), false);
+  assert.equal(getSlotCount(state), 0);
+  assert.equal(setRecipe(state, 0, "iron_bar", START), false);
+  state.skills.mining.xp += 1;                                       // Mining 8
+  assert.equal(isRefineryOpen(state), true);
+  assert.equal(getSlotCount(state), 1);
+});
+
+test("At Mining 8 the refinery has 1 slot and only the iron bar recipe", () => {
+  const state = gameWithRefinery();
   assert.equal(getSlotCount(state), 1);
   assert.equal(isRecipeUnlocked(state, "iron_bar"), true);
   assert.equal(isRecipeUnlocked(state, "nickel_bar"), false);
@@ -1433,7 +1451,7 @@ test("A new game has 1 refinery slot and only the iron bar recipe", () => {
 });
 
 test("Locked recipes and slots can't be used", () => {
-  const state = createNewGame();
+  const state = gameWithRefinery();
   assert.equal(setRecipe(state, 0, "nickel_bar", START), false);   // needs Refining 5
   assert.equal(setRecipe(state, 1, "iron_bar", START), false);     // slot 2 needs Refining 10
   assert.equal(state.jobs.length, 0);
@@ -1449,7 +1467,7 @@ test("Slots unlock at Refining 1, 10 and 25; recipes at 1, 5 and 15", () => {
 });
 
 test("With no ore, a slot waits; ore arriving starts the batch", () => {
-  const state = createNewGame();
+  const state = gameWithRefinery();
   setRecipe(state, 0, "iron_bar", START);
   assert.equal(getRefineJob(state, 0).status, "waiting");
 
@@ -1460,7 +1478,7 @@ test("With no ore, a slot waits; ore arriving starts the batch", () => {
 });
 
 test("One batch: 60 t iron ore becomes 30 t iron bars and 8 Refining XP after 60s", () => {
-  const state = createNewGame();
+  const state = gameWithRefinery();
   state.inventory.iron_ore = 60;
   setRecipe(state, 0, "iron_bar", START);
 
@@ -1474,7 +1492,7 @@ test("One batch: 60 t iron ore becomes 30 t iron bars and 8 Refining XP after 60
 });
 
 test("Batches run back to back: 150 t ore makes 2 batches in 2 minutes, 30 t left over", () => {
-  const state = createNewGame();
+  const state = gameWithRefinery();
   state.inventory.iron_ore = 150;
   setRecipe(state, 0, "iron_bar", START);
   processJobs(state, START + 2 * IRON_BATCH_MS);
@@ -1483,7 +1501,7 @@ test("Batches run back to back: 150 t ore makes 2 batches in 2 minutes, 30 t lef
 });
 
 test("Stopping mid-batch gives the ore back and earns no XP", () => {
-  const state = createNewGame();
+  const state = gameWithRefinery();
   state.inventory.iron_ore = 60;
   setRecipe(state, 0, "iron_bar", START);
   processJobs(state, START + 30 * SECOND);
@@ -1523,6 +1541,7 @@ test("Two slots waiting on the same ore: slot 1 gets first pick", () => {
 
 test("The refinery takes its ore before a waiting freighter loads", () => {
   const state = gameWithCourier("full");               // Courier wants 600 t
+  state.skills.mining.xp = XP_TABLE[REFINERY.openAtMiningLevel];
   setRecipe(state, 0, "iron_bar", START);
   startHaulJob(state, "ship-2", START);
   state.inventory.iron_ore = 600;
@@ -1532,7 +1551,7 @@ test("The refinery takes its ore before a waiting freighter loads", () => {
 });
 
 test("Offline: a barge feeds the refinery for an hour, and no ore is lost or made up", () => {
-  const state = createNewGame();
+  const state = gameWithRefinery();
   startMiningJob(state, "ship-1", "inner_belt", START);
   setRecipe(state, 0, "iron_bar", START);
   state.lastSavedAt = START;
@@ -1547,7 +1566,7 @@ test("Offline: a barge feeds the refinery for an hour, and no ore is lost or mad
 });
 
 test("A batch in the furnace survives saving, and finishes while away", () => {
-  const state = createNewGame();
+  const state = gameWithRefinery();
   state.inventory.iron_ore = 60;
   setRecipe(state, 0, "iron_bar", START);
   state.lastSavedAt = START + 10 * SECOND;
@@ -1558,7 +1577,7 @@ test("A batch in the furnace survives saving, and finishes while away", () => {
 });
 
 test("Refining and mining results come back separately for the log", () => {
-  const state = createNewGame();
+  const state = gameWithRefinery();
   state.inventory.iron_ore = 120;
   setRecipe(state, 0, "iron_bar", START);
   startMiningJob(state, "ship-1", "inner_belt", START);

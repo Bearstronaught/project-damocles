@@ -77,7 +77,7 @@ export const SKILLS = {
   },
   refining: {
     name: "Refining",
-    description: "Smelt ore into metal at the Anvil Station refinery. Metal sells for more than the ore it came from. Levels unlock recipes, extra refinery slots and faster batches.",
+    description: "Smelt ore into metal at the Anvil Station refinery, which opens at a Mining milestone. Metal sells for more than the ore it came from. Levels unlock recipes, extra refinery slots and faster batches.",
   },
 };
 
@@ -246,6 +246,9 @@ export const RECIPES = {
 //                  slot 2 at level 10, slot 3 at level 25
 //   speedPerLevel  each level above 1 makes batches this much
 //                  faster (0.005 = 0.5% per level)
+//   openAtMiningLevel  the refinery is closed until the player
+//                  reaches this MINING level, so early on ore has
+//                  to be sold
 export const REFINERY = BALANCE.refinery;
 
 

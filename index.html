@@ -52,6 +52,7 @@
     <button class="nav-btn" data-screen="command">Command</button>
     <button class="nav-btn" data-screen="fleet">Fleet</button>
     <button class="nav-btn" data-screen="shipyard">Shipyard</button>
+    <button class="nav-btn" data-screen="industry">Industry</button>
     <button class="nav-btn" data-screen="skills">Skills</button>
   </nav>
 
@@ -68,9 +69,6 @@
         </div>
         <div id="fleet-list"></div>
       </div>
-
-      <!-- The right-hand column: cargo, with the refinery under it -->
-      <div class="side-stack">
 
       <!-- Cargo: what's in storage, and selling -->
       <div class="panel">
@@ -106,18 +104,6 @@
         <!-- ui.js adds the station's name; "Sell all" shows if it can't -->
         <button id="sell-all" class="btn btn-primary">Sell all</button>
       </div>
-
-      <!-- Refinery: turns ore from the hold into metal. One box
-           per slot (built by ui.js); locked slots show when they open. -->
-      <div class="panel">
-        <div class="panel-head">
-          <h2 class="panel-title">Refinery</h2>
-          <span class="panel-tag" id="refinery-tag"></span>
-        </div>
-        <div id="refinery-slots"></div>
-      </div>
-
-      </div> <!-- end of the right-hand column -->
 
       <!-- Log: messages about what happened -->
       <div class="panel panel-wide">
@@ -176,6 +162,40 @@
         <div id="shipyard-list" class="card-grid"></div>
         <!-- How many ships are still locked (text written by ui.js) -->
         <p id="shipyard-note" class="price-note"></p>
+      </div>
+    </section>
+
+    <!-- ===================== INDUSTRY SCREEN ===================== -->
+    <!-- Making things at Anvil Station. The refinery for now;
+         manufacturing and automation join it later. -->
+    <section class="screen layout" data-screen="industry" hidden>
+
+      <!-- Refinery: turns ore from the hold into metal. One box
+           per slot (built by ui.js); locked slots show when they open. -->
+      <div class="panel">
+        <div class="panel-head">
+          <h2 class="panel-title">Refinery</h2>
+          <span class="panel-tag" id="refinery-tag"></span>
+        </div>
+        <!-- While the refinery is closed, this says when it opens -->
+        <p class="price-note" id="refinery-note"></p>
+        <div id="refinery-slots"></div>
+      </div>
+
+      <!-- What's in the station's hold, so ore and metal can be
+           checked without going back to the Command screen.
+           (Read-only: selling is on the Command screen.) -->
+      <div class="panel">
+        <div class="panel-head">
+          <h2 class="panel-title">Station hold</h2>
+          <span class="panel-tag" id="hold-name-tag"></span>
+        </div>
+        <table class="cargo-table">
+          <thead>
+            <tr><th>Item</th><th>Stock</th></tr>
+          </thead>
+          <tbody id="hold-body"></tbody>
+        </table>
       </div>
     </section>
 

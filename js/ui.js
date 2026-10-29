@@ -25,10 +25,10 @@ import { getShipPoints, getCommandCapacity, getCommandUsed, getNextUpgradeCost, 
 import { getCargoValue, getTradeXp } from "./trade.js";
 import { getSchematic } from "./art.js";
 import { getRoleGroups, describeGroup } from "./fleet-groups.js";
-import { getRefineJob, getSlotCount, getSlotUnlockLevel, isRecipeUnlocked, getBatchMs, hasInputs, describeInputs } from "./refinery.js";
+import { isRefineryOpen, getRefineJob, getSlotCount, getSlotUnlockLevel, isRecipeUnlocked, getBatchMs, hasInputs, describeInputs } from "./refinery.js";
 
 // The screens that exist, in nav order. The first is the default.
-const SCREENS = ["command", "fleet", "shipyard", "skills"];
+const SCREENS = ["command", "fleet", "shipyard", "industry", "skills"];
 
 // Words shown for each phase of a trip.
 const PHASE_LABELS = {
@@ -95,6 +95,7 @@ export function setupUI(state, actions) {
   buildShipyard(actions);
   buildSkillCards();
   buildRefinery(actions);
+  buildStationHold();
 }
 
 
@@ -797,6 +798,24 @@ function buildRefinery(actions) {
 
 
 // -------------------------------------------------------------
+// buildStationHold()
+// The Industry screen's read-only list of what's in the hold:
+// one row per item, amounts filled in by render().
+// -------------------------------------------------------------
+function buildStationHold() {
+  const body = byId("hold-body");
+  body.innerHTML = "";
+  for (const [itemId, item] of Object.entries(ITEMS)) {
+    const row = document.createElement("tr");
+    row.id = "hold-" + itemId;
+    row.innerHTML = `<td>${item.name}</td><td data-part="amount">0 t</td>`;
+    body.appendChild(row);
+  }
+  byId("hold-name-tag").textContent = HOME.name;
+}
+
+
+// -------------------------------------------------------------
 // buildShipyard(actions)
 // One card per ship TYPE. Ship types come from content.js and
 // don't change while playing, so this only runs once.
@@ -861,6 +880,7 @@ function buildSkillCards() {
       for (const [fieldId, field] of Object.entries(FIELDS)) {
         unlocks.push({ level: field.unlockLevel, name: field.name, kind: "Field", key: "field:" + fieldId });
       }
+      unlocks.push({ level: REFINERY.openAtMiningLevel, name: "Refinery (Industry tab)", kind: "Station", key: "refinery:open" });
     }
     if (skillId === "refining") {
       for (const [recipeId, recipe] of Object.entries(RECIPES)) {
@@ -944,6 +964,11 @@ function renderCargo(state) {
     part(row, "sell").disabled = amount === 0;
     // Dim rows for items you have none of
     row.classList.toggle("empty", amount === 0);
+
+    // The same number on the Industry screen's station hold
+    const holdRow = byId("hold-" + itemId);
+    part(holdRow, "amount").textContent = formatTonnes(amount);
+    holdRow.classList.toggle("empty", amount === 0);
   }
 
   const total = getCargoValue(state);
@@ -1350,6 +1375,7 @@ function renderSkills(state) {
       if (kind === "ship") unlocked = isShipTypeUnlocked(state, id);
       else if (kind === "field") unlocked = isFieldUnlocked(state, id);
       else if (kind === "recipe") unlocked = isRecipeUnlocked(state, id);
+      else if (kind === "refinery") unlocked = isRefineryOpen(state);
       else unlocked = Number(id) < getSlotCount(state);   // "slot:1" = the second slot
       line.classList.toggle("unlocked", unlocked);
       part(line, "state").textContent = unlocked ? "Unlocked" : "Locked";
@@ -1365,8 +1391,16 @@ function renderSkills(state) {
 //   "Waiting for 60 t iron ore"
 // -------------------------------------------------------------
 function renderRefinery(state, now) {
-  const unlockedSlots = getSlotCount(state);
-  byId("refinery-tag").textContent = `${unlockedSlots} of ${REFINERY.slotLevels.length} slots`;
+  const open = isRefineryOpen(state);
+  const unlockedSlots = getSlotCount(state);   // 0 while closed
+
+  byId("refinery-tag").textContent = open
+    ? `${unlockedSlots} of ${REFINERY.slotLevels.length} slots`
+    : "Closed";
+  byId("refinery-note").textContent = open
+    ? ""
+    : `The refinery opens at Mining ${REFINERY.openAtMiningLevel}. Until then, sell your ore on the Command screen.`;
+  byId("refinery-note").hidden = open;
 
   REFINERY.slotLevels.forEach((unlockLevel, slot) => {
     const box = byId("refine-slot-" + slot);
@@ -1382,7 +1416,9 @@ function renderRefinery(state, now) {
     if (select.disabled !== locked) select.disabled = locked;
     if (locked) {
       tag.textContent = "Locked";
-      status.textContent = `Unlocks at Refining ${getSlotUnlockLevel(slot)}`;
+      status.textContent = open
+        ? `Unlocks at Refining ${getSlotUnlockLevel(slot)}`
+        : (slot === 0 ? `Opens with the refinery at Mining ${REFINERY.openAtMiningLevel}` : `Unlocks at Refining ${getSlotUnlockLevel(slot)}`);
       specs.textContent = "";
       bar.style.width = "0%";
       return;   // (inside forEach, "return" skips to the next slot)

@@ -1619,15 +1619,6 @@ body {
    THE REFINERY (build 12)
    ============================================================= */
 
-/* The right-hand column on the Command screen: cargo on top,
-   the refinery underneath, with the same gap as the grid. */
-.side-stack {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  min-width: 0;
-}
-
 /* One box per refinery slot, like a small ship card */
 .refine-slot {
   background: var(--panel-raised);
