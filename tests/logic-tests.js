@@ -27,6 +27,7 @@ import { getMiningXpShare, startMiningJob, startHaulJob, getJobForShip, processJ
 import { sellAll, sellEverything, getCargoValue, sellAtHub, getTradeXp, getPrice } from "../js/trade.js";
 import { parseSave, applyOfflineProgress, exportSave, importSave } from "../js/save.js";
 import { advanceTo } from "../js/simulation.js";
+import { getBond, getSellable, getBondedInHold, setBond } from "../js/bonded.js";
 import { XP_TABLE, getLevelForXp, getLevel, getLevelProgress, addXp, isShipTypeUnlocked, MAX_LEVEL } from "../js/skills.js";
 import { canBuyShip, buyShip, canSellShip, sellShip, getSellValue, renameShip, getShipPrice } from "../js/shipyard.js";
 import { getCommandCapacity, getCommandUsed, getNextUpgradeCost, buyUpgrade } from "../js/command.js";
@@ -2114,6 +2115,129 @@ test("Engine: 6 hours with the workshop running, ticked or jumped, end identical
   }
   assert.ok(jumped.skills.manufacturing.xp > XP_TABLE[5]);  // the workshop really ran
   assert.deepEqual(ticked, jumped);
+});
+
+
+// =============================================================
+// BONDED STOCK (js/bonded.js)
+// Bonded goods are never sold - not by the Sell buttons, not by
+// freighters - but the refinery and workshop can still use them.
+// Each test checks one thing that takes goods from the hold.
+// =============================================================
+
+test("Selling at home leaves the bonded stock in the hold", () => {
+  const state = createNewGame();
+  state.inventory.iron_ore = 200;
+  setBond(state, "iron_ore", 150);
+  const sale = sellAll(state, "iron_ore");
+  assert.equal(sale.credits, 50 * ITEMS.iron_ore.sellPrice);
+  assert.equal(state.inventory.iron_ore, 150);
+});
+
+test("A bond bigger than the stock keeps all of it, and sells nothing", () => {
+  const state = createNewGame();
+  state.inventory.iron_ore = 40;
+  setBond(state, "iron_ore", 100);
+  assert.equal(getSellable(state, "iron_ore"), 0);
+  assert.equal(getBondedInHold(state, "iron_ore"), 40);       // shown as "40 t (40 bonded)"
+  assert.equal(sellAll(state, "iron_ore").credits, 0);
+  assert.equal(state.inventory.iron_ore, 40);
+});
+
+test("Sell all and the cargo value only count unbonded stock", () => {
+  const state = createNewGame();
+  state.inventory.iron_ore = 100;
+  state.inventory.iron_bar = 100;
+  setBond(state, "iron_bar", 100);
+  assert.equal(getCargoValue(state), 100 * ITEMS.iron_ore.sellPrice);
+  sellEverything(state);
+  assert.equal(state.inventory.iron_ore, 0);
+  assert.equal(state.inventory.iron_bar, 100);
+});
+
+test("A freighter on constant runs leaves bonded goods behind", () => {
+  const state = createNewGame();
+  state.inventory.hull_plating = 150;
+  setBond(state, "hull_plating", 100);
+  const cargo = loadCargo(state, 600, "constant");
+  assert.deepEqual(cargo, { hull_plating: 50 });
+  assert.equal(state.inventory.hull_plating, 100);
+});
+
+test("A freighter waiting for a full load doesn't count bonded goods towards it", () => {
+  const state = createNewGame();
+  state.inventory.iron_ore = 650;
+  setBond(state, "iron_ore", 100);                            // only 550 t for sale
+  assert.equal(loadCargo(state, 600, "full"), null);          // so it keeps waiting
+  state.inventory.iron_ore = 700;                             // now 600 t for sale
+  assert.deepEqual(loadCargo(state, 600, "full"), { iron_ore: 600 });
+  assert.equal(state.inventory.iron_ore, 100);
+});
+
+test("The refinery can smelt bonded ore", () => {
+  const state = gameWithRefinery();
+  state.inventory.iron_ore = 60;
+  setBond(state, "iron_ore", 100);
+  setRecipe(state, 0, "iron_bar", START);
+  assert.equal(getRefineJob(state, 0).status, "working");
+  assert.equal(state.inventory.iron_ore, 0);
+});
+
+test("The workshop can use bonded metal", () => {
+  const state = gameWithWorkshop();
+  state.inventory.iron_bar = 30;
+  setBond(state, "iron_bar", 30);
+  addOrder(state, 0, "hull_plating", 1, START);
+  assert.equal(getWorkshopJob(state, 0).status, "working");
+});
+
+test("Bonds must be whole tonnes, 0 or more; 0 releases the bond", () => {
+  const state = createNewGame();
+  assert.equal(setBond(state, "iron_ore", -5).ok, false);
+  assert.equal(setBond(state, "iron_ore", 2.5).ok, false);
+  assert.equal(setBond(state, "unobtainium", 10).ok, false);
+  assert.deepEqual(state.bonded, {});
+  setBond(state, "iron_ore", 80);
+  assert.equal(getBond(state, "iron_ore"), 80);
+  setBond(state, "iron_ore", 0);                              // Release
+  assert.deepEqual(state.bonded, {});                         // no entry left behind
+});
+
+test("Bonds survive saving and loading", () => {
+  const state = createNewGame();
+  setBond(state, "hull_plating", 100);
+  const loaded = importSave(exportSave(state)).state;
+  assert.equal(getBond(loaded, "hull_plating"), 100);
+});
+
+test("A version 9 save gains an empty bond list", () => {
+  const oldSave = {
+    version: 9, credits: 100, inventory: { iron_bar: 30 }, commandUpgrades: 0, nextShipNumber: 2,
+    ships: [{ id: "ship-1", name: "Rusty Pick", type: "prospector", destination: "inner_belt" }],
+    skills: { mining: { xp: 0 }, trade: { xp: 0 }, refining: { xp: 0 }, manufacturing: { xp: 0 } },
+    jobs: [], lastSavedAt: START, simulatedUpTo: START, simulatedMs: 0,
+  };
+  const state = parseSave(JSON.stringify(oldSave));
+  assert.equal(state.version, SAVE_VERSION);
+  assert.deepEqual(state.bonded, {});
+});
+
+test("Engine: with bonds set, 6 hours ticked or jumped end identical, and bonds hold", () => {
+  function bondedEmpire() {
+    const state = busyEmpire();                               // both freighters run from the hold
+    setBond(state, "iron_bar", 90);
+    setBond(state, "nickel_bar", 60);
+    return state;
+  }
+  const jumped = bondedEmpire();
+  advanceTo(jumped, START + 6 * HOUR);
+  const ticked = bondedEmpire();
+  for (let t = 250; t <= 6 * HOUR; t += 250) {
+    advanceTo(ticked, START + t);
+  }
+  assert.deepEqual(ticked, jumped);
+  assert.ok(jumped.inventory.iron_bar >= 90);                 // the freighters left the bond alone
+  assert.ok(jumped.inventory.nickel_bar >= 60);
 });
 
 // -------------------------------------------------------------

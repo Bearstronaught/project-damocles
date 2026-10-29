@@ -23,6 +23,7 @@ import { getLevel, getLevelProgress, isShipTypeUnlocked, isFieldUnlocked } from 
 import { canBuyShip, canSellShip, getSellValue, getShipPrice, MAX_NAME_LENGTH } from "./shipyard.js";
 import { getShipPoints, getCommandCapacity, getCommandUsed, getNextUpgradeCost, canBuyUpgrade } from "./command.js";
 import { getCargoValue, getTradeXp } from "./trade.js";
+import { getBond, getSellable, getBondedInHold } from "./bonded.js";
 import { getSchematic } from "./art.js";
 import { getRoleGroups, describeGroup } from "./fleet-groups.js";
 import { isRefineryOpen, getRefineJob, getSlotCount, getSlotUnlockLevel, isRecipeUnlocked, getBatchMs, hasInputs, describeInputs } from "./refinery.js";
@@ -97,7 +98,7 @@ export function setupUI(state, actions) {
   buildSkillCards();
   buildRefinery(actions);
   buildWorkshop(actions);
-  buildStationHold();
+  buildStationHold(actions);
 }
 
 
@@ -879,17 +880,48 @@ function buildWorkshop(actions) {
 
 
 // -------------------------------------------------------------
-// buildStationHold()
-// The Industry screen's read-only list of what's in the hold:
-// one row per item, amounts filled in by render().
+// buildStationHold(actions)
+// The Industry screen's list of what's in the hold, one row per
+// item, with its BOND: a box for the tonnes to set aside, a
+// Bond button to set it, and Release to clear it.
+// Amounts are filled in by render().
 // -------------------------------------------------------------
-function buildStationHold() {
+function buildStationHold(actions) {
   const body = byId("hold-body");
   body.innerHTML = "";
   for (const [itemId, item] of Object.entries(ITEMS)) {
     const row = document.createElement("tr");
     row.id = "hold-" + itemId;
-    row.innerHTML = `<td>${item.name}</td><td data-part="amount">0 t</td>`;
+    row.innerHTML = `
+      <td>${item.name}</td>
+      <td data-part="amount">0 t</td>
+      <td class="bond-cell">
+        <input class="batch-input bond-input" type="number" min="0" step="1"
+               aria-label="Tonnes of ${item.name.toLowerCase()} to bond" data-part="bond">
+        <button class="btn btn-small" data-part="bond-button">Bond</button>
+        <button class="btn btn-small" data-part="release">Release</button>
+      </td>
+    `;
+    const input = part(row, "bond");
+
+    // Bond: set the bond to the number in the box. A refused
+    // number (like -5) puts the box back to the current bond.
+    part(row, "bond-button").addEventListener("click", () => {
+      actions.setBond(itemId, Number(input.value));
+      input.dataset.editing = "";
+    });
+    // Release: no bond at all.
+    part(row, "release").addEventListener("click", () => {
+      actions.setBond(itemId, 0);
+      input.dataset.editing = "";
+    });
+    // While the player is typing, the 4-times-a-second redraw
+    // mustn't overwrite the box. "editing" marks that.
+    input.addEventListener("input", () => { input.dataset.editing = "yes"; });
+    // Pressing Enter in the box works like the Bond button.
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") part(row, "bond-button").click();
+    });
     body.appendChild(row);
   }
   byId("hold-name-tag").textContent = HOME.name;
@@ -1054,16 +1086,30 @@ function renderCargo(state) {
   for (const [itemId, item] of Object.entries(ITEMS)) {
     const row = byId("cargo-" + itemId);
     const amount = state.inventory[itemId] || 0;
-    part(row, "amount").textContent = formatTonnes(amount);
-    part(row, "value").textContent = formatNumber(amount * item.sellPrice) + " cr";
-    part(row, "sell").disabled = amount === 0;
+    const sellable = getSellable(state, itemId);         // above the bond
+    const bonded = getBondedInHold(state, itemId);       // held back by it
+
+    // "120 t (100 t bonded)" when some of it is bonded
+    const stockText = bonded > 0
+      ? `${formatTonnes(amount)} (${formatTonnes(bonded)} bonded)`
+      : formatTonnes(amount);
+    part(row, "amount").textContent = stockText;
+    // Only the part that can be sold is worth anything here.
+    part(row, "value").textContent = formatNumber(sellable * item.sellPrice) + " cr";
+    part(row, "sell").disabled = sellable === 0;
     // Dim rows for items you have none of
     row.classList.toggle("empty", amount === 0);
 
-    // The same number on the Industry screen's station hold
+    // The same on the Industry screen's station hold, with its bond
     const holdRow = byId("hold-" + itemId);
-    part(holdRow, "amount").textContent = formatTonnes(amount);
-    holdRow.classList.toggle("empty", amount === 0);
+    part(holdRow, "amount").textContent = stockText;
+    holdRow.classList.toggle("empty", amount === 0 && getBond(state, itemId) === 0);
+    const input = part(holdRow, "bond");
+    if (!input.dataset.editing && document.activeElement !== input) {
+      const bond = String(getBond(state, itemId));
+      if (input.value !== bond) input.value = bond;
+    }
+    part(holdRow, "release").hidden = getBond(state, itemId) === 0;
   }
 
   const total = getCargoValue(state);

@@ -18,6 +18,7 @@
 
 import { ITEMS, TRADE, HUB } from "../data/content.js";
 import { addXp } from "./skills.js";
+import { getSellable } from "./bonded.js";
 
 
 // -------------------------------------------------------------
@@ -50,13 +51,14 @@ export function getTradeXp(tonnes, travelSeconds) {
 
 // -------------------------------------------------------------
 // sellAll(state, itemId)
-// Sells all of one item at the HOME dock. No Trade XP here:
-// that comes from freighters (Dan, 29 Oct).
+// Sells all of one item at the HOME dock - except any BONDED
+// stock, which stays in the hold (see bonded.js). No Trade XP
+// here: that comes from freighters (Dan, 29 Oct).
 // Returns what happened, so the screen can report it:
 //   { credits: 600, xp: 0, newLevels: [] }
 // -------------------------------------------------------------
 export function sellAll(state, itemId) {
-  const amount = state.inventory[itemId] || 0;   // "|| 0" = treat missing as zero
+  const amount = getSellable(state, itemId);   // what's above the bond
 
   // Nothing to sell? Nothing earned.
   if (amount <= 0) {
@@ -65,7 +67,7 @@ export function sellAll(state, itemId) {
 
   const earned = amount * getPrice(itemId, "home");
 
-  state.inventory[itemId] = 0;   // the goods leave the hold...
+  state.inventory[itemId] -= amount;   // the goods leave the hold (the bond stays)...
   state.credits += earned;       // ...and the money arrives
 
   return { credits: earned, xp: 0, newLevels: [] };
@@ -124,13 +126,14 @@ export function sellAtHub(state, cargo, xpShare = 1) {
 
 // -------------------------------------------------------------
 // getCargoValue(state, market)
-// What everything in the home hold is worth at one market
-// ("home" by default, or "hub").
+// What everything in the home hold that can be SOLD is worth at
+// one market ("home" by default, or "hub"). Bonded stock isn't
+// for sale, so it isn't counted.
 // -------------------------------------------------------------
 export function getCargoValue(state, market = "home") {
   let total = 0;
   for (const itemId of Object.keys(ITEMS)) {
-    total += (state.inventory[itemId] || 0) * getPrice(itemId, market);
+    total += getSellable(state, itemId) * getPrice(itemId, market);
   }
   return total;
 }

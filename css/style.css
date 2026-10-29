@@ -1763,3 +1763,25 @@ body {
 
 /* The log's MAKE tag, in the cooler secondary tone like REFINE */
 .log-make .log-tag { color: var(--teal); }
+
+
+/* =============================================================
+   BONDED STOCK (the Station hold's Bond column)
+   ============================================================= */
+
+/* The box, Bond and Release sit on one line */
+.bond-cell {
+  white-space: nowrap;
+}
+
+.bond-input {
+  width: 72px;
+  padding: 3px 6px;
+  font-size: 12px;
+  margin-right: 4px;
+}
+
+/* Keep "Bond t" on one line in the narrow phone layout */
+.hold-table th {
+  white-space: nowrap;
+}

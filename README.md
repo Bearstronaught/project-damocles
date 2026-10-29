@@ -39,6 +39,7 @@ js/skills.js        XP, levels, and which ships each level unlocks
 js/shipyard.js      buying and selling ships
 js/command.js       command capacity: points per hull, upgrades
 js/trade.js         selling goods for credits
+js/bonded.js        bonded stock: goods set aside so they're never sold
 js/refinery.js      the Anvil Station refinery: recipes, slots, batches
 js/workshop.js      the Anvil Station workshop: Manufacturing work orders and queues
 js/save.js          save, load, version upgrades, offline progress

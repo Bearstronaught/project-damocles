@@ -59,6 +59,7 @@ import { addXp, isFieldUnlocked } from "./skills.js";
 import { sellAtHub } from "./trade.js";
 import { startWaitingBatches, finishBatch } from "./refinery.js";
 import { startWaitingOrders, finishWorkshopBatch } from "./workshop.js";
+import { getSellable } from "./bonded.js";
 
 
 // =============================================================
@@ -424,12 +425,14 @@ export function getJobForShip(state, shipId) {
 
 // -------------------------------------------------------------
 // getOreInHold(state)
-// How many tonnes of ore are in the home hold, all types added up.
+// How many tonnes of goods in the home hold a freighter could
+// take, all types added up. Bonded stock doesn't count: freighters
+// never take it (see bonded.js).
 // -------------------------------------------------------------
 export function getOreInHold(state) {
   let total = 0;
   for (const itemId of Object.keys(ITEMS)) {
-    total += state.inventory[itemId] || 0;
+    total += getSellable(state, itemId);
   }
   return total;
 }
@@ -437,8 +440,9 @@ export function getOreInHold(state) {
 
 // -------------------------------------------------------------
 // loadCargo(state, capacity, mode)
-// Takes ore out of the home hold to fill a freighter, MOST
-// VALUABLE FIRST (by hub price), so the best ore always goes.
+// Takes goods out of the home hold to fill a freighter, MOST
+// VALUABLE FIRST (by hub price), so the best goods always go.
+// Bonded stock is left behind.
 // Returns what was loaded, e.g. { nickel_ore: 20, iron_ore: 40 },
 // or null if the freighter shouldn't leave yet:
 //   "full" mode:     not enough ore to fill the whole hold
@@ -459,7 +463,7 @@ export function loadCargo(state, capacity, mode) {
 
   for (const itemId of byValue) {
     if (space === 0) break;
-    const take = Math.min(space, state.inventory[itemId] || 0);   // as much as fits
+    const take = Math.min(space, getSellable(state, itemId));   // as much as fits, above the bond
     if (take > 0) {
       cargo[itemId] = take;
       state.inventory[itemId] -= take;   // it leaves the home hold

@@ -195,7 +195,8 @@ function looksLikeASave(state) {
     typeof state.skills === "object" && state.skills !== null &&
     typeof state.lastSavedAt === "number" &&
     typeof state.simulatedUpTo === "number" &&
-    typeof state.simulatedMs === "number"
+    typeof state.simulatedMs === "number" &&
+    typeof state.bonded === "object" && state.bonded !== null
   );
 }
 
@@ -335,7 +336,14 @@ function upgradeSave(state) {
     state.version = 9;
   }
 
-  // (Future: if (state.version === 9) { ...; state.version = 10; })
+  // --- Version 9 -> 10: bonded stock ---
+  // Nobody has bonded anything yet.
+  if (state.version === 9) {
+    state.bonded = {};
+    state.version = 10;
+  }
+
+  // (Future: if (state.version === 10) { ...; state.version = 11; })
 
   if (state.version > SAVE_VERSION) {
     // A save from a NEWER version of the game than this one.

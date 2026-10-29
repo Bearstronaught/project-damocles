@@ -18,6 +18,7 @@ import { createNewGame, findShip } from "./state.js";
 import { startMiningJob, startHaulJob, recallJob, resumeJob, getJobForShip } from "./jobs.js";
 import { advanceTo } from "./simulation.js";
 import { sellAll, sellEverything } from "./trade.js";
+import { setBond } from "./bonded.js";
 import { buyShip, sellShip, renameShip } from "./shipyard.js";
 import { buyUpgrade, getCommandCapacity } from "./command.js";
 import { getUnlocksAtLevel, getFieldUnlocksAtLevel, isFieldUnlocked } from "./skills.js";
@@ -176,6 +177,22 @@ const actions = {
       }
     }
     refresh();
+  },
+
+  // Sets how much of an item is bonded (0 = release it).
+  setBond(itemId, tonnes) {
+    const before = state.bonded[itemId] || 0;
+    const result = setBond(state, itemId, tonnes);
+    const name = ITEMS[itemId].name.toLowerCase();
+    if (!result.ok) {
+      addLog(`Bond not set: ${result.reason}`, "trade");
+    } else if (tonnes === 0 && before > 0) {
+      addLog(`Released the bond on ${name}. It can be sold again.`, "trade");
+    } else if (tonnes > 0 && tonnes !== before) {
+      addLog(`Bonded ${formatTonnes(tonnes)} of ${name}. Freighters and the Sell buttons will leave it.`, "trade");
+    }
+    refresh();
+    return result;
   },
 
   sellItem(itemId) {

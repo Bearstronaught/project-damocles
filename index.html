@@ -196,17 +196,18 @@
         <div id="workshop-slots"></div>
       </div>
 
-      <!-- What's in the station's hold, so ore and metal can be
-           checked without going back to the Command screen.
-           (Read-only: selling is on the Command screen.) -->
+      <!-- What's in the station's hold, and BONDED stock: an amount
+           of each item set aside so it's never sold (bonded.js).
+           Selling itself is on the Command screen. -->
       <div class="panel">
         <div class="panel-head">
           <h2 class="panel-title">Station hold</h2>
           <span class="panel-tag" id="hold-name-tag"></span>
         </div>
-        <table class="cargo-table">
+        <p class="price-note">Bonded stock is never sold, by freighters or the Sell buttons. The refinery and workshop can still use it.</p>
+        <table class="cargo-table hold-table">
           <thead>
-            <tr><th>Item</th><th>Stock</th></tr>
+            <tr><th>Item</th><th>Stock</th><th>Bond <small>t</small></th></tr>
           </thead>
           <tbody id="hold-body"></tbody>
         </table>

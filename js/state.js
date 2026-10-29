@@ -23,7 +23,8 @@
 //   Version 7: added the Refining skill (and refinery jobs)
 //   Version 8: one simulation clock (simulatedUpTo, simulatedMs)
 //   Version 9: added the Manufacturing skill (and workshop jobs)
-export const SAVE_VERSION = 9;
+//   Version 10: bonded stock (goods set aside, never sold)
+export const SAVE_VERSION = 10;
 
 
 // -------------------------------------------------------------
@@ -63,6 +64,11 @@ export function createNewGame() {
         destination: "inner_belt",
       },
     ],
+
+    // BONDED STOCK: tonnes of each item set aside so freighters
+    // and the Sell buttons never take them, e.g.
+    // { hull_plating: 100 }. Empty = nothing bonded. (bonded.js)
+    bonded: {},
 
     // How many Fleet command upgrades have been bought.
     // The total command points are worked out from this (command.js).
