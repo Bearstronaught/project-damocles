@@ -19,6 +19,7 @@
 
 import { ITEMS, SHIP_TYPES, FIELDS, SKILLS, HULL_SIZES, COMMAND, HUB, HOME, HAUL_MODES, RECIPES, REFINERY, WORKSHOP_RECIPES, WORKSHOP, UPGRADES } from "../data/content.js";
 import { isOwned, isShown, canBuyIndustryUpgrade } from "./upgrades.js";
+import { gameNow, SPEEDS } from "./clock.js";
 import { getJobForShip, getJobPhase, getTripPlan, getHaulPlan, getOreInHold, getMiningXpShare } from "./jobs.js";
 import { getLevel, getLevelProgress, isShipTypeUnlocked, isFieldUnlocked } from "./skills.js";
 import { canBuyShip, canSellShip, getSellValue, getShipPrice, MAX_NAME_LENGTH } from "./shipyard.js";
@@ -101,6 +102,7 @@ export function setupUI(state, actions) {
   buildWorkshop(actions);
   buildUpgrades(actions);
   buildStationHold(actions);
+  buildDevPanel(actions);
 }
 
 
@@ -596,7 +598,7 @@ function buildFleetCards(state, actions) {
 
   // One group per role that has ships; each ship's card goes
   // inside its group.
-  for (const group of getRoleGroups(state, Date.now())) {
+  for (const group of getRoleGroups(state, gameNow(state))) {
     const { box, shipsArea } = buildRoleGroup(group);
     fleetList.appendChild(box);
 
@@ -1257,7 +1259,21 @@ function renderCargo(state) {
 
 // The thin strip of readouts under the top bar
 function renderStatusStrip(state, now) {
-  byId("clock").textContent = new Date(now).toLocaleTimeString("en-GB");
+  // The clock shows the REAL time of day: at a playtest speed the
+  // game's clock runs ahead, and a made-up time would just confuse.
+  byId("clock").textContent = new Date().toLocaleTimeString("en-GB");
+
+  // Playtest readouts (playtest.js): the speed, only when it isn't
+  // 1x, and the badge once the save has used a playtest tool.
+  byId("speed-readout").hidden = state.clock.speed === 1;
+  byId("speed-value").textContent = state.clock.speed + "×";
+  byId("playtest-badge").hidden = !state.playtest;
+
+  // Light up the speed button that's running (if the panel's shown).
+  for (const button of document.querySelectorAll(".dev-speed")) {
+    button.classList.toggle("active", Number(button.dataset.speed) === state.clock.speed);
+  }
+
   byId("mining-level").textContent = "Lv " + getLevel(state, "mining");
   byId("trade-level").textContent = "Lv " + getLevel(state, "trade");
   byId("refining-level").textContent = "Lv " + getLevel(state, "refining");
@@ -1469,7 +1485,7 @@ function renderFreighterCard(state, ship, card, now) {
 
 // Each ship's row on the Ships screen
 function renderOwnedList(state) {
-  const now = Date.now();
+  const now = gameNow(state);   // the game's time (clock.js)
   for (const ship of state.ships) {
     const row = byId("owned-" + ship.id);
     if (!row) continue;
@@ -2107,4 +2123,78 @@ export function formatDuration(ms) {
   if (hours > 0) return `${hours}h ${minutes}m`;
   if (minutes > 0) return `${minutes}m ${seconds}s`;
   return `${seconds}s`;
+}
+
+
+// =============================================================
+// THE DEV PANEL (playtest tools)
+// -------------------------------------------------------------
+// Built once at start-up, like the other screens. It stays
+// hidden until dev mode is switched on (dev-switch.js, main.js).
+// =============================================================
+
+// -------------------------------------------------------------
+// showDevPanel(on)
+// Shows or hides the whole panel.
+// -------------------------------------------------------------
+export function showDevPanel(on) {
+  byId("dev-wrap").hidden = !on;
+}
+
+// -------------------------------------------------------------
+// buildDevPanel(actions)
+// Fills in the speed buttons and dropdowns, and connects every
+// button to its action in main.js.
+// -------------------------------------------------------------
+function buildDevPanel(actions) {
+  const message = byId("dev-message");
+
+  // Each action returns { ok } or { ok: false, reason }. Show the
+  // reason if it was refused; clear the message if it worked.
+  function report(result) {
+    message.textContent = result.ok ? "" : result.reason;
+  }
+
+  // Number boxes give back text, e.g. "25". Number() turns it into
+  // 25 (or NaN for nonsense, which the action then refuses).
+  function numberIn(id) {
+    return Number(byId(id).value);
+  }
+
+  // --- Speed buttons: 1x 2x 5x 10x 60x ---
+  const speeds = byId("dev-speeds");
+  for (const speed of SPEEDS) {
+    const button = document.createElement("button");
+    button.className = "btn btn-small dev-speed";
+    button.dataset.speed = speed;           // read back when lighting it up
+    button.textContent = speed + "×";
+    button.addEventListener("click", () => report(actions.devSetSpeed(speed)));
+    speeds.appendChild(button);
+  }
+
+  // --- Jump an hour ---
+  byId("dev-jump").addEventListener("click", () => report(actions.devJumpHour()));
+
+  // --- Skill dropdown: one option per skill ---
+  const skillMenu = byId("dev-skill");
+  for (const [skillId, skill] of Object.entries(SKILLS)) {
+    skillMenu.add(new Option(skill.name, skillId));   // new Option(text, value)
+  }
+  byId("dev-set-level").addEventListener("click", () => {
+    report(actions.devSetLevel(skillMenu.value, numberIn("dev-level")));
+  });
+
+  // --- Credits ---
+  byId("dev-add-credits").addEventListener("click", () => {
+    report(actions.devAddCredits(numberIn("dev-credits")));
+  });
+
+  // --- Goods dropdown: every item, ores to ship parts ---
+  const itemMenu = byId("dev-item");
+  for (const [itemId, item] of Object.entries(ITEMS)) {
+    itemMenu.add(new Option(item.name, itemId));
+  }
+  byId("dev-add-goods").addEventListener("click", () => {
+    report(actions.devAddGoods(itemMenu.value, numberIn("dev-tonnes")));
+  });
 }

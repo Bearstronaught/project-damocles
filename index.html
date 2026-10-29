@@ -44,7 +44,72 @@
     <span class="status-item">Trade <b id="trade-level">Lv 1</b></span>
     <span class="status-item">Refining <b id="refining-level">Lv 1</b></span>
     <span class="status-item">Manufacturing <b id="manufacturing-level">Lv 1</b></span>
+    <!-- Only shown at a playtest speed (not 1x) -->
+    <span class="status-item status-speed" id="speed-readout" hidden>Speed <b id="speed-value">1×</b></span>
+    <!-- Only shown once this save has used a playtest tool -->
+    <span class="status-item playtest-badge" id="playtest-badge" hidden
+          title="This save has used the playtest tools (speed or the dev panel)">Playtest save</span>
     <span class="status-item status-save"><i class="pulse-dot"></i> Autosave on</span>
+  </div>
+
+  <!-- ===== Dev panel: the playtest tools =====
+       Hidden unless dev mode is on (type "damocles", or tap the
+       title 7 times). Everything here is built and wired up by
+       ui.js (buildDevPanel); the cheats are in playtest.js. -->
+  <div class="dev-wrap" id="dev-wrap" hidden>
+    <details class="panel dev-panel" open>
+      <summary class="panel-head">
+        <h2 class="panel-title">Playtest tools</h2>
+        <span class="panel-tag">Dev mode</span>
+      </summary>
+
+      <!-- Game speed: one button per speed -->
+      <div class="dev-row">
+        <span class="dev-label">Speed</span>
+        <div class="dev-controls" id="dev-speeds"></div>
+      </div>
+
+      <!-- Jump the game clock forward -->
+      <div class="dev-row">
+        <span class="dev-label">Time</span>
+        <div class="dev-controls">
+          <button class="btn btn-small" id="dev-jump">Jump 1 hour</button>
+        </div>
+      </div>
+
+      <!-- Set a skill to a level -->
+      <div class="dev-row">
+        <span class="dev-label">Skill</span>
+        <div class="dev-controls">
+          <select class="dest-select dev-select" id="dev-skill" aria-label="Skill"></select>
+          <input class="batch-input" id="dev-level" type="number" min="1" max="99" step="1" value="10" aria-label="Level">
+          <button class="btn btn-small" id="dev-set-level">Set level</button>
+        </div>
+      </div>
+
+      <!-- Add credits -->
+      <div class="dev-row">
+        <span class="dev-label">Credits</span>
+        <div class="dev-controls">
+          <input class="batch-input dev-wide" id="dev-credits" type="number" min="1" step="1" value="100000" aria-label="Credits to add">
+          <button class="btn btn-small" id="dev-add-credits">Add credits</button>
+        </div>
+      </div>
+
+      <!-- Add goods to the home hold -->
+      <div class="dev-row">
+        <span class="dev-label">Goods</span>
+        <div class="dev-controls">
+          <select class="dest-select dev-select" id="dev-item" aria-label="Item"></select>
+          <input class="batch-input dev-wide" id="dev-tonnes" type="number" min="1" step="1" value="1000" aria-label="Tonnes to add">
+          <button class="btn btn-small" id="dev-add-goods">Add goods</button>
+        </div>
+      </div>
+
+      <!-- Why something was refused (e.g. level 120) -->
+      <p class="order-message" id="dev-message" role="status"></p>
+      <p class="price-note">Using any of these marks the save as a playtest save. Type "damocles" or tap the title 7 times to hide them again.</p>
+    </details>
   </div>
 
   <!-- ===== Navigation: one button per screen =====

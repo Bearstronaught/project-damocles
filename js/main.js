@@ -17,6 +17,12 @@ import { RULES, ITEMS, FIELDS, SHIP_TYPES, SKILLS, HUB, HOME, HAUL_MODES, RECIPE
 import { createNewGame, findShip } from "./state.js";
 import { startMiningJob, startHaulJob, recallJob, resumeJob, getJobForShip } from "./jobs.js";
 import { advanceTo } from "./simulation.js";
+import { gameNow, setSpeed } from "./clock.js";
+// "* as playtest" brings in the whole file under one name, so the
+// calls read playtest.devSetLevel(...) and can't be mixed up with
+// the actions of the same name below.
+import * as playtest from "./playtest.js";
+import { isDevModeOn, setDevMode, watchForSecret } from "./dev-switch.js";
 import { sellAll, sellEverything } from "./trade.js";
 import { setBond } from "./bonded.js";
 import { buyShip, sellShip, renameShip } from "./shipyard.js";
@@ -27,7 +33,7 @@ import { addOrder, cancelOrder, getWorkshopJob, getWorkshopRecipeUnlocksAtLevel,
 import { buyIndustryUpgrade, getUpgradeUnlocksAtLevel } from "./upgrades.js";
 import { saveGame, loadGame, deleteSave, applyOfflineProgress, exportSave, importSave } from "./save.js";
 import { showLevelBanner } from "./banner.js";
-import { setupUI, buildFleetViews, render, addLog, formatNumber, formatXp, formatTonnes, formatDuration } from "./ui.js";
+import { setupUI, buildFleetViews, render, addLog, formatNumber, formatXp, formatTonnes, formatDuration, showDevPanel } from "./ui.js";
 
 
 // -------------------------------------------------------------
@@ -70,14 +76,14 @@ const actions = {
 
     // Freighters go on hub runs; everything else goes mining.
     if (SHIP_TYPES[ship.type].role === "freight") {
-      const job = startHaulJob(state, shipId, Date.now());
+      const job = startHaulJob(state, shipId, gameNow(state));
       if (job && job.status === "travelling") {
         addLog(`${ship.name} loads ${describeCargo(job.cargo)} and departs for the ${HUB.name.toLowerCase()}.`, "fleet");
       } else if (job) {
         addLog(`${ship.name} starts hub runs. Waiting at the dock for ore to load.`, "fleet");
       }
     } else {
-      const job = startMiningJob(state, shipId, ship.destination, Date.now());
+      const job = startMiningJob(state, shipId, ship.destination, gameNow(state));
       if (job) {
         addLog(`${ship.name} departs for ${FIELDS[ship.destination].name}.`, "fleet");
       }
@@ -91,7 +97,7 @@ const actions = {
     const job = getJobForShip(state, shipId);
     if (!job) return;
     const ship = findShip(state, shipId);
-    const recall = recallJob(state, job.id, Date.now());
+    const recall = recallJob(state, job.id, gameNow(state));
     if (!recall) return;
 
     const docks = recall.docksInMs !== undefined ? formatDuration(recall.docksInMs) : "";
@@ -114,7 +120,7 @@ const actions = {
   // Cancels a recall: the ship carries on working.
   resumeShip(shipId) {
     const job = getJobForShip(state, shipId);
-    if (job && resumeJob(state, job.id, Date.now())) {
+    if (job && resumeJob(state, job.id, gameNow(state))) {
       addLog(`${findShip(state, shipId).name} resumes work.`, "fleet");
     }
     refresh();
@@ -135,7 +141,7 @@ const actions = {
     // Ore in a half-finished batch comes back if it's stopped.
     const returning = before && before.status === "working" ? before.inputs : null;
 
-    if (!setRecipe(state, slot, recipeId, Date.now())) {
+    if (!setRecipe(state, slot, recipeId, gameNow(state))) {
       refresh();   // (redraws the dropdown back to what it was)
       return;
     }
@@ -154,7 +160,7 @@ const actions = {
   // Puts a work order at the back of a workshop slot's queue.
   // Returns { ok, reason } so the screen can say why it was refused.
   queueOrder(slot, recipeId, batches) {
-    const result = addOrder(state, slot, recipeId, batches, Date.now());
+    const result = addOrder(state, slot, recipeId, batches, gameNow(state));
     if (result.ok) {
       const name = WORKSHOP_RECIPES[recipeId].name.toLowerCase();
       addLog(`Workshop slot ${slot + 1}: order queued for ${batches} ${batches === 1 ? "batch" : "batches"} of ${name}.`, "make");
@@ -171,7 +177,7 @@ const actions = {
     // Metal comes back only if the current batch was underway.
     const returning = index === 0 && job.status === "working" ? job.inputs : null;
 
-    if (cancelOrder(state, slot, index, Date.now())) {
+    if (cancelOrder(state, slot, index, gameNow(state))) {
       addLog(`Workshop slot ${slot + 1}: ${WORKSHOP_RECIPES[order.recipeId].name.toLowerCase()} order cancelled.`, "make");
       if (returning) {
         addLog(`The unfinished batch's ${describeCargo(returning)} went back into the hold.`, "make");
@@ -182,7 +188,7 @@ const actions = {
 
   // "Keep [target] t of [product] in stock" on a workshop slot.
   addStandingOrder(slot, recipeId, target) {
-    const result = addStandingOrder(state, slot, recipeId, target, Date.now());
+    const result = addStandingOrder(state, slot, recipeId, target, gameNow(state));
     if (result.ok) {
       addLog(`Workshop slot ${slot + 1}: standing order to keep ${formatTonnes(target)} of ${WORKSHOP_RECIPES[recipeId].name.toLowerCase()} in stock.`, "make");
     }
@@ -192,7 +198,7 @@ const actions = {
 
   removeStandingOrder(slot, index) {
     const order = getStandingOrders(state, slot)[index];
-    if (order && removeStandingOrder(state, slot, index, Date.now())) {
+    if (order && removeStandingOrder(state, slot, index, gameNow(state))) {
       addLog(`Workshop slot ${slot + 1}: standing order for ${WORKSHOP_RECIPES[order.recipeId].name.toLowerCase()} removed.`, "make");
     }
     refresh();
@@ -302,11 +308,63 @@ const actions = {
 
     // Catch up on the time since that save was exported, exactly
     // like coming back to the game.
-    const report = applyOfflineProgress(state, Date.now());
+    const report = applyOfflineProgress(state, gameNow(state));
     reportOfflineProgress(report);
 
     refresh();   // redraw and save it as the current game
     return { ok: true };
+  },
+
+  // ===========================================================
+  // PLAYTEST TOOLS (the dev panel - see playtest.js)
+  // Each one is logged, so a playtest log never hides a cheat.
+  // ===========================================================
+
+  devSetSpeed(speed) {
+    // The real time is passed in so the clock pins "now" to it.
+    const result = playtest.devSetSpeed(state, speed, Date.now());
+    if (result.ok) {
+      addLog(`Playtest: game speed set to ${speed}×.`, "system");
+      refresh();
+    }
+    return result;
+  },
+
+  devJumpHour() {
+    playtest.devJumpHour(state);
+    // Play the hour out straight away, and report it like a
+    // return from time away.
+    const report = advanceTo(state, gameNow(state));
+    reportOfflineProgress(report, "Playtest: jumped ahead 1 hour.");
+    refresh();
+    return { ok: true };
+  },
+
+  devSetLevel(skillId, level) {
+    const result = playtest.devSetLevel(state, skillId, level);
+    if (result.ok) {
+      addLog(`Playtest: ${SKILLS[skillId].name} set to level ${level}.`, "system");
+      refresh();
+    }
+    return result;
+  },
+
+  devAddCredits(amount) {
+    const result = playtest.devAddCredits(state, amount);
+    if (result.ok) {
+      addLog(`Playtest: added ${formatNumber(amount)} cr.`, "system");
+      refresh();
+    }
+    return result;
+  },
+
+  devAddGoods(itemId, tonnes) {
+    const result = playtest.devAddGoods(state, itemId, tonnes);
+    if (result.ok) {
+      addLog(`Playtest: added ${formatTonnes(tonnes)} of ${ITEMS[itemId].name.toLowerCase()} to the hold.`, "system");
+      refresh();
+    }
+    return result;
   },
 
   resetGame() {
@@ -346,6 +404,11 @@ for (const name of Object.keys(actions)) {
 // A gap at least this long gets the "welcome back" summary.
 const WELCOME_BACK_SECONDS = 60;
 
+// The computer's time at the last tick. The welcome-back check
+// uses REAL time: at 60x game speed, one slow tick of 1 second
+// is a whole game minute, and that shouldn't count as "away".
+let lastTickRealAt = Date.now();
+
 // -------------------------------------------------------------
 // tick() - one turn of the game loop.
 // -------------------------------------------------------------
@@ -359,7 +422,13 @@ function tick() {
     return;
   }
 
-  const now = Date.now();
+  // The game's time (clock.js) - the same as real time at 1x.
+  const now = gameNow(state);
+
+  // How long since the last tick, in real seconds.
+  const realNow = Date.now();
+  const realSecondsGap = (realNow - lastTickRealAt) / 1000;
+  lastTickRealAt = realNow;
 
   // Play the game forward to now (simulation.js). This is the
   // same call the game makes on load after time away.
@@ -368,7 +437,7 @@ function tick() {
   // A big gap while the page was open - the computer was asleep,
   // or the browser paused a background tab - reads better as one
   // "welcome back" summary than as dozens of log lines.
-  if (report.secondsAway >= WELCOME_BACK_SECONDS) {
+  if (realSecondsGap >= WELCOME_BACK_SECONDS && report.secondsAway >= WELCOME_BACK_SECONDS) {
     reportOfflineProgress(report);
     render(state, now);
     return;
@@ -412,7 +481,7 @@ function tick() {
 // refresh() - redraw straight away after a button press, and
 // save, so the action is never lost if the tab closes.
 function refresh() {
-  render(state, Date.now());
+  render(state, gameNow(state));
   saveGame(state);
 }
 
@@ -555,13 +624,21 @@ function logLevelUps(skillId, levels, showBanners = true) {
 // -------------------------------------------------------------
 // The "welcome back" message after time away.
 // -------------------------------------------------------------
-function reportOfflineProgress(report) {
+// "opening" replaces the first sentence (the dev panel's jump
+// says "Playtest: jumped ahead 1 hour." instead).
+function reportOfflineProgress(report, opening = null) {
   // Ignore tiny gaps, like a quick page refresh.
   if (report.secondsAway < 10) {
     return;
   }
 
-  let message = `Welcome back, commander. You were away ${formatDuration(report.secondsAway * 1000)}.`;
+  let message = opening || `Welcome back, commander. You were away ${formatDuration(report.secondsAway * 1000)}.`;
+
+  // Time away is GAME time, so at a playtest speed say so
+  // (an hour away at 10x reads as 10 hours).
+  if (!opening && state.clock.speed !== 1) {
+    message += ` (Game time, at ${state.clock.speed}× speed.)`;
+  }
 
   if (report.secondsCounted < report.secondsAway) {
     message += ` (Only ${RULES.offlineCapHours}h counted.)`;
@@ -653,9 +730,44 @@ if (isNewGame) {
 // This runs after set-up so its messages have a log to go in.
 // -------------------------------------------------------------
 if (!isNewGame) {
-  const report = applyOfflineProgress(state, Date.now());
+  const report = applyOfflineProgress(state, gameNow(state));
   reportOfflineProgress(report);
 }
+
+// A save left at a playtest speed, opened in a browser where dev
+// mode is off (say, an imported save), goes back to 1x: without
+// dev mode there'd be no way to see or change the speed. The
+// time away above was already played at the saved speed.
+if (!isDevModeOn() && state.clock.speed !== 1) {
+  setSpeed(state, 1);
+}
+
+
+// -------------------------------------------------------------
+// The hidden dev mode switch (dev-switch.js): type "damocles",
+// or tap the title 7 times.
+// -------------------------------------------------------------
+showDevPanel(isDevModeOn());
+
+watchForSecret(document.querySelector(".title"), () => {
+  tick();   // catch up first, like every action
+  const turningOn = !isDevModeOn();
+  setDevMode(turningOn);
+
+  if (turningOn) {
+    addLog("Dev mode on: playtest tools are open under the status strip.", "system");
+  } else {
+    // Turning it off also puts the speed back to 1x, so the game
+    // never keeps racing with no control on screen.
+    if (state.clock.speed !== 1) {
+      setSpeed(state, 1);
+      addLog("Game speed back to 1×.", "system");
+    }
+    addLog("Dev mode off.", "system");
+  }
+  showDevPanel(turningOn);
+  refresh();
+});
 
 
 // -------------------------------------------------------------

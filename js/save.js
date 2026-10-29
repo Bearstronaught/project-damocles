@@ -13,6 +13,7 @@ import { RULES } from "../data/content.js";
 import { SAVE_VERSION } from "./state.js";
 import { getTripPlan } from "./jobs.js";
 import { advanceTo } from "./simulation.js";
+import { createClock } from "./clock.js";
 
 // The label our save is stored under in localStorage.
 const SAVE_KEY = "project-damocles-save";
@@ -199,7 +200,11 @@ function looksLikeASave(state) {
     typeof state.bonded === "object" && state.bonded !== null &&
     typeof state.upgrades === "object" && state.upgrades !== null &&
     typeof state.carry === "object" && state.carry !== null &&
-    typeof state.standingOrders === "object" && state.standingOrders !== null
+    typeof state.standingOrders === "object" && state.standingOrders !== null &&
+    typeof state.clock === "object" && state.clock !== null &&
+    typeof state.clock.speed === "number" &&
+    typeof state.clock.realAt === "number" &&
+    typeof state.clock.gameAt === "number"
   );
 }
 
@@ -360,7 +365,17 @@ function upgradeSave(state) {
     state.version = 12;
   }
 
-  // (Future: if (state.version === 12) { ...; state.version = 13; })
+  // --- Version 12 -> 13: the game clock and the playtest mark ---
+  // Older saves ran on real time at 1x, so the game clock starts
+  // equal to real time: both anchors at the moment it was last
+  // played up to. Nothing has used the playtest tools yet.
+  if (state.version === 12) {
+    state.clock = createClock(state.simulatedUpTo);
+    state.playtest = false;
+    state.version = 13;
+  }
+
+  // (Future: if (state.version === 13) { ...; state.version = 14; })
 
   if (state.version > SAVE_VERSION) {
     // A save from a NEWER version of the game than this one.

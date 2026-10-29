@@ -34,6 +34,7 @@ data/balance.js     every balance number, written by the balance sheet (don't ed
 js/main.js          starting point: loads the save, runs the game loop, autosaves
 js/state.js         what the player owns: credits, cargo, ships, jobs
 js/simulation.js    the one way time moves forward: plays the game up to "now"
+js/clock.js         the game clock: game time, and the playtest speed setting
 js/jobs.js          timed work (trips, hauls) and the engine that replays events in order
 js/skills.js        XP, levels, and which ships each level unlocks
 js/shipyard.js      buying and selling ships
@@ -43,6 +44,8 @@ js/bonded.js        bonded stock: goods set aside so they're never sold
 js/refinery.js      the Anvil Station refinery: recipes, slots, batches
 js/workshop.js      the Anvil Station workshop: Manufacturing work orders and queues
 js/upgrades.js      refinery and workshop upgrades: buying them and adding up their effects
+js/playtest.js      the dev panel's tools (set levels, add goods or credits, jump an hour)
+js/dev-switch.js    the hidden dev mode switch (type "damocles", or tap the title 7 times)
 js/save.js          save, load, version upgrades, offline progress
 js/ui.js            drawing the screens and handling button clicks
 js/fleet-groups.js  sorting ships into role groups (Mining, Freight) and their summaries
@@ -62,3 +65,13 @@ Words (names, descriptions) stay in `data/content.js`. Adding a new ship, field 
 ## Design
 
 The full design lives in the Project Damocles design doc (Claude Docs).
+
+## Playtest tools
+
+Type `damocles` anywhere on the page (not in a text box), or tap the game title 7 times quickly on a phone, to show the playtest tools under the status strip. Do the same again to hide them (this also puts the speed back to 1×). The switch lives in this browser, not in the save.
+
+- **Speed** 1×, 2×, 5×, 10×, 60×: the game clock runs that much faster, offline time included. The 24-hour offline cap counts game time.
+- **Jump 1 hour**, **set a skill level**, **add credits**, **add goods**.
+
+Any save that uses them gets a red **Playtest save** badge for good, so it's never mistaken for a real run.
+

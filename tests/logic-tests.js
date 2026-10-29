@@ -27,6 +27,8 @@ import { getMiningXpShare, startMiningJob, startHaulJob, getJobForShip, processJ
 import { sellAll, sellEverything, getCargoValue, sellAtHub, getTradeXp, getPrice } from "../js/trade.js";
 import { parseSave, applyOfflineProgress, exportSave, importSave } from "../js/save.js";
 import { advanceTo } from "../js/simulation.js";
+import { createClock, gameNow, setSpeed, jumpAhead, SPEEDS } from "../js/clock.js";
+import { devSetLevel, devAddCredits, devAddGoods, devSetSpeed, devJumpHour, HOUR_MS } from "../js/playtest.js";
 import { getBond, getSellable, getBondedInHold, setBond } from "../js/bonded.js";
 import { isOwned, getEffect, canBuyIndustryUpgrade, buyIndustryUpgrade, isShown } from "../js/upgrades.js";
 import { addItemWithCarry } from "../js/state.js";
@@ -1772,6 +1774,7 @@ test("Every recipe uses items that exist", () => {
 function busyEmpire() {
   const state = createNewGame();
   state.simulatedUpTo = START;
+  state.clock = createClock(START);              // game clock starts at START too
   state.lastSavedAt = 0;                         // (differs per run, so ignored)
   state.skills.mining.xp = XP_TABLE[12];         // both fields and the refinery open
   state.skills.refining.xp = XP_TABLE[14];       // reaches 15 during the run
@@ -2602,6 +2605,216 @@ test("Engine: standing orders with freighters selling the product, ticked or jum
   }
   assert.ok(jumped.skills.manufacturing.xp > XP_TABLE[30] + 1000);   // it kept working
   assert.deepEqual(ticked, jumped);
+});
+
+// =============================================================
+// THE GAME CLOCK AND PLAYTEST TOOLS (clock.js, playtest.js)
+// The promise to check: "an hour at 10x plays exactly like 10
+// hours at 1x, offline time included", and the 24-hour cap
+// counts GAME time. Plus: the dev panel's cheats do what they
+// say, refuse nonsense, and always mark the save.
+// =============================================================
+
+test("Clock: a new game's clock IS real time at 1x", () => {
+  const state = createNewGame();
+  state.clock = createClock(START);
+  // Any real time in, the same time out.
+  assert.equal(gameNow(state, START), START);
+  assert.equal(gameNow(state, START + 5 * HOUR), START + 5 * HOUR);
+});
+
+test("Clock: at 10x, 1 real minute is 10 game minutes", () => {
+  const state = createNewGame();
+  state.clock = createClock(START);
+  setSpeed(state, 10, START);
+  assert.equal(gameNow(state, START + MINUTE), START + 10 * MINUTE);
+});
+
+test("Clock: slowing back to 1x keeps the time already played fast", () => {
+  // 1 real minute at 10x (= 10 game minutes), then 1 real minute
+  // at 1x: the game should be 11 minutes on, never jump back.
+  const state = createNewGame();
+  state.clock = createClock(START);
+  setSpeed(state, 10, START);
+  setSpeed(state, 1, START + MINUTE);
+  assert.equal(gameNow(state, START + MINUTE), START + 10 * MINUTE);       // no jump at the switch
+  assert.equal(gameNow(state, START + 2 * MINUTE), START + 11 * MINUTE);
+});
+
+test("Clock: only the speeds on offer are allowed", () => {
+  const state = createNewGame();
+  state.clock = createClock(START);
+  assert.deepEqual(SPEEDS, [1, 2, 5, 10, 60]);
+  assert.equal(setSpeed(state, 3, START), false);
+  assert.equal(setSpeed(state, 0, START), false);
+  assert.equal(state.clock.speed, 1);   // unchanged
+});
+
+test("Clock: 1 real hour at 10x ends identical to 10 hours at 1x (played live)", () => {
+  // Fast: ticking 4 times a second for 1 real hour at 10x.
+  const fast = busyEmpire();
+  setSpeed(fast, 10, START);
+  for (let real = 250; real <= HOUR; real += 250) {
+    advanceTo(fast, gameNow(fast, START + real));
+  }
+  // Normal: one jump of 10 hours at 1x.
+  const normal = busyEmpire();
+  advanceTo(normal, START + 10 * HOUR);
+
+  assert.ok(normal.skills.trade.xp > 0);
+  // Everything matches except the clock's own settings (the
+  // speed and its anchor), which are SUPPOSED to differ.
+  fast.clock = normal.clock;
+  assert.deepEqual(fast, normal);
+});
+
+test("Clock: closing the game at 10x for 1 real hour = 10 game hours offline", () => {
+  const closed = busyEmpire();
+  setSpeed(closed, 10, START);
+  // Save, then load it an hour later (real time).
+  const loaded = parseSave(JSON.stringify(closed));
+  const report = applyOfflineProgress(loaded, gameNow(loaded, START + HOUR));
+  assert.equal(report.secondsAway, 10 * 60 * 60);
+
+  const normal = busyEmpire();
+  advanceTo(normal, START + 10 * HOUR);
+  loaded.clock = normal.clock;
+  loaded.lastSavedAt = normal.lastSavedAt;   // the save stamps its own time
+  assert.deepEqual(loaded, normal);
+});
+
+test("Clock: the 24-hour offline cap counts GAME time (1 real hour at 60x = 60h, 24h counted)", () => {
+  const state = busyEmpire();
+  setSpeed(state, 60, START);
+  const report = advanceTo(state, gameNow(state, START + HOUR));
+  assert.equal(report.secondsAway, 60 * 60 * 60);
+  assert.equal(report.secondsCounted, 24 * 60 * 60);
+  assert.equal(state.simulatedMs, 24 * HOUR);
+});
+
+test("Clock: the computer's clock going back at 10x awards nothing", () => {
+  const state = busyEmpire();
+  setSpeed(state, 10, START);
+  advanceTo(state, gameNow(state, START + MINUTE));   // 10 game minutes played
+  const credits = state.credits;
+  const report = advanceTo(state, gameNow(state, START));   // real clock back 1 minute
+  assert.equal(report.secondsCounted, 0);
+  assert.equal(state.credits, credits);
+});
+
+test("Clock: a version 12 save gets a 1x clock equal to real time, and no playtest mark", () => {
+  const oldSave = createNewGame();
+  oldSave.version = 12;
+  oldSave.simulatedUpTo = START;
+  delete oldSave.clock;
+  delete oldSave.playtest;
+  const state = parseSave(JSON.stringify(oldSave));
+  assert.equal(state.version, SAVE_VERSION);
+  assert.deepEqual(state.clock, { realAt: START, gameAt: START, speed: 1 });
+  assert.equal(state.playtest, false);
+  assert.equal(gameNow(state, START + HOUR), START + HOUR);   // still real time
+});
+
+test("Clock: an exported save keeps its speed and playtest mark", () => {
+  const state = createNewGame();
+  devSetSpeed(state, 5, START);
+  const result = importSave(exportSave(state));
+  assert.ok(result.ok);
+  assert.equal(result.state.clock.speed, 5);
+  assert.equal(result.state.playtest, true);
+});
+
+test("Playtest: a new game is not a playtest save", () => {
+  assert.equal(createNewGame().playtest, false);
+});
+
+test("Playtest: set level puts the skill at the START of that level, and marks the save", () => {
+  const state = createNewGame();
+  assert.deepEqual(devSetLevel(state, "mining", 20), { ok: true });
+  assert.equal(state.skills.mining.xp, XP_TABLE[20]);
+  assert.equal(getLevel(state, "mining"), 20);
+  assert.equal(state.playtest, true);
+  // Down works too
+  devSetLevel(state, "mining", 1);
+  assert.equal(getLevel(state, "mining"), 1);
+});
+
+test("Playtest: set level refuses nonsense and doesn't mark the save", () => {
+  const state = createNewGame();
+  for (const level of [0, 100, 2.5, NaN]) {
+    assert.equal(devSetLevel(state, "mining", level).ok, false, "level " + level);
+  }
+  assert.equal(devSetLevel(state, "cooking", 5).ok, false);
+  assert.equal(state.skills.mining.xp, 0);
+  assert.equal(state.playtest, false);
+});
+
+test("Playtest: add credits and goods, refusing 0, negatives and part-tonnes", () => {
+  const state = createNewGame();
+  const credits = state.credits;
+  assert.equal(devAddCredits(state, 0).ok, false);
+  assert.equal(devAddCredits(state, -5).ok, false);
+  assert.equal(devAddGoods(state, "iron_ore", 1.5).ok, false);
+  assert.equal(devAddGoods(state, "unobtainium", 10).ok, false);
+  assert.equal(state.playtest, false);   // nothing worked, so no mark
+
+  assert.ok(devAddCredits(state, 50_000).ok);
+  assert.equal(state.credits, credits + 50_000);
+  assert.ok(devAddGoods(state, "hull_plating", 300).ok);
+  assert.equal(state.inventory.hull_plating, 300);
+  assert.equal(state.playtest, true);
+});
+
+test("Playtest: added ore is picked up by a waiting refinery slot on the next tick", () => {
+  const state = createNewGame();
+  state.clock = createClock(START);
+  state.simulatedUpTo = START;
+  state.skills.mining.xp = XP_TABLE[8];          // refinery open
+  setRecipe(state, 0, "iron_bar", START);        // waits: no ore yet
+  assert.equal(getRefineJob(state, 0).status, "waiting");
+  devAddGoods(state, "iron_ore", 1000);
+  advanceTo(state, START + SECOND);
+  assert.equal(getRefineJob(state, 0).status, "working");
+});
+
+test("Playtest: speed 1x doesn't mark the save; any faster speed does", () => {
+  const state = createNewGame();
+  assert.ok(devSetSpeed(state, 1, START).ok);
+  assert.equal(state.playtest, false);
+  assert.equal(devSetSpeed(state, 7, START).ok, false);
+  assert.ok(devSetSpeed(state, 2, START).ok);
+  assert.equal(state.playtest, true);
+});
+
+test("Playtest: jump an hour plays exactly one more hour", () => {
+  const jumped = busyEmpire();
+  devJumpHour(jumped);
+  // The clock has moved an hour with no real time passing...
+  assert.equal(gameNow(jumped, START), START + HOUR);
+  advanceTo(jumped, gameNow(jumped, START));
+  // ...and it plays the same as an hour going by normally.
+  const normal = busyEmpire();
+  advanceTo(normal, START + HOUR);
+  assert.equal(jumped.simulatedMs, HOUR);
+  jumped.clock = normal.clock;
+  jumped.playtest = false;
+  assert.deepEqual(jumped, normal);
+});
+
+test("Playtest: dropping a skill below its unlocks mid-run doesn't break the engine", () => {
+  // Refinery and workshop busy at high levels, then Mining and
+  // Refining dropped to 1 (the refinery and workshop "close").
+  // Jobs already running should just carry on; nothing crashes
+  // and no goods appear from nowhere.
+  const state = busyEmpire();
+  state.skills.refining.xp = XP_TABLE[30];
+  addOrder(state, 0, "hull_plating", 5, START);
+  devSetLevel(state, "mining", 1);
+  devSetLevel(state, "refining", 1);
+  advanceTo(state, START + 6 * HOUR);
+  for (const [itemId, amount] of Object.entries(state.inventory)) {
+    assert.ok(Number.isInteger(amount) && amount >= 0, itemId + " = " + amount);
+  }
 });
 
 // -------------------------------------------------------------

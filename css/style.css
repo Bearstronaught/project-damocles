@@ -1950,3 +1950,74 @@ body {
 .slot-grid .refine-slot {
   margin-bottom: 0;
 }
+
+
+/* ================================================================
+   PLAYTEST TOOLS (dev mode only)
+   ================================================================ */
+
+/* The speed readout in the status strip, when not 1x */
+.status-speed b {
+  color: var(--amber);
+}
+
+/* "Playtest save" badge: a red outline so a sped-up or cheated
+   save is never mistaken for a real playthrough */
+.playtest-badge {
+  color: var(--red);
+  border: 1px solid var(--red);
+  padding: 0 6px;
+}
+
+/* The dev panel sits under the status strip, the same width as
+   the screens below it */
+.dev-wrap {
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 16px 16px 0;
+}
+
+/* Each tool is one row: a label on the left, controls beside it.
+   flex-wrap lets the controls drop under the label on a phone. */
+.dev-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  margin: 8px 0;
+}
+
+.dev-label {
+  width: 64px;
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--steel-dim);
+}
+
+/* The controls wrap too, so nothing spills past the panel */
+.dev-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+/* Dropdowns don't stretch to fill the row like ship cards' do */
+.dev-select {
+  flex: 0 1 auto;
+  max-width: 100%;
+}
+
+/* Room for numbers like 1,000,000 */
+.dev-wide {
+  width: 110px;
+}
+
+/* The speed currently running is lit amber */
+.dev-speed.active {
+  color: var(--amber);
+  border-color: var(--amber);
+  background: var(--amber-faint);
+}

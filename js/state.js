@@ -9,6 +9,8 @@
 // writes it to the browser so it survives closing the tab.
 // =============================================================
 
+import { createClock } from "./clock.js";
+
 
 // The version number of the save format.
 // If we ever change the shape of the state (rename something,
@@ -26,7 +28,8 @@
 //   Version 10: bonded stock (goods set aside, never sold)
 //   Version 11: refinery and workshop upgrades, and part-tonnes
 //   Version 12: standing orders (the Control centre)
-export const SAVE_VERSION = 12;
+//   Version 13: the game clock (playtest speed) and the playtest mark
+export const SAVE_VERSION = 13;
 
 
 // -------------------------------------------------------------
@@ -34,6 +37,10 @@ export const SAVE_VERSION = 12;
 // Builds the starting state for a brand new player.
 // -------------------------------------------------------------
 export function createNewGame() {
+  // Read the computer's clock once, so every start time below is
+  // exactly the same moment.
+  const now = Date.now();
+
   return {
     version: SAVE_VERSION,
 
@@ -108,16 +115,25 @@ export function createNewGame() {
     jobs: [],
 
     // When the game was last saved, as a timestamp.
-    lastSavedAt: Date.now(),
+    lastSavedAt: now,
 
     // How far the game has been PLAYED up to, as a timestamp.
     // simulation.js plays from here to "now" every tick, and on
     // load after time away - see advanceTo().
-    simulatedUpTo: Date.now(),
+    simulatedUpTo: now,
 
     // The run clock: total time actually played, in ms. Time
     // past the offline cap doesn't count (it isn't played).
     simulatedMs: 0,
+
+    // The game clock: what time it is inside the game, and how
+    // fast it runs (1x unless the playtest speed is changed).
+    // See clock.js.
+    clock: createClock(now),
+
+    // True once any playtest tool has been used on this save
+    // (speed, dev panel). It never goes back. See playtest.js.
+    playtest: false,
   };
 }
 
