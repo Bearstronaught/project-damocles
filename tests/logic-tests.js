@@ -27,7 +27,7 @@ import { startMiningJob, startHaulJob, getJobForShip, processJobs, cancelJob, re
 import { sellAll, sellEverything, getCargoValue, sellAtHub, getTradeXp, getPrice } from "../js/trade.js";
 import { parseSave, applyOfflineProgress, exportSave, importSave } from "../js/save.js";
 import { XP_TABLE, getLevelForXp, getLevel, getLevelProgress, addXp, isShipTypeUnlocked, MAX_LEVEL } from "../js/skills.js";
-import { canBuyShip, buyShip, canSellShip, sellShip, getSellValue, renameShip } from "../js/shipyard.js";
+import { canBuyShip, buyShip, canSellShip, sellShip, getSellValue, renameShip, getShipPrice } from "../js/shipyard.js";
 import { getCommandCapacity, getCommandUsed, getNextUpgradeCost, buyUpgrade } from "../js/command.js";
 import { isFieldUnlocked } from "../js/skills.js";
 import { getRoleGroups, describeGroup, getShipActivity } from "../js/fleet-groups.js";
@@ -437,19 +437,22 @@ test("A second Prospector can be bought from the start, for 8,000 cr", () => {
 
 test("Four Prospectors fill the 4 starting command points", () => {
   const state = createNewGame();
-  state.credits = 8000 * 4;
+  state.credits = 1_000_000;                         // plenty, so only points can stop us
   buyShip(state, "prospector");
   buyShip(state, "prospector");
   buyShip(state, "prospector");
+  const before = state.credits;
   assert.deepEqual(canBuyShip(state, "prospector"), { ok: false, reason: "Not enough command points" });
-  assert.equal(state.credits, 8000);                 // the 4th wasn't charged
+  assert.equal(buyShip(state, "prospector"), null);
+  assert.equal(state.credits, before);               // the 5th wasn't charged
 });
 
 test("A second Prospector takes about half an hour of mining to afford", () => {
-  // Dan's change (28 Oct): an hour felt too long. 8,000 cr at
-  // 14,400 cr an hour = about 33 minutes.
+  // Dan's change (28 Oct): an hour felt too long. The second one
+  // (owning the starter) costs 8,000 cr; at 14,400 cr an hour
+  // that's about 33 minutes. Later ones cost more (29 Oct).
   const creditsPerHour = PROSPECTOR.orePerTrip * ITEMS.iron_ore.sellPrice * (HOUR / TRIP);
-  const hours = SHIP_TYPES.prospector.cost / creditsPerHour;
+  const hours = getShipPrice(createNewGame(), "prospector") / creditsPerHour;
   assert.ok(hours > 0.4 && hours < 0.75, hours.toFixed(2) + " hours");
 });
 
@@ -536,14 +539,15 @@ test("A second Excavator is blocked by command, even with the money", () => {
   assert.equal(state.credits, SHIP_TYPES.excavator.cost);   // no money taken
 });
 
-test("Command upgrades: +2 points each, priced 20,000 then 40,000 then 80,000", () => {
+test("Command upgrades: +2 points each, priced 80,000 then 160,000 then 320,000", () => {
+  // Four times the old prices (Dan, 29 Oct), still doubling.
   const state = createNewGame();
-  state.credits = 20000 + 40000 + 80000;
-  assert.equal(getNextUpgradeCost(state), 20000);
-  buyUpgrade(state);
-  assert.equal(getNextUpgradeCost(state), 40000);
-  buyUpgrade(state);
+  state.credits = 80000 + 160000 + 320000;
   assert.equal(getNextUpgradeCost(state), 80000);
+  buyUpgrade(state);
+  assert.equal(getNextUpgradeCost(state), 160000);
+  buyUpgrade(state);
+  assert.equal(getNextUpgradeCost(state), 320000);
   buyUpgrade(state);
   assert.equal(getCommandCapacity(state), 4 + 3 * 2);
   assert.equal(state.credits, 0);
@@ -566,7 +570,8 @@ test("After the last upgrade there are no more to buy", () => {
 });
 
 test("Expanding command makes room for the second Excavator", () => {
-  const state = gameAtLevel10(SHIP_TYPES.excavator.cost * 2 + 20000);
+  // First Excavator 60,000 + upgrade 80,000 + second Excavator 96,000
+  const state = gameAtLevel10(60000 + 80000 + 96000);
   buyShip(state, "excavator");
   buyUpgrade(state);
   assert.ok(buyShip(state, "excavator"));
@@ -576,12 +581,65 @@ test("Expanding command makes room for the second Excavator", () => {
 
 
 // =============================================================
+// SHIP PRICES RISE WITH EACH ONE YOU OWN (Dan, 29 Oct)
+// =============================================================
+
+test("Each Prospector costs 60% more than the last: 8,000, 12,800, 20,480", () => {
+  const state = createNewGame();                     // owns the starter
+  state.credits = 1_000_000;
+  assert.equal(getShipPrice(state, "prospector"), 8000);
+  buyShip(state, "prospector");
+  assert.equal(getShipPrice(state, "prospector"), 12800);
+  buyShip(state, "prospector");
+  assert.equal(getShipPrice(state, "prospector"), 20480);
+  // What was taken matches the prices shown: 8,000 + 12,800
+  assert.equal(state.credits, 1_000_000 - 8000 - 12800);
+});
+
+test("Each ship type has its own price ladder", () => {
+  const state = gameAtLevel10(1_000_000);
+  buyShip(state, "prospector");
+  buyShip(state, "prospector");
+  // Owning 3 Prospectors doesn't make the first Excavator dearer
+  assert.equal(getShipPrice(state, "excavator"), SHIP_TYPES.excavator.cost);
+});
+
+test("Selling a ship makes the next one of that type cheaper again", () => {
+  const state = createNewGame();
+  state.credits = 1_000_000;
+  buyShip(state, "prospector");                      // ship-2
+  buyShip(state, "prospector");                      // ship-3
+  assert.equal(getShipPrice(state, "prospector"), 20480);
+  sellShip(state, "ship-3");
+  assert.equal(getShipPrice(state, "prospector"), 12800);
+});
+
+test("Buying a ship and selling it straight back loses half the price", () => {
+  const state = gameAtLevel10(1_000_000);
+  buyShip(state, "excavator");                       // pays 60,000
+  const price = getShipPrice(state, "excavator");    // the 2nd costs 96,000
+  buyUpgrade(state);                                 // room for the 2nd
+  const before = state.credits;
+  const ship = buyShip(state, "excavator");
+  sellShip(state, ship.id);
+  assert.equal(before - state.credits, price / 2);
+});
+
+
+// =============================================================
 // SELLING SHIPS
 // =============================================================
 
-test("Both barges sell for half their price (Excavator 15,000, Prospector 4,000)", () => {
-  assert.equal(getSellValue("excavator"), SHIP_TYPES.excavator.cost / 2);
-  assert.equal(getSellValue("prospector"), 4000);
+test("A ship sells for half of what it would cost to buy back", () => {
+  const state = gameAtLevel10(1_000_000);
+  // Only the starter Prospector: buying it back (owning 0) costs 5,000
+  assert.equal(getSellValue(state, "prospector"), 2500);
+  buyShip(state, "prospector");
+  // Owning 2: buying one back (owning 1) costs 8,000
+  assert.equal(getSellValue(state, "prospector"), 4000);
+  buyShip(state, "excavator");
+  // One Excavator: buying it back costs 60,000
+  assert.equal(getSellValue(state, "excavator"), 30000);
 });
 
 test("Selling a docked ship pays out and frees its command points", () => {
@@ -732,14 +790,14 @@ function gameWithCourier(mode = "full") {
   return state;
 }
 
-test("The Courier is locked until Trade 3, then costs 25,000 cr", () => {
+test("The Courier is locked until Trade 3, then costs 50,000 cr", () => {
   const state = createNewGame();
   state.credits = 1_000_000;
   state.skills.trade.xp = XP_TABLE[3] - 1;
   assert.deepEqual(canBuyShip(state, "courier"), { ok: false, reason: "Locked" });
   state.skills.trade.xp = XP_TABLE[3];
   const ship = buyShip(state, "courier");
-  assert.equal(state.credits, 1_000_000 - 25000);
+  assert.equal(state.credits, 1_000_000 - 50000);
   assert.equal(ship.haulMode, "full");           // starts on full loads
   assert.equal(ship.destination, undefined);     // freighters don't mine
 });
@@ -867,7 +925,7 @@ test("Switching a waiting Courier to constant runs sends it off", () => {
 
 test("Two Couriers waiting for ore: the one bought first loads first", () => {
   const state = gameWithCourier("full");
-  state.credits = SHIP_TYPES.courier.cost;
+  state.credits = getShipPrice(state, "courier");
   buyShip(state, "courier");                     // ship-3
   const first = startHaulJob(state, "ship-2", START);
   const second = startHaulJob(state, "ship-3", START);
@@ -903,9 +961,10 @@ test("Barges + Courier: ticking for 2 hours equals one 2-hour jump", () => {
   // The big one: this is what makes offline hauling fair.
   const setup = () => {
     const state = gameWithCourier("full");
-    state.credits = SHIP_TYPES.prospector.cost * 2;
+    state.credits = 1_000_000;
     buyShip(state, "prospector");                // ship-3
     buyShip(state, "prospector");                // ship-4
+    state.credits = 0;                           // count only what's earned
     startMiningJob(state, "ship-1", "inner_belt", START);
     startMiningJob(state, "ship-3", "inner_belt", START + 7 * SECOND);
     startMiningJob(state, "ship-4", "inner_belt", START + 61 * SECOND);
@@ -1106,7 +1165,7 @@ test("Names over 24 characters are refused; exactly 24 is fine", () => {
 
 test("Two ships can't share a name (capitals don't count as different)", () => {
   const state = createNewGame();
-  state.credits = SHIP_TYPES.prospector.cost;
+  state.credits = getShipPrice(state, "prospector");
   buyShip(state, "prospector");                       // "Second Wind"
   const result = renameShip(state, "ship-1", "SECOND WIND");
   assert.equal(result.ok, false);

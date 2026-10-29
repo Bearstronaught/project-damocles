@@ -64,7 +64,7 @@ export function getCommandFree(state) {
 // Price of the next Fleet command upgrade, or null if the
 // player has bought them all.
 // Each one costs costMultiplier times the last:
-//   upgrade 1: 2,000   upgrade 2: 4,000   upgrade 3: 8,000 ...
+//   upgrade 1: 80,000   upgrade 2: 160,000   upgrade 3: 320,000 ...
 // -------------------------------------------------------------
 export function getNextUpgradeCost(state) {
   if (state.commandUpgrades >= COMMAND.maxUpgrades) {

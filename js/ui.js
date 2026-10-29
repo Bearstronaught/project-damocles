@@ -20,7 +20,7 @@
 import { ITEMS, SHIP_TYPES, FIELDS, SKILLS, HULL_SIZES, COMMAND, HUB, HOME, HAUL_MODES, RECIPES, REFINERY } from "../data/content.js";
 import { getJobForShip, getJobPhase, getTripPlan, getHaulPlan, getOreInHold } from "./jobs.js";
 import { getLevel, getLevelProgress, isShipTypeUnlocked, isFieldUnlocked } from "./skills.js";
-import { canBuyShip, canSellShip, getSellValue, MAX_NAME_LENGTH } from "./shipyard.js";
+import { canBuyShip, canSellShip, getSellValue, getShipPrice, MAX_NAME_LENGTH } from "./shipyard.js";
 import { getShipPoints, getCommandCapacity, getCommandUsed, getNextUpgradeCost, canBuyUpgrade } from "./command.js";
 import { getCargoValue, getTradeXp } from "./trade.js";
 import { getSchematic } from "./art.js";
@@ -827,7 +827,6 @@ function buildShipyard(actions) {
   // Object.entries gives pairs: ["excavator", { name: ... }]
   for (const [typeId, shipType] of Object.entries(SHIP_TYPES)) {
     const skillName = SKILLS[shipType.skill].name;
-    const price = shipType.cost === null ? "Not sold" : formatNumber(shipType.cost) + " cr";
 
     const card = document.createElement("div");
     card.className = "yard-card";
@@ -842,7 +841,7 @@ function buildShipyard(actions) {
       ${statsList(typeId)}
       <dl class="stats stats-yard">
         <dt>Requires</dt>  <dd>${skillName} level ${shipType.unlockLevel}</dd>
-        <dt>Price</dt>     <dd>${price}</dd>
+        <dt>Next one</dt>  <dd data-part="price"></dd>
         <dt>Owned</dt>     <dd data-part="owned">0</dd>
       </dl>
       <div class="yard-note" data-part="note"></div>
@@ -1226,7 +1225,7 @@ function renderOwnedList(state) {
     const check = canSellShip(state, ship.id);
     sellButton.disabled = !check.ok;
     if (!isArmed(sellButton)) {
-      sellButton.textContent = "Sell — " + formatNumber(getSellValue(ship.type)) + " cr";
+      sellButton.textContent = "Sell — " + formatNumber(getSellValue(state, ship.type)) + " cr";
     }
     if (check.reason === "Last ship") note.textContent = "Can't sell your last ship.";
     else if (check.reason === "Ship is busy") note.textContent = "Recall or wait for it to dock to sell.";
@@ -1305,6 +1304,10 @@ function renderShipyard(state) {
       fieldRow.classList.toggle("locked", !isFieldUnlocked(state, fieldRow.dataset.field));
     }
 
+    // The price of the NEXT one: it rises with each one you own.
+    const price = getShipPrice(state, typeId);
+    part(card, "price").textContent = price === null ? "Not sold" : formatNumber(price) + " cr";
+
     // Pick the tag, note and button text for each situation.
     if (shipType.cost === null) {
       tag.textContent = "Starter";
@@ -1315,7 +1318,7 @@ function renderShipyard(state) {
 
     button.hidden = false;
     button.disabled = !check.ok;
-    button.textContent = `Buy — ${formatNumber(shipType.cost)} cr`;
+    button.textContent = `Buy — ${formatNumber(price)} cr`;
 
     // (Locked ships were skipped above, so they never get here.)
     if (check.reason === "Not enough command points") {
@@ -1323,7 +1326,7 @@ function renderShipyard(state) {
       note.textContent = `Needs ${getShipPoints(typeId)} command points; you have ${getCommandCapacity(state) - getCommandUsed(state)} free. Expand command or sell a ship.`;
     } else if (check.reason === "Not enough credits") {
       tag.textContent = "Available";
-      note.textContent = `Need ${formatNumber(shipType.cost - state.credits)} more cr.`;
+      note.textContent = `Need ${formatNumber(price - state.credits)} more cr.`;
     } else {
       tag.textContent = "Available";
       note.textContent = `Ready to buy. New ships dock at ${HOME.name}, awaiting orders.`;

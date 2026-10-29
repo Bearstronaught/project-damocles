@@ -106,12 +106,17 @@ export const HULL_SIZES = {
 //   pointsPerUpgrade  points each Fleet command upgrade adds
 //   firstUpgradeCost  price of the first upgrade (credits)
 //   costMultiplier    each upgrade costs this many times the last
-//                     (2 = doubles: 20,000 -> 40,000 -> 80,000 ...)
+//                     (2 = doubles: 80,000 -> 160,000 -> 320,000 ...)
 //   maxUpgrades       how many upgrades can be bought in total
 export const COMMAND = BALANCE.command;
 
 // SELLING: an idle ship sells for this share of its price.
 export const SELL_RATE = BALANCE.sellRate;
+
+// SHIP PRICES GROW: each ship of a type costs this many times the
+// last one (1.6 = 60% more), counting the ships of that type you
+// own right now. Selling one makes the next one cheaper again.
+export const SHIP_PRICE_GROWTH = BALANCE.shipPriceGrowth;
 
 
 // -------------------------------------------------------------
@@ -143,7 +148,9 @@ export const ROLES = {
 //   size           hull size, from HULL_SIZES (sets command points)
 //   skill          which skill unlocks this ship
 //   unlockLevel    the skill level needed to buy one
-//   cost           price in credits (null = not for sale)
+//   cost           base price in credits: what the first one costs
+//                  when you own none (null = not for sale). Each one
+//                  you own makes the next dearer (SHIP_PRICE_GROWTH).
 //   cargoCapacity  tonnes of ore the hold carries per trip
 //   miningRate     tonnes mined per minute at the field
 //                  (mining time = cargo / rate). Freighters have none.

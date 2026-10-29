@@ -13,9 +13,9 @@ export const BALANCE = {
     steel: { sellPrice: 22, hubPrice: 35 },
   },
   ships: {
-    prospector: { role: 'mining', size: 'small', skill: 'mining', unlockLevel: 1, cost: 8000, cargoCapacity: 120, miningRate: 120, speed: 1 },
-    excavator: { role: 'mining', size: 'medium', skill: 'mining', unlockLevel: 10, cost: 30000, cargoCapacity: 480, miningRate: 240, speed: 0.75 },
-    courier: { role: 'freight', size: 'small', skill: 'trade', unlockLevel: 3, cost: 25000, cargoCapacity: 600, speed: 1 },
+    prospector: { role: 'mining', size: 'small', skill: 'mining', unlockLevel: 1, cost: 5000, cargoCapacity: 120, miningRate: 120, speed: 1 },
+    excavator: { role: 'mining', size: 'medium', skill: 'mining', unlockLevel: 10, cost: 60000, cargoCapacity: 480, miningRate: 240, speed: 0.75 },
+    courier: { role: 'freight', size: 'small', skill: 'trade', unlockLevel: 3, cost: 50000, cargoCapacity: 600, speed: 1 },
   },
   fields: {
     inner_belt: { yields: 'iron_ore', travelSeconds: 45, tonnesPerXp: 10, unlockLevel: 1 },
@@ -32,8 +32,9 @@ export const BALANCE = {
     large: { commandPoints: 4 },
     capital: { commandPoints: 8 },
   },
-  command: { startPoints: 4, pointsPerUpgrade: 2, firstUpgradeCost: 20000, costMultiplier: 2, maxUpgrades: 10 },
+  command: { startPoints: 4, pointsPerUpgrade: 2, firstUpgradeCost: 80000, costMultiplier: 2, maxUpgrades: 10 },
   sellRate: 0.5,
+  shipPriceGrowth: 1.6,
   trade: { creditsPerXp: 100, hubTonnesPerBonusXp: 10 },
   hub: { travelSeconds: 180, tradeSeconds: 30 },
   refinery: { slotLevels: [1, 10, 25], speedPerLevel: 0.005, openAtMiningLevel: 8 },

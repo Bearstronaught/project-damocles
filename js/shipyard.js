@@ -4,11 +4,50 @@
 // SHIPYARD: buying and selling ships.
 // =============================================================
 
-import { SHIP_TYPES, SHIP_NAMES, SELL_RATE } from "../data/content.js";
+import { SHIP_TYPES, SHIP_NAMES, SELL_RATE, SHIP_PRICE_GROWTH } from "../data/content.js";
 import { isShipTypeUnlocked } from "./skills.js";
 import { getShipPoints, getCommandFree } from "./command.js";
 import { findShip } from "./state.js";
 import { getJobForShip } from "./jobs.js";
+
+
+// -------------------------------------------------------------
+// countOwned(state, shipTypeId)
+// How many ships of this type are in the fleet right now.
+// -------------------------------------------------------------
+export function countOwned(state, shipTypeId) {
+  return state.ships.filter((ship) => ship.type === shipTypeId).length;
+}
+
+
+// -------------------------------------------------------------
+// getPriceWithOwned(shipTypeId, owned)
+// The price of a ship of this type when you already own "owned"
+// of them. The base cost (the price when you own none) grows by
+// SHIP_PRICE_GROWTH for each one you own:
+//     owned 0: base          5,000
+//     owned 1: base x 1.6    8,000
+//     owned 2: base x 1.6²  12,800   ...and so on.
+// Rounded to whole credits. Returns null if the shop doesn't
+// sell this type at all.
+// -------------------------------------------------------------
+export function getPriceWithOwned(shipTypeId, owned) {
+  const shipType = SHIP_TYPES[shipTypeId];
+  if (shipType.cost === null) {
+    return null;
+  }
+  // ** means "to the power of": 1.6 ** 2 = 1.6 x 1.6 = 2.56
+  return Math.round(shipType.cost * SHIP_PRICE_GROWTH ** owned);
+}
+
+
+// -------------------------------------------------------------
+// getShipPrice(state, shipTypeId)
+// What the NEXT ship of this type costs for this player.
+// -------------------------------------------------------------
+export function getShipPrice(state, shipTypeId) {
+  return getPriceWithOwned(shipTypeId, countOwned(state, shipTypeId));
+}
 
 
 // -------------------------------------------------------------
@@ -30,7 +69,7 @@ export function canBuyShip(state, shipTypeId) {
   if (getShipPoints(shipTypeId) > getCommandFree(state)) {
     return { ok: false, reason: "Not enough command points" };
   }
-  if (state.credits < shipType.cost) {
+  if (state.credits < getShipPrice(state, shipTypeId)) {
     return { ok: false, reason: "Not enough credits" };
   }
   return { ok: true };
@@ -48,7 +87,9 @@ export function buyShip(state, shipTypeId) {
     return null;
   }
 
-  state.credits -= SHIP_TYPES[shipTypeId].cost;
+  // Pay the price BEFORE adding the ship, so the price is worked
+  // out from the fleet as it was when the player clicked Buy.
+  state.credits -= getShipPrice(state, shipTypeId);
 
   // Every ship gets a unique ID from a counter that only ever
   // goes up, so IDs are never reused (even after a ship is sold).
@@ -74,16 +115,22 @@ export function buyShip(state, shipTypeId) {
 
 
 // -------------------------------------------------------------
-// getSellValue(shipTypeId)
-// What a ship sells for: half its shop price (SELL_RATE), or
-// its fixed resale value if the shop doesn't sell it.
+// getSellValue(state, shipTypeId)
+// What one ship of this type sells for right now: half
+// (SELL_RATE) of what it would cost to buy it back. Buying it
+// back means owning one fewer, so that's the price at owned - 1.
+// This way buying a ship and selling it straight away always
+// loses half the money, however many you own.
+// A type the shop doesn't sell uses its fixed resale value.
 // -------------------------------------------------------------
-export function getSellValue(shipTypeId) {
+export function getSellValue(state, shipTypeId) {
   const shipType = SHIP_TYPES[shipTypeId];
   if (shipType.cost === null) {
     return shipType.resale || 0;
   }
-  return Math.floor(shipType.cost * SELL_RATE);
+  const owned = countOwned(state, shipTypeId);
+  const buyBackPrice = getPriceWithOwned(shipTypeId, Math.max(owned - 1, 0));
+  return Math.floor(buyBackPrice * SELL_RATE);
 }
 
 
@@ -117,7 +164,9 @@ export function sellShip(state, shipId) {
     return 0;
   }
   const ship = findShip(state, shipId);
-  const value = getSellValue(ship.type);
+  // Work out the value BEFORE removing the ship (it depends on
+  // how many of this type are in the fleet).
+  const value = getSellValue(state, ship.type);
 
   // Keep every ship EXCEPT this one.
   state.ships = state.ships.filter((s) => s.id !== shipId);
