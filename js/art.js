@@ -133,12 +133,14 @@ const GRADE_MARKS = { 1: "I", 2: "II", 3: "III" };
 
 
 // -------------------------------------------------------------
-// getShipArt(artName, grades)
+// getShipArt(artName, grades, labels)
 // The drawing with a hardpoint marker on each component.
 // "grades" says what's fitted, e.g. { drill: 1, hold: 0, drive: 2 }.
+// "labels" (optional) is what hovering each marker shows, as
+// [title, detail], e.g. { drill: ["Drill", "Mk I · +15% mining rate"] }.
 // Parts the hull doesn't have (a freighter's drill) are skipped.
 // -------------------------------------------------------------
-export function getShipArt(artName, grades) {
+export function getShipArt(artName, grades, labels = {}) {
   const drawing = getSchematic(artName);
   const points = HARDPOINTS[artName];
   if (!points) {
@@ -149,10 +151,15 @@ export function getShipArt(artName, grades) {
   for (const [partId, [x, y]] of Object.entries(points)) {
     if (!(partId in grades)) continue;
     const grade = grades[partId];
+    // The hover text, kept on the marker as data-tip-title and
+    // data-tip (ui.js shows them in a tooltip box).
+    const [title, detail] = labels[partId] || ["", ""];
     // <g> groups the ring and its label so they move together;
     // "translate" moves the group to the hardpoint.
     markers += `
-      <g class="hardpoint ${grade > 0 ? "fitted" : "stock"}" transform="translate(${x} ${y})">
+      <g class="hardpoint ${grade > 0 ? "fitted" : "stock"}" transform="translate(${x} ${y})"
+         data-tip-title="${title}" data-tip="${detail}">
+        <circle class="hit" r="11" />
         <circle r="7.5" />
         ${grade > 0 ? `<text y="2.8">${GRADE_MARKS[grade]}</text>` : ""}
       </g>`;

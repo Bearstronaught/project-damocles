@@ -105,6 +105,7 @@ export function setupUI(state, actions) {
   buildStationHold(actions);
   buildComponents(actions);
   buildDevPanel(actions);
+  setupHardpointTips();
 }
 
 
@@ -340,7 +341,7 @@ function renderStatsBoxes(state) {
     const key = JSON.stringify(grades);
     if (box.dataset.key !== key) {
       box.dataset.key = key;
-      box.innerHTML = getShipArt(SHIP_TYPES[typeId].art, grades);
+      box.innerHTML = getShipArt(SHIP_TYPES[typeId].art, grades, getPartLabels(state, typeId));
     }
   }
   for (const box of document.querySelectorAll("[data-parts]")) {
@@ -365,6 +366,96 @@ function getGrades(state, typeId) {
   }
   return grades;
 }
+
+// -------------------------------------------------------------
+// getPartLabels(state, typeId)
+// What hovering each hardpoint says, as [title, detail], e.g.
+//   drill: ["Drill", "Mk II fitted · +30% mining rate"]
+//   hold:  ["Cargo hold", "Stock part · nothing fitted yet"]
+// -------------------------------------------------------------
+function getPartLabels(state, typeId) {
+  const labels = {};
+  for (const partId of getHullParts(typeId)) {
+    const grade = getPartGrade(state, typeId, partId);
+    const name = SHIP_PARTS[partId].name;
+    if (grade === 0) {
+      labels[partId] = [name, "Stock part · nothing fitted yet"];
+    } else {
+      const bonus = getPartBonus(state, typeId, partId);
+      const gradeName = findUpgrade(typeId, partId, grade).gradeName;
+      labels[partId] = [name, `${gradeName} fitted · +${formatPercent(bonus)} ${SHIP_PARTS[partId].says}`];
+    }
+  }
+  return labels;
+}
+
+
+// -------------------------------------------------------------
+// setupHardpointTips()
+// One tooltip box for every hardpoint on every drawing. It's
+// "delegated": a single listener on the whole page checks
+// whether the pointer is over a hardpoint, so drawings that are
+// redrawn later (after fitting a component) work without
+// setting anything up again.
+//   Mouse: hover a marker to show the box, move off to hide it.
+//   Touch: tap a marker to show it, tap anywhere else to hide it.
+// -------------------------------------------------------------
+function setupHardpointTips() {
+  const tip = byId("hardpoint-tip");
+
+  function show(marker) {
+    tip.querySelector("b").textContent = marker.dataset.tipTitle;
+    tip.querySelector("span").textContent = marker.dataset.tip;
+    tip.hidden = false;
+    // Place the box just above the marker, kept on screen.
+    // getBoundingClientRect gives where the marker is drawn now.
+    const spot = marker.getBoundingClientRect();
+    const box = tip.getBoundingClientRect();
+    const left = Math.min(Math.max(4, spot.left + spot.width / 2 - box.width / 2),
+                          window.innerWidth - box.width - 4);
+    const above = spot.top - box.height - 6;
+    tip.style.left = left + "px";
+    // No room above (top of the screen)? Put it below instead.
+    tip.style.top = (above > 4 ? above : spot.bottom + 6) + "px";
+  }
+  function hide() {
+    tip.hidden = true;
+  }
+
+  // .closest(".hardpoint") finds the marker the pointer is in,
+  // even when it's over the ring or the numeral inside it.
+  // Hover is for a real MOUSE only (pointerType "mouse"): a
+  // touch screen also fires pretend mouse events around a tap,
+  // and their "pointer left" would hide the box straight away.
+  document.addEventListener("pointerover", (event) => {
+    if (event.pointerType !== "mouse") return;
+    const marker = event.target.closest && event.target.closest(".hardpoint");
+    if (marker && marker.dataset.tipTitle) show(marker);
+  });
+  document.addEventListener("pointerout", (event) => {
+    if (event.pointerType !== "mouse") return;
+    const marker = event.target.closest && event.target.closest(".hardpoint");
+    if (marker) hide();
+  });
+
+  // A tap (or click) on a marker shows it. It must NOT also open or
+  // close the card the drawing sits in, so the click is stopped
+  // here ("capture": true runs this before the card hears it).
+  document.addEventListener("click", (event) => {
+    const marker = event.target.closest && event.target.closest(".hardpoint");
+    if (marker && marker.dataset.tipTitle) {
+      event.preventDefault();
+      event.stopPropagation();
+      show(marker);
+    } else {
+      hide();
+    }
+  }, true);
+
+  // Scrolling moves the drawing out from under the box.
+  window.addEventListener("scroll", hide, true);
+}
+
 
 // -------------------------------------------------------------
 // partsList(state, typeId)

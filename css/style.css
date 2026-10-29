@@ -2228,3 +2228,53 @@ body {
 .parts-list li.fitted .part-grade {
   color: var(--teal);
 }
+
+
+/* ----- Hardpoint hover ----- */
+
+/* The invisible, bigger circle around each marker, so it's easy
+   to point at (or tap on a phone). "transparent" still catches
+   the pointer. */
+.schematic .hardpoint .hit {
+  fill: transparent;
+  stroke: none;
+}
+
+.schematic .hardpoint {
+  cursor: help;
+}
+
+/* The marker being pointed at is lit amber */
+.schematic .hardpoint:hover circle:not(.hit) {
+  stroke: var(--amber);
+}
+
+/* The tooltip box: fixed to the screen, placed by ui.js */
+.hardpoint-tip {
+  position: fixed;
+  z-index: 50;
+  max-width: 240px;
+  padding: 6px 10px;
+  background: var(--bg);
+  border: 1px solid var(--teal);
+  box-shadow: var(--glow-teal);
+  font-size: 12px;
+  pointer-events: none;       /* never gets in the way of the mouse */
+}
+
+.hardpoint-tip[hidden] {
+  display: none;
+}
+
+.hardpoint-tip b {
+  display: block;
+  color: var(--amber);
+  font-family: var(--font-display);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-size: 11px;
+}
+
+.hardpoint-tip span {
+  color: var(--steel);
+}

@@ -3123,6 +3123,11 @@ test("Hardpoints: a marker per component, numbered by Mk; no drill marker on a f
   const courier = getShipArt("hull_courier", { hold: 3, drive: 0 });
   assert.equal((courier.match(/class="hardpoint /g) || []).length, 2);
   assert.ok(courier.includes(">III<"));
+  // Hover labels ride on each marker
+  const labelled = getShipArt("hull_courier", { hold: 1, drive: 0 },
+    { hold: ["Cargo hold", "Mk I fitted · +15% cargo"], drive: ["Drive", "Stock part"] });
+  assert.ok(labelled.includes('data-tip-title="Cargo hold" data-tip="Mk I fitted · +15% cargo"'));
+  assert.ok(labelled.includes('data-tip-title="Drive" data-tip="Stock part"'));
 });
 
 // -------------------------------------------------------------
