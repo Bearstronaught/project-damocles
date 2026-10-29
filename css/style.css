@@ -1658,3 +1658,108 @@ body {
 
 /* The log's REFINE tag, in the cooler secondary tone */
 .log-refine .log-tag { color: var(--teal); }
+
+
+/* =============================================================
+   THE WORKSHOP (Manufacturing work orders)
+   Workshop slots reuse the refinery's .refine-slot boxes; these
+   rules add the order queue and the "queue an order" form.
+   ============================================================= */
+
+/* An idle slot (queue ran out): amber, because it's waiting on
+   the player - the same colour as a docked ship. */
+.workshop-slot.idle .ship-status {
+  color: var(--amber);
+}
+
+/* The queue: a short numbered list of orders */
+.order-queue {
+  margin: 8px 0 4px;
+  padding-left: 22px;
+  font-size: 12px;
+  color: var(--steel);
+}
+
+.order-queue:empty {
+  display: none;            /* no orders: no empty gap */
+}
+
+.order-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 2px 0;
+}
+
+/* The first order is the one being worked on */
+.order-line:first-child .order-name {
+  color: var(--teal);
+}
+
+.order-done {
+  color: var(--steel-dim);
+}
+
+/* The little cancel cross beside each order */
+.order-cancel {
+  padding: 0 7px;
+  line-height: 18px;
+}
+
+/* "Make [recipe] Batches [20] [Queue order]" on one line, which
+   wraps onto two on a narrow phone screen */
+.order-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 12px;
+}
+
+.order-form .dest-select-row {
+  margin: 6px 0;
+}
+
+/* The recipe menu gets a whole line to itself. min-width: 0 lets
+   it shrink to fit the box: without it, the longest option
+   ("Thruster assemblies (Manufacturing 20)") forced the menu
+   wider than the slot and it spilled out on the right. */
+.order-form .dest-select-row:first-child {
+  flex: 1 1 100%;
+  min-width: 0;
+}
+
+.order-form .btn {
+  width: auto;
+}
+
+/* The batch count box, styled like the dropdowns */
+.batch-input {
+  width: 64px;
+  font-family: var(--font-display);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--teal);
+  background: var(--bg);
+  border: 1px solid var(--line-strong);
+  padding: 6px 8px;
+}
+
+.batch-input:focus-visible {
+  border-color: var(--teal);
+  outline: none;
+}
+
+/* Why an order was refused, e.g. "This slot's queue is full" */
+.order-message {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--amber);
+}
+
+.order-message:empty {
+  display: none;
+}
+
+/* The log's MAKE tag, in the cooler secondary tone like REFINE */
+.log-make .log-tag { color: var(--teal); }

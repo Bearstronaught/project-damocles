@@ -326,7 +326,16 @@ function upgradeSave(state) {
     state.version = 8;
   }
 
-  // (Future: if (state.version === 8) { ...; state.version = 9; })
+  // --- Version 8 -> 9: the Manufacturing skill ---
+  // Nobody has manufactured anything yet, so Manufacturing starts
+  // at 0 XP. (The new products start at 0 t on their own: the
+  // cargo hold treats a missing item as 0.)
+  if (state.version === 8) {
+    state.skills.manufacturing = { xp: 0 };
+    state.version = 9;
+  }
+
+  // (Future: if (state.version === 9) { ...; state.version = 10; })
 
   if (state.version > SAVE_VERSION) {
     // A save from a NEWER version of the game than this one.

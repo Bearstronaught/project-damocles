@@ -2,7 +2,7 @@
 
 A space-based idle game. Grow from one mining barge into a galaxy-spanning empire through mining, trade, industry and exploration.
 
-**Current state:** early prototype. Ships fly out to an asteroid field, mine until the hold is full and fly home; trip times come from each ship's stats (cargo hold, mining rate, drive speed). Ore sells for credits, and progress continues while the game is closed (up to 24 hours). Mining levels follow RuneScape's XP curve up to 99; Mining level 2 unlocks the Excavator-class barge and level 5 the Outer Belt (nickel ore). Each ship uses command points by hull size, which cap the fleet; buy Fleet command upgrades to expand it, or sell an idle ship for half its price. Three screens: Command, Ships (fleet command, your fleet, the shipyard) and Skills.
+**Current state:** early prototype, now with Refining and Manufacturing. The refinery (open at Mining 8) smelts ore into metal on repeat; the workshop (open at Refining 8) turns metal into components and assemblies through work orders, a short queue per slot that runs offline and then stops. Ships fly out to an asteroid field, mine until the hold is full and fly home; trip times come from each ship's stats (cargo hold, mining rate, drive speed). Ore sells for credits, and progress continues while the game is closed (up to 24 hours). Mining levels follow RuneScape's XP curve up to 99; Mining level 2 unlocks the Excavator-class barge and level 5 the Outer Belt (nickel ore). Each ship uses command points by hull size, which cap the fleet; buy Fleet command upgrades to expand it, or sell an idle ship for half its price. Three screens: Command, Ships (fleet command, your fleet, the shipyard) and Skills.
 
 ## Running the game
 
@@ -40,6 +40,7 @@ js/shipyard.js      buying and selling ships
 js/command.js       command capacity: points per hull, upgrades
 js/trade.js         selling goods for credits
 js/refinery.js      the Anvil Station refinery: recipes, slots, batches
+js/workshop.js      the Anvil Station workshop: Manufacturing work orders and queues
 js/save.js          save, load, version upgrades, offline progress
 js/ui.js            drawing the screens and handling button clicks
 js/fleet-groups.js  sorting ships into role groups (Mining, Freight) and their summaries

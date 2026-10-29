@@ -57,6 +57,29 @@ export const ITEMS = {
     name: "Steel",
     ...BALANCE.items.steel,
   },
+  // Manufactured products, made at the workshop (see
+  // WORKSHOP_RECIPES below). Each sells for more than the metal
+  // that went into it, and later ones feed ship building.
+  hull_plating: {
+    name: "Hull plating",
+    ...BALANCE.items.hull_plating,
+  },
+  wiring_coils: {
+    name: "Wiring coils",
+    ...BALANCE.items.wiring_coils,
+  },
+  structural_frames: {
+    name: "Structural frames",
+    ...BALANCE.items.structural_frames,
+  },
+  cargo_pod: {
+    name: "Cargo pods",
+    ...BALANCE.items.cargo_pod,
+  },
+  thruster_assembly: {
+    name: "Thruster assemblies",
+    ...BALANCE.items.thruster_assembly,
+  },
 };
 
 
@@ -78,6 +101,10 @@ export const SKILLS = {
   refining: {
     name: "Refining",
     description: "Smelt ore into metal at the Anvil Station refinery, which opens at a Mining milestone. Metal sells for more than the ore it came from. Levels unlock recipes, extra refinery slots and faster batches.",
+  },
+  manufacturing: {
+    name: "Manufacturing",
+    description: "Turn metal into components and assemblies at the Anvil Station workshop, which opens at a Refining milestone. Queue work orders: each runs a set number of batches, then the slot goes idle. Products sell for more than their metal. Levels unlock recipes, workshop slots, longer queues and faster batches.",
   },
 };
 
@@ -264,6 +291,58 @@ export const RECIPES = {
 //                  reaches this MINING level, so early on ore has
 //                  to be sold
 export const REFINERY = BALANCE.refinery;
+
+
+// -------------------------------------------------------------
+// WORKSHOP RECIPES: what the workshop can make (Manufacturing).
+// -------------------------------------------------------------
+// Laid out exactly like the refinery's RECIPES above, but they
+// run as WORK ORDERS instead of on repeat: the player queues
+// "make 20 batches of hull plating", the slot works through it,
+// and then stops (see js/workshop.js).
+// Manufacturing keeps tonnage: 30 t of bars makes 30 t of plating.
+//
+// Written here: the name the player sees.
+// From the balance sheet (Workshop tab): unlockLevel (a
+// Manufacturing level), inputs, output, outputAmount, seconds
+// (at Manufacturing level 1) and xp (Manufacturing XP per batch).
+export const WORKSHOP_RECIPES = {
+  hull_plating: {
+    name: "Hull plating",
+    ...BALANCE.workshopRecipes.hull_plating,
+  },
+  wiring_coils: {
+    name: "Wiring coils",
+    ...BALANCE.workshopRecipes.wiring_coils,
+  },
+  structural_frames: {
+    name: "Structural frames",
+    ...BALANCE.workshopRecipes.structural_frames,
+  },
+  cargo_pod: {
+    name: "Cargo pods",
+    ...BALANCE.workshopRecipes.cargo_pod,
+  },
+  thruster_assembly: {
+    name: "Thruster assemblies",
+    ...BALANCE.workshopRecipes.thruster_assembly,
+  },
+};
+
+// THE WORKSHOP: slots, queues and speed. From the balance sheet
+// (Settings tab):
+//   openAtRefiningLevel  the workshop is closed until the player
+//                        reaches this REFINING level
+//   slotLevels           the Manufacturing level each slot unlocks
+//                        at, e.g. [1, 12, 35]
+//   baseQueue            how many orders each slot can hold to start
+//   queueLevels          each of these Manufacturing levels adds
+//                        one more queued order per slot, e.g. [8, 25]
+//                        takes the queue from 3 to 4, then 5
+//   maxOrderBatches      the most batches one order can ask for
+//   speedPerLevel        each level above 1 makes batches this much
+//                        faster (0.005 = 0.5% per level)
+export const WORKSHOP = BALANCE.workshop;
 
 
 // -------------------------------------------------------------

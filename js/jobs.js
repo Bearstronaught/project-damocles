@@ -11,9 +11,10 @@
 // open the whole time or closed for 6 hours - the maths is the
 // same. Offline progress comes for free.
 //
-// There are two kinds of SHIP job. (The refinery's batches are
-// jobs too - see js/refinery.js - so they play out on the same
-// timeline as the ships.)
+// There are two kinds of SHIP job. (The refinery's batches and
+// the workshop's work orders are jobs too - see js/refinery.js
+// and js/workshop.js - so they play out on the same timeline
+// as the ships.)
 //
 // A MINING trip has three phases, one after the other:
 //   OUTBOUND  fly from home to the field
@@ -57,6 +58,7 @@ import { addItem, findShip } from "./state.js";
 import { addXp, isFieldUnlocked } from "./skills.js";
 import { sellAtHub } from "./trade.js";
 import { startWaitingBatches, finishBatch } from "./refinery.js";
+import { startWaitingOrders, finishWorkshopBatch } from "./workshop.js";
 
 
 // =============================================================
@@ -602,6 +604,10 @@ export function getJobPhase(job, now) {
 //   refine: { kind: "refine", slot, recipeId, itemId, amount,
 //             trips, skillId: "refining", xpGained, newLevels }
 //           (one entry per slot and recipe, batches added up)
+//   workshop: { kind: "workshop", slot, recipeId, itemId, amount,
+//             trips, ordersFinished, slotIdle,
+//             skillId: "manufacturing", xpGained, newLevels }
+//           (the same, for the workshop)
 // -------------------------------------------------------------
 export function processJobs(state, now) {
   const results = [];
@@ -609,12 +615,11 @@ export function processJobs(state, now) {
   // A freighter might be able to leave because of something the
   // player just did (like switching to constant runs). The
   // earliest that can count is the next event, or now.
-  // The same goes for a refinery slot waiting for ore.
-  // The refinery gets first pick of the ore, then freighters.
+  // The same goes for a refinery or workshop slot waiting for
+  // ore or metal.
   const first = findNextEvent(state, now);
   const startTime = first ? Math.min(first.time, now) : now;
-  startWaitingBatches(state, startTime);
-  departWaitingFreighters(state, startTime);
+  startWaitingAll(state, startTime);
 
   // Then replay every due event, earliest first.
   // (The safety limit stops a bug from freezing the browser.)
@@ -629,12 +634,29 @@ export function processJobs(state, now) {
 
     // Ore may have just arrived, a batch just finished, or a
     // freighter just docked: anyone waiting gets a chance to
-    // start. The refinery gets first pick, then freighters.
-    startWaitingBatches(state, next.time);
-    departWaitingFreighters(state, next.time);
+    // start.
+    startWaitingAll(state, next.time);
   }
 
   return mergeResultsByShip(results);
+}
+
+
+// -------------------------------------------------------------
+// startWaitingAll(state, time)
+// Everything that waits for goods in the home hold gets a
+// chance to start, in a fixed order of who gets first pick:
+//   1. the refinery (takes ore)
+//   2. the workshop (takes metal and components)
+//   3. freighters   (take whatever is left, most valuable first)
+// The order matters when they want the same goods: freighters
+// come last, so they never empty the hold of metal the workshop
+// was about to use.
+// -------------------------------------------------------------
+function startWaitingAll(state, time) {
+  startWaitingBatches(state, time);
+  startWaitingOrders(state, time);
+  departWaitingFreighters(state, time);
 }
 
 
@@ -644,9 +666,9 @@ export function processJobs(state, now) {
 // { job, time }, or null if nothing is due yet.
 //   Mining job:  the trip finishing (ship docks with ore)
 //   Haul job:    selling at the hub, then docking back home
-//   Refinery job: the current batch finishing
-//   Waiting freighters and refinery slots have no event - they
-//   wait for ore.
+//   Refinery or workshop job: the current batch finishing
+//   Waiting freighters, refinery slots and workshop slots have
+//   no event - they wait for goods.
 // -------------------------------------------------------------
 function findNextEvent(state, now) {
   let best = null;
@@ -658,6 +680,8 @@ function findNextEvent(state, now) {
       time = job.startedAt + job.durationMs;
     } else if (job.type === "refine" && job.status === "working") {
       time = job.startedAt + job.durationMs;              // batch done
+    } else if (job.type === "workshop" && job.status === "working") {
+      time = job.startedAt + job.durationMs;              // workshop batch done
     } else if (job.type === "haul" && job.status === "travelling") {
       time = (job.sold || job.noSale)
         ? job.startedAt + job.durationMs                  // docks back home
@@ -686,6 +710,11 @@ function runEvent(state, job, time) {
   // --- A refinery batch finishes: metal into the hold ---
   if (job.type === "refine") {
     return finishBatch(state, job);
+  }
+
+  // --- A workshop batch finishes: a product into the hold ---
+  if (job.type === "workshop") {
+    return finishWorkshopBatch(state, job);
   }
 
   // --- A mining trip finishes: unload ore, earn Mining XP ---
@@ -824,6 +853,12 @@ function mergeResultsByShip(results) {
 
     if (result.kind === "mining" || result.kind === "refine") {
       total.amount += result.amount;
+    } else if (result.kind === "workshop") {
+      total.amount += result.amount;
+      total.ordersFinished += result.ordersFinished;
+      // Idle only if the LAST batch left it idle (a slot can go
+      // idle, then get a new order, then keep working).
+      total.slotIdle = result.slotIdle;
     } else {
       total.tonnes += result.tonnes;
       total.credits += result.credits;

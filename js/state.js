@@ -22,7 +22,8 @@
 //   Version 6: cargo in tonnes - all amounts and credits x10
 //   Version 7: added the Refining skill (and refinery jobs)
 //   Version 8: one simulation clock (simulatedUpTo, simulatedMs)
-export const SAVE_VERSION = 8;
+//   Version 9: added the Manufacturing skill (and workshop jobs)
+export const SAVE_VERSION = 9;
 
 
 // -------------------------------------------------------------
@@ -44,6 +45,11 @@ export function createNewGame() {
       iron_bar: 0,
       nickel_bar: 0,
       steel: 0,
+      hull_plating: 0,
+      wiring_coils: 0,
+      structural_frames: 0,
+      cargo_pod: 0,
+      thruster_assembly: 0,
     },
 
     // The player's fleet. Each ship has its own unique ID
@@ -70,10 +76,12 @@ export function createNewGame() {
       mining: { xp: 0 },
       trade: { xp: 0 },
       refining: { xp: 0 },
+      manufacturing: { xp: 0 },
     },
 
     // Jobs that are currently running (empty at the start):
-    // ships' trips (see jobs.js) and refinery slots (refinery.js).
+    // ships' trips (see jobs.js), refinery slots (refinery.js)
+    // and workshop work orders (workshop.js).
     jobs: [],
 
     // When the game was last saved, as a timestamp.

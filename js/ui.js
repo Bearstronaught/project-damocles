@@ -17,7 +17,7 @@
 // flicker and sometimes swallow clicks.)
 // =============================================================
 
-import { ITEMS, SHIP_TYPES, FIELDS, SKILLS, HULL_SIZES, COMMAND, HUB, HOME, HAUL_MODES, RECIPES, REFINERY } from "../data/content.js";
+import { ITEMS, SHIP_TYPES, FIELDS, SKILLS, HULL_SIZES, COMMAND, HUB, HOME, HAUL_MODES, RECIPES, REFINERY, WORKSHOP_RECIPES, WORKSHOP } from "../data/content.js";
 import { getJobForShip, getJobPhase, getTripPlan, getHaulPlan, getOreInHold, getMiningXpShare } from "./jobs.js";
 import { getLevel, getLevelProgress, isShipTypeUnlocked, isFieldUnlocked } from "./skills.js";
 import { canBuyShip, canSellShip, getSellValue, getShipPrice, MAX_NAME_LENGTH } from "./shipyard.js";
@@ -26,6 +26,7 @@ import { getCargoValue, getTradeXp } from "./trade.js";
 import { getSchematic } from "./art.js";
 import { getRoleGroups, describeGroup } from "./fleet-groups.js";
 import { isRefineryOpen, getRefineJob, getSlotCount, getSlotUnlockLevel, isRecipeUnlocked, getBatchMs, hasInputs, describeInputs } from "./refinery.js";
+import { isWorkshopOpen, getWorkshopSlotCount, getWorkshopSlotUnlockLevel, getQueueLimit, isWorkshopRecipeUnlocked, getWorkshopBatchMs, getWorkshopJob, hasWorkshopInputs, describeWorkshopInputs } from "./workshop.js";
 
 // The screens that exist, in nav order. The first is the default.
 const SCREENS = ["command", "fleet", "shipyard", "industry", "skills"];
@@ -95,6 +96,7 @@ export function setupUI(state, actions) {
   buildShipyard(actions);
   buildSkillCards();
   buildRefinery(actions);
+  buildWorkshop(actions);
   buildStationHold();
 }
 
@@ -798,6 +800,85 @@ function buildRefinery(actions) {
 
 
 // -------------------------------------------------------------
+// buildWorkshop(actions)
+// One box per workshop slot, including slots still locked.
+// Each box has three parts:
+//   1. the current order: what it's making, a progress bar and
+//      how far through the order it is
+//   2. the queue: every order waiting, each with a cancel (x)
+//      button (redrawn only when the queue changes)
+//   3. the "add an order" row: a recipe, a number of batches
+//      and a Queue button, with a line that explains a refusal
+// Built once; renderWorkshop() keeps everything current.
+// -------------------------------------------------------------
+function buildWorkshop(actions) {
+  const area = byId("workshop-slots");
+  area.innerHTML = "";
+
+  const options = Object.entries(WORKSHOP_RECIPES).map(([recipeId, recipe]) => `
+    <option value="${recipeId}">${recipe.name}</option>
+  `).join("");
+
+  WORKSHOP.slotLevels.forEach((unlockLevel, slot) => {
+    const box = document.createElement("div");
+    box.className = "refine-slot workshop-slot";
+    box.id = "workshop-slot-" + slot;
+    box.innerHTML = `
+      <div class="card-header">
+        <span class="card-name">Slot ${slot + 1}</span>
+        <span class="card-sub" data-part="tag"></span>
+      </div>
+      <div class="progress"><div class="progress-fill refine-fill" data-part="bar"></div></div>
+      <div class="ship-status" data-part="status"></div>
+      <ol class="order-queue" data-part="queue"></ol>
+      <div class="order-form" data-part="form">
+        <label class="dest-select-row">
+          <span class="dest-label">Make</span>
+          <select class="dest-select" data-part="recipe">${options}</select>
+        </label>
+        <label class="dest-select-row">
+          <span class="dest-label">Batches</span>
+          <input class="batch-input" type="number" min="1" max="${WORKSHOP.maxOrderBatches}"
+                 step="1" value="${WORKSHOP.maxOrderBatches}" data-part="batches">
+        </label>
+        <button class="btn btn-primary" data-part="queue-button">Queue order</button>
+      </div>
+      <div class="ship-specs" data-part="specs"></div>
+      <div class="order-message" data-part="message" role="status"></div>
+    `;
+
+    const select = part(box, "recipe");
+    const batches = part(box, "batches");
+    const message = part(box, "message");
+
+    // Queue button: ask the game to add the order. If it says
+    // no, show the reason under the form (e.g. "queue is full").
+    part(box, "queue-button").addEventListener("click", () => {
+      const result = actions.queueOrder(slot, select.value, Number(batches.value));
+      message.textContent = result.ok ? "" : result.reason;
+    });
+
+    // Cancel buttons are redrawn with the queue, so one listener
+    // on the whole list handles them all ("event delegation"):
+    // it checks whether the click landed on a cancel button.
+    part(box, "queue").addEventListener("click", (event) => {
+      const button = event.target.closest("[data-cancel]");
+      if (button) {
+        actions.cancelOrder(slot, Number(button.dataset.cancel));
+        message.textContent = "";
+      }
+    });
+
+    // Changing the recipe or batch count clears an old refusal.
+    select.addEventListener("change", () => { message.textContent = ""; });
+    batches.addEventListener("input", () => { message.textContent = ""; });
+
+    area.appendChild(box);
+  });
+}
+
+
+// -------------------------------------------------------------
 // buildStationHold()
 // The Industry screen's read-only list of what's in the hold:
 // one row per item, amounts filled in by render().
@@ -888,6 +969,19 @@ function buildSkillCards() {
       REFINERY.slotLevels.forEach((slotLevel, slot) => {
         unlocks.push({ level: slotLevel, name: `Refinery slot ${slot + 1}`, kind: "Slot", key: "slot:" + slot });
       });
+      unlocks.push({ level: WORKSHOP.openAtRefiningLevel, name: "Workshop (Industry tab)", kind: "Station", key: "workshop:open" });
+    }
+    if (skillId === "manufacturing") {
+      for (const [recipeId, recipe] of Object.entries(WORKSHOP_RECIPES)) {
+        unlocks.push({ level: recipe.unlockLevel, name: recipe.name, kind: "Recipe", key: "wrecipe:" + recipeId });
+      }
+      WORKSHOP.slotLevels.forEach((slotLevel, slot) => {
+        unlocks.push({ level: slotLevel, name: `Workshop slot ${slot + 1}`, kind: "Slot", key: "wslot:" + slot });
+      });
+      WORKSHOP.queueLevels.forEach((queueLevel, index) => {
+        const size = WORKSHOP.baseQueue + index + 1;
+        unlocks.push({ level: queueLevel, name: `Queue of ${size} orders per slot`, kind: "Queue", key: "queue:" + queueLevel });
+      });
     }
     unlocks.sort((a, b) => a.level - b.level);   // lowest level first
 
@@ -949,6 +1043,7 @@ export function render(state, now) {
   renderShipyard(state);
   renderSkills(state);
   renderRefinery(state, now);
+  renderWorkshop(state, now);
 }
 
 
@@ -983,6 +1078,7 @@ function renderStatusStrip(state, now) {
   byId("mining-level").textContent = "Lv " + getLevel(state, "mining");
   byId("trade-level").textContent = "Lv " + getLevel(state, "trade");
   byId("refining-level").textContent = "Lv " + getLevel(state, "refining");
+  byId("manufacturing-level").textContent = "Lv " + getLevel(state, "manufacturing");
   byId("command-readout").textContent = getCommandUsed(state) + "/" + getCommandCapacity(state);
 
   // "1 ship" / "2 ships" in the panel corners
@@ -1389,6 +1485,10 @@ function renderSkills(state) {
       else if (kind === "field") unlocked = isFieldUnlocked(state, id);
       else if (kind === "recipe") unlocked = isRecipeUnlocked(state, id);
       else if (kind === "refinery") unlocked = isRefineryOpen(state);
+      else if (kind === "workshop") unlocked = isWorkshopOpen(state);
+      else if (kind === "wrecipe") unlocked = isWorkshopRecipeUnlocked(state, id);
+      else if (kind === "wslot") unlocked = Number(id) < getWorkshopSlotCount(state);
+      else if (kind === "queue") unlocked = getLevel(state, "manufacturing") >= Number(id);
       else unlocked = Number(id) < getSlotCount(state);   // "slot:1" = the second slot
       line.classList.toggle("unlocked", unlocked);
       part(line, "state").textContent = unlocked ? "Unlocked" : "Locked";
@@ -1491,6 +1591,141 @@ function renderRefinery(state, now) {
 }
 
 
+// -------------------------------------------------------------
+// renderWorkshop(state, now)
+// Each slot's current order, queue and order form, e.g.
+//   "Hull plating: batch 4 of 20 — 1m 10s left"
+//   "Waiting for 30 t iron bars"
+//   "Idle. Queue an order to start."
+// -------------------------------------------------------------
+function renderWorkshop(state, now) {
+  const open = isWorkshopOpen(state);
+  const unlockedSlots = getWorkshopSlotCount(state);   // 0 while closed
+  const queueLimit = getQueueLimit(state);
+
+  byId("workshop-tag").textContent = open
+    ? `${unlockedSlots} of ${WORKSHOP.slotLevels.length} slots · ${queueLimit} orders each`
+    : "Closed";
+  byId("workshop-note").textContent = open
+    ? ""
+    : `The workshop opens at Refining ${WORKSHOP.openAtRefiningLevel}. Keep the refinery busy to get there.`;
+  byId("workshop-note").hidden = open;
+
+  WORKSHOP.slotLevels.forEach((unlockLevel, slot) => {
+    const box = byId("workshop-slot-" + slot);
+    const tag = part(box, "tag");
+    const bar = part(box, "bar");
+    const status = part(box, "status");
+    const queue = part(box, "queue");
+    const form = part(box, "form");
+    const specs = part(box, "specs");
+    const select = part(box, "recipe");
+
+    // --- A slot the player hasn't unlocked yet ---
+    const locked = slot >= unlockedSlots;
+    box.classList.toggle("locked", locked);
+    form.hidden = locked;
+    if (locked) {
+      tag.textContent = "Locked";
+      status.textContent = (!open && slot === 0)
+        ? `Opens with the workshop at Refining ${WORKSHOP.openAtRefiningLevel}`
+        : `Unlocks at Manufacturing ${getWorkshopSlotUnlockLevel(slot)}`;
+      bar.style.width = "0%";
+      specs.textContent = "";
+      setQueueList(queue, null, "");
+      box.classList.remove("busy", "waiting");
+      return;
+    }
+
+    // --- The recipe dropdown: locked recipes greyed out ---
+    // (Only change what's different, so an open dropdown isn't
+    // closed by the 4-times-a-second redraw.)
+    for (const option of select.options) {
+      const recipe = WORKSHOP_RECIPES[option.value];
+      const unlocked = isWorkshopRecipeUnlocked(state, option.value);
+      const label = unlocked ? recipe.name : `${recipe.name} (Manufacturing ${recipe.unlockLevel})`;
+      if (option.textContent !== label) option.textContent = label;
+      if (option.disabled === unlocked) option.disabled = !unlocked;
+    }
+
+    // --- What one batch of the chosen recipe takes and makes ---
+    // e.g. "30 t iron bars → 30 t hull plating · 1m 30s · 12 XP per batch"
+    const chosen = WORKSHOP_RECIPES[select.value];
+    if (chosen) {
+      specs.textContent =
+        `${describeWorkshopInputs(select.value, formatTonnes)} → ${formatTonnes(chosen.outputAmount)} ` +
+        `${ITEMS[chosen.output].name.toLowerCase()} · ${formatDuration(getWorkshopBatchMs(state, select.value))} · ` +
+        `${formatXp(chosen.xp)} XP per batch`;
+    }
+
+    const job = getWorkshopJob(state, slot);
+    setQueueList(queue, job, formatTonnes);
+
+    // --- Idle: no orders at all ---
+    if (!job) {
+      tag.textContent = `Idle · 0/${queueLimit}`;
+      status.textContent = "Idle. Queue an order to start.";
+      bar.style.width = "0%";
+      box.classList.remove("busy", "waiting");
+      box.classList.add("idle");
+      return;
+    }
+    box.classList.remove("idle");
+
+    const order = job.orders[0];
+    const recipe = WORKSHOP_RECIPES[order.recipeId];
+    const batchNumber = order.done + 1;
+
+    if (job.status === "working") {
+      const elapsed = Math.min(Math.max(now - job.startedAt, 0), job.durationMs);
+      bar.style.width = (elapsed / job.durationMs * 100) + "%";
+      tag.textContent = `Working · ${job.orders.length}/${queueLimit}`;
+      status.textContent = `${recipe.name}: batch ${batchNumber} of ${order.batches} — ${formatDuration(job.durationMs - elapsed)} left`;
+      box.classList.add("busy");
+      box.classList.remove("waiting");
+    } else {
+      bar.style.width = "0%";
+      tag.textContent = `Waiting · ${job.orders.length}/${queueLimit}`;
+      status.textContent = hasWorkshopInputs(state, order.recipeId)
+        ? "Starting the next batch"
+        : `Waiting for ${describeWorkshopInputs(order.recipeId, formatTonnes)}`;
+      box.classList.add("waiting");
+      box.classList.remove("busy");
+    }
+  });
+}
+
+// -------------------------------------------------------------
+// setQueueList(list, job)
+// Draws a slot's queue as a numbered list, one line per order:
+//   1. Hull plating × 20 (3 done)        [x]
+//   2. Wiring coils × 5                  [x]
+// Redrawing it 4 times a second would swallow clicks on the
+// cancel buttons, so it only redraws when the queue CHANGES.
+// The list remembers what it last drew in a "signature".
+// -------------------------------------------------------------
+function setQueueList(list, job) {
+  const orders = job ? job.orders : [];
+  const signature = JSON.stringify(orders);
+  if (list.dataset.signature === signature) {
+    return;   // nothing changed since last time
+  }
+  list.dataset.signature = signature;
+
+  list.innerHTML = orders.map((order, index) => {
+    const recipe = WORKSHOP_RECIPES[order.recipeId];
+    const done = order.done > 0 ? ` <span class="order-done">(${order.done} done)</span>` : "";
+    return `
+      <li class="order-line">
+        <span class="order-name">${recipe.name} × ${order.batches}${done}</span>
+        <button class="btn btn-small order-cancel" data-cancel="${index}"
+                title="Cancel this order" aria-label="Cancel ${recipe.name} order">✕</button>
+      </li>
+    `;
+  }).join("");
+}
+
+
 // =============================================================
 // THE LOG
 // =============================================================
@@ -1502,11 +1737,13 @@ function renderRefinery(state, now) {
 // different events are easy to tell apart:
 //   "trip"   a ship came home        "trade"  something sold
 //   "level"  a level-up or unlock    "fleet"  ships and command
-//   "refine" the refinery            "system" anything else
+//   "refine" the refinery            "make"   the workshop
+//   "system" anything else
 // -------------------------------------------------------------
 const LOG_TAGS = {
   trip: "TRIP",
   refine: "REFINE",
+  make: "MAKE",
   trade: "TRADE",
   level: "LEVEL",
   fleet: "FLEET",

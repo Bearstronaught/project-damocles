@@ -1,0 +1,358 @@
+// =============================================================
+// js/workshop.js
+// -------------------------------------------------------------
+// THE WORKSHOP at Anvil Station: turning metal into products
+// (the Manufacturing skill).
+//
+// It looks like the refinery - a few SLOTS, each making one
+// recipe at a time - but it works differently on purpose
+// (design doc, "Work orders"):
+//
+//   REFINERY  a slot runs ONE recipe over and over, forever.
+//   WORKSHOP  a slot works through a QUEUE of work ORDERS. Each
+//             order says "make this recipe, this many batches".
+//             When the last order is done, the slot goes idle
+//             until the player queues more.
+//
+// So a player who's away longer than their queue comes back to
+// an idle workshop. That's intended: it's what makes longer
+// queues (and, later, the Control centre) worth wanting.
+//
+// A slot with orders is stored as a JOB in state.jobs, like the
+// ships and the refinery, so jobs.js plays its batches out in
+// time order with everything else - offline too.
+//
+// A workshop job looks like this:
+//   {
+//     id: "workshop-slot-0",
+//     type: "workshop",
+//     slot: 0,                     which slot (0 = the first)
+//     orders: [                    the queue; the FIRST is current
+//       { recipeId: "hull_plating", batches: 20, done: 3 },
+//       { recipeId: "wiring_coils", batches: 5,  done: 0 },
+//     ],
+//     status: "working",           "working" on a batch, or
+//                                  "waiting" for metal
+//     startedAt: 1712345678901,    when the current batch started
+//     durationMs: 90000,           how long this batch takes
+//     inputs: { iron_bar: 30 },    metal taken for this batch (so
+//                                  it can be handed back if cancelled)
+//   }
+// When the queue empties, the job is removed: the slot is idle.
+//
+// The queue is worked in order. If the first order is waiting
+// for metal, the orders behind it wait too. That keeps it
+// predictable: the player always knows what comes next.
+// =============================================================
+
+import { WORKSHOP_RECIPES, WORKSHOP, ITEMS } from "../data/content.js";
+import { addItem } from "./state.js";
+import { getLevel, addXp } from "./skills.js";
+
+
+// =============================================================
+// WHAT THE PLAYER HAS UNLOCKED
+// =============================================================
+
+// -------------------------------------------------------------
+// isWorkshopOpen(state)
+// The workshop stays shut until a REFINING milestone (Refining 8
+// to start with), the same way the refinery waits for Mining.
+// -------------------------------------------------------------
+export function isWorkshopOpen(state) {
+  return getLevel(state, "refining") >= WORKSHOP.openAtRefiningLevel;
+}
+
+// -------------------------------------------------------------
+// getWorkshopSlotCount(state)
+// How many workshop slots the player can use. With slotLevels
+// [1, 12, 35]: Manufacturing 1-11 = 1, 12-34 = 2, 35+ = 3.
+// A closed workshop has none.
+// -------------------------------------------------------------
+export function getWorkshopSlotCount(state) {
+  if (!isWorkshopOpen(state)) {
+    return 0;
+  }
+  const level = getLevel(state, "manufacturing");
+  return WORKSHOP.slotLevels.filter((slotLevel) => level >= slotLevel).length;
+}
+
+// The Manufacturing level a slot unlocks at (slot 0 = the first).
+export function getWorkshopSlotUnlockLevel(slot) {
+  return WORKSHOP.slotLevels[slot];
+}
+
+// -------------------------------------------------------------
+// getQueueLimit(state)
+// How many orders each slot can hold: the starting amount, plus
+// one for every queueLevels milestone reached.
+//   baseQueue 3, queueLevels [8, 25]:
+//   Manufacturing 1-7 = 3, 8-24 = 4, 25+ = 5
+// -------------------------------------------------------------
+export function getQueueLimit(state) {
+  const level = getLevel(state, "manufacturing");
+  const extra = WORKSHOP.queueLevels.filter((queueLevel) => level >= queueLevel).length;
+  return WORKSHOP.baseQueue + extra;
+}
+
+// True if the player's Manufacturing level allows this recipe.
+export function isWorkshopRecipeUnlocked(state, recipeId) {
+  return getLevel(state, "manufacturing") >= WORKSHOP_RECIPES[recipeId].unlockLevel;
+}
+
+// Which workshop recipes unlock at exactly this Manufacturing
+// level, e.g. getWorkshopRecipeUnlocksAtLevel(5) -> ["wiring_coils"]
+export function getWorkshopRecipeUnlocksAtLevel(level) {
+  return Object.keys(WORKSHOP_RECIPES).filter((id) => WORKSHOP_RECIPES[id].unlockLevel === level);
+}
+
+// Which slots unlock at exactly this level, as the numbers a
+// player would say ("slot 2"), e.g. level 12 -> [2].
+export function getWorkshopSlotUnlocksAtLevel(level) {
+  const slots = [];
+  WORKSHOP.slotLevels.forEach((slotLevel, index) => {
+    if (slotLevel === level) {
+      slots.push(index + 1);
+    }
+  });
+  return slots;
+}
+
+// True if this Manufacturing level adds a queued order per slot.
+export function isQueueUnlockLevel(level) {
+  return WORKSHOP.queueLevels.includes(level);
+}
+
+
+// =============================================================
+// HOW LONG A BATCH TAKES
+// =============================================================
+
+// -------------------------------------------------------------
+// getWorkshopBatchMs(state, recipeId)
+// Batch time in milliseconds at the player's Manufacturing
+// level. Each level above 1 makes batches speedPerLevel faster,
+// exactly like the refinery:
+//   level 1:  90s x 1.000 = 90s
+//   level 11: 90s x 0.950 = 85.5s
+// -------------------------------------------------------------
+export function getWorkshopBatchMs(state, recipeId) {
+  const level = getLevel(state, "manufacturing");
+  const speedUp = WORKSHOP.speedPerLevel * (level - 1);
+  // Never shorter than a tenth of the normal time, whatever the
+  // balance sheet says (a safety net against a typo).
+  const factor = Math.max(0.1, 1 - speedUp);
+  return Math.round(WORKSHOP_RECIPES[recipeId].seconds * 1000 * factor);
+}
+
+
+// =============================================================
+// ORDERS: QUEUEING AND CANCELLING
+// =============================================================
+
+// The workshop job for one slot, or undefined if the slot is idle.
+export function getWorkshopJob(state, slot) {
+  return state.jobs.find((job) => job.type === "workshop" && job.slot === slot);
+}
+
+// -------------------------------------------------------------
+// addOrder(state, slot, recipeId, batches, now)
+// Puts a work order at the back of a slot's queue.
+// Returns { ok: true } or { ok: false, reason: "..." } so the
+// screen can say why an order was refused.
+// -------------------------------------------------------------
+export function addOrder(state, slot, recipeId, batches, now) {
+  // --- Check everything before changing anything ---
+  if (!isWorkshopOpen(state)) {
+    return { ok: false, reason: `The workshop opens at Refining ${WORKSHOP.openAtRefiningLevel}.` };
+  }
+  if (slot < 0 || slot >= getWorkshopSlotCount(state)) {
+    return { ok: false, reason: "That slot isn't unlocked yet." };
+  }
+  const recipe = WORKSHOP_RECIPES[recipeId];
+  if (!recipe) {
+    return { ok: false, reason: "Pick a recipe first." };
+  }
+  if (!isWorkshopRecipeUnlocked(state, recipeId)) {
+    return { ok: false, reason: `${recipe.name} needs Manufacturing ${recipe.unlockLevel}.` };
+  }
+  // Number.isInteger rules out 2.5 batches, text, and so on.
+  if (!Number.isInteger(batches) || batches < 1 || batches > WORKSHOP.maxOrderBatches) {
+    return { ok: false, reason: `An order can be 1 to ${WORKSHOP.maxOrderBatches} batches.` };
+  }
+
+  let job = getWorkshopJob(state, slot);
+  const queued = job ? job.orders.length : 0;
+  if (queued >= getQueueLimit(state)) {
+    return { ok: false, reason: `This slot's queue is full (${getQueueLimit(state)} orders).` };
+  }
+
+  // --- All good: queue it ---
+  const order = { recipeId: recipeId, batches: batches, done: 0 };
+
+  if (job) {
+    job.orders.push(order);   // to the back of the queue
+  } else {
+    // An idle slot: make its job, waiting for metal to start.
+    job = {
+      id: "workshop-slot-" + slot,
+      type: "workshop",
+      slot: slot,
+      orders: [order],
+      status: "waiting",
+      startedAt: now,
+      durationMs: 0,
+      inputs: null,
+    };
+    state.jobs.push(job);
+    // Start straight away if the metal is already in the hold.
+    startWaitingOrders(state, now);
+  }
+  return { ok: true };
+}
+
+// -------------------------------------------------------------
+// cancelOrder(state, slot, index, now)
+// Removes one order from a slot's queue (index 0 = the current
+// order). Cancelling the current order mid-batch hands its
+// metal back, so nothing is ever lost (but that batch's XP isn't
+// earned). Batches already finished stay finished.
+// Returns true if an order was removed.
+// -------------------------------------------------------------
+export function cancelOrder(state, slot, index, now) {
+  const job = getWorkshopJob(state, slot);
+  if (!job || index < 0 || index >= job.orders.length) {
+    return false;
+  }
+
+  // Cancelling the CURRENT order while a batch is running:
+  // give the metal back and stop the batch.
+  if (index === 0 && job.status === "working") {
+    for (const [itemId, amount] of Object.entries(job.inputs)) {
+      addItem(state, itemId, amount);
+    }
+    job.status = "waiting";
+    job.inputs = null;
+  }
+
+  // .splice(index, 1) removes one item from the list at "index".
+  job.orders.splice(index, 1);
+
+  if (job.orders.length === 0) {
+    removeJob(state, job);              // nothing left: the slot is idle
+  } else {
+    startWaitingOrders(state, now);     // the next order may start now
+  }
+  return true;
+}
+
+// Takes a job out of the list of running jobs.
+function removeJob(state, job) {
+  state.jobs = state.jobs.filter((other) => other !== job);
+}
+
+
+// =============================================================
+// RUNNING BATCHES (called by jobs.js as time passes)
+// =============================================================
+
+// -------------------------------------------------------------
+// hasWorkshopInputs(state, recipeId)
+// True if the hold has enough of every input for one batch.
+// -------------------------------------------------------------
+export function hasWorkshopInputs(state, recipeId) {
+  const inputs = WORKSHOP_RECIPES[recipeId].inputs;
+  return Object.entries(inputs).every(
+    ([itemId, amount]) => (state.inventory[itemId] || 0) >= amount
+  );
+}
+
+// -------------------------------------------------------------
+// startWaitingOrders(state, time)
+// Every waiting slot checks whether the hold has the metal for
+// its current order's next batch. Those that do take it and
+// start at "time". Slots are checked in order, so slot 1 gets
+// first pick when two want the same metal.
+// -------------------------------------------------------------
+export function startWaitingOrders(state, time) {
+  const waiting = state.jobs
+    .filter((job) => job.type === "workshop" && job.status === "waiting")
+    .sort((a, b) => a.slot - b.slot);
+
+  for (const job of waiting) {
+    const recipeId = job.orders[0].recipeId;
+    if (!hasWorkshopInputs(state, recipeId)) {
+      continue;   // not enough metal yet: keep waiting
+    }
+
+    // Take the metal out of the hold for this batch.
+    const inputs = { ...WORKSHOP_RECIPES[recipeId].inputs };   // a copy
+    for (const [itemId, amount] of Object.entries(inputs)) {
+      state.inventory[itemId] -= amount;
+    }
+
+    job.status = "working";
+    job.startedAt = time;
+    job.durationMs = getWorkshopBatchMs(state, recipeId);
+    job.inputs = inputs;
+  }
+}
+
+// -------------------------------------------------------------
+// finishWorkshopBatch(state, job)
+// A batch is done: the product goes into the hold and
+// Manufacturing XP is earned. The order counts one more batch
+// done; a finished order leaves the queue, and an empty queue
+// means the slot goes idle (its job is removed).
+// jobs.js then starts the next batch straight away if there's
+// metal for it.
+// Returns a result for the log, like the ships' results.
+// -------------------------------------------------------------
+export function finishWorkshopBatch(state, job) {
+  const order = job.orders[0];
+  const recipe = WORKSHOP_RECIPES[order.recipeId];
+
+  addItem(state, recipe.output, recipe.outputAmount);
+  const newLevels = addXp(state, "manufacturing", recipe.xp);
+
+  order.done += 1;
+  const orderFinished = order.done >= order.batches;
+  if (orderFinished) {
+    job.orders.shift();   // .shift() removes the first item: on to the next order
+  }
+
+  job.status = "waiting";
+  job.inputs = null;
+
+  // Queue empty: the slot is idle.
+  const idle = job.orders.length === 0;
+  if (idle) {
+    removeJob(state, job);
+  }
+
+  return {
+    kind: "workshop",
+    slot: job.slot,
+    recipeId: order.recipeId,
+    itemId: recipe.output,
+    amount: recipe.outputAmount,
+    trips: 1,                          // (batches; "trips" so results add up the same way)
+    ordersFinished: orderFinished ? 1 : 0,
+    slotIdle: idle,                    // true if this batch emptied the queue
+    skillId: "manufacturing",
+    xpGained: recipe.xp,
+    newLevels: newLevels,
+  };
+}
+
+
+// -------------------------------------------------------------
+// describeWorkshopInputs(recipeId, formatTonnes)
+// "30 t iron bars" or "40 t hull plating + 20 t structural
+// frames", for the screen. (Kept here so the wording matches.)
+// -------------------------------------------------------------
+export function describeWorkshopInputs(recipeId, formatTonnes) {
+  return Object.entries(WORKSHOP_RECIPES[recipeId].inputs)
+    .map(([itemId, amount]) => `${formatTonnes(amount)} ${ITEMS[itemId].name.toLowerCase()}`)
+    .join(" + ");
+}

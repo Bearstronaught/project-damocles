@@ -33,7 +33,9 @@ import { getCommandCapacity, getCommandUsed, getNextUpgradeCost, buyUpgrade } fr
 import { isFieldUnlocked } from "../js/skills.js";
 import { getRoleGroups, describeGroup, getShipActivity } from "../js/fleet-groups.js";
 import { setRecipe, getRefineJob, isRefineryOpen, getSlotCount, getBatchMs, isRecipeUnlocked, getRecipeUnlocksAtLevel, getSlotUnlocksAtLevel } from "../js/refinery.js";
-import { RECIPES, REFINERY } from "../data/content.js";
+import { RECIPES, REFINERY, WORKSHOP_RECIPES, WORKSHOP } from "../data/content.js";
+import { isWorkshopOpen, getWorkshopSlotCount, getQueueLimit, isWorkshopRecipeUnlocked, getWorkshopBatchMs, getWorkshopJob, addOrder, cancelOrder } from "../js/workshop.js";
+import { BALANCE as BALANCE_FILE } from "../data/balance.js";
 
 const SECOND = 1000;                 // milliseconds in a second
 const MINUTE = 60 * SECOND;
@@ -499,7 +501,7 @@ test("A version 1 save (first commit) upgrades all the way to the latest version
   assert.equal(state.version, SAVE_VERSION);
   assert.equal(state.credits, 500);                // x10 for tonnes, nothing lost
   assert.equal(state.inventory.iron_ore, 100);
-  assert.deepEqual(state.skills, { mining: { xp: 0 }, trade: { xp: 0 }, refining: { xp: 0 } });
+  assert.deepEqual(state.skills, { mining: { xp: 0 }, trade: { xp: 0 }, refining: { xp: 0 }, manufacturing: { xp: 0 } });
   assert.equal(state.nextShipNumber, 2);
 });
 
@@ -841,7 +843,7 @@ test("A version 4 save gains the Trade skill at 0 XP, keeping its Mining XP", ()
   };
   const state = parseSave(JSON.stringify(oldSave));
   assert.equal(state.version, SAVE_VERSION);
-  assert.deepEqual(state.skills, { mining: { xp: 900 }, trade: { xp: 0 }, refining: { xp: 0 } });
+  assert.deepEqual(state.skills, { mining: { xp: 900 }, trade: { xp: 0 }, refining: { xp: 0 }, manufacturing: { xp: 0 } });
   assert.equal(state.credits, 12000);              // x10 at version 6
 });
 
@@ -1133,7 +1135,7 @@ test("A version 5 save moves to tonnes: credits and ore x10, XP unchanged", () =
   assert.equal(state.credits, 26000);
   assert.deepEqual(state.inventory, { iron_ore: 300, nickel_ore: 40 });
   assert.deepEqual(state.jobs[0].cargo, { nickel_ore: 200, iron_ore: 400 });
-  assert.deepEqual(state.skills, { mining: { xp: 900 }, trade: { xp: 180 }, refining: { xp: 0 } });
+  assert.deepEqual(state.skills, { mining: { xp: 900 }, trade: { xp: 180 }, refining: { xp: 0 }, manufacturing: { xp: 0 } });
 });
 
 test("A bogus 'version 5' save with no inventory is refused, not a crash", () => {
@@ -1875,6 +1877,243 @@ test("A version 7 save gains the simulation clock, starting from when it was sav
   assert.equal(state.version, SAVE_VERSION);
   assert.equal(state.simulatedUpTo, START);
   assert.equal(state.simulatedMs, 0);
+});
+
+
+// =============================================================
+// THE WORKSHOP (js/workshop.js) - Manufacturing and work orders
+// Like the refinery tests, these run through processJobs and
+// advanceTo, so they test the real timeline, offline included.
+// =============================================================
+
+const PLATING = WORKSHOP_RECIPES.hull_plating;          // 30 t iron bars -> 30 t plating
+const PLATING_MS = PLATING.seconds * SECOND;            // at Manufacturing level 1
+
+// A game with the workshop open (Refining 8) at a chosen
+// Manufacturing level, with the clock set to START.
+function gameWithWorkshop(manufacturingLevel = 1) {
+  const state = createNewGame();
+  state.skills.mining.xp = XP_TABLE[REFINERY.openAtMiningLevel];
+  state.skills.refining.xp = XP_TABLE[WORKSHOP.openAtRefiningLevel];
+  state.skills.manufacturing.xp = XP_TABLE[manufacturingLevel];
+  state.simulatedUpTo = START;
+  return state;
+}
+
+test("The workshop is closed until Refining 8, and says so when asked for an order", () => {
+  const state = gameWithWorkshop();
+  state.skills.refining.xp = XP_TABLE[WORKSHOP.openAtRefiningLevel] - 1;   // Refining 7
+  assert.equal(isWorkshopOpen(state), false);
+  assert.equal(getWorkshopSlotCount(state), 0);
+  const result = addOrder(state, 0, "hull_plating", 5, START);
+  assert.equal(result.ok, false);
+  assert.match(result.reason, /Refining 8/);
+  assert.equal(state.jobs.length, 0);
+});
+
+test("At Refining 8: 1 workshop slot, 3 orders per queue, only hull plating unlocked", () => {
+  const state = gameWithWorkshop(1);
+  assert.equal(isWorkshopOpen(state), true);
+  assert.equal(getWorkshopSlotCount(state), 1);
+  assert.equal(getQueueLimit(state), 3);
+  assert.equal(isWorkshopRecipeUnlocked(state, "hull_plating"), true);
+  assert.equal(isWorkshopRecipeUnlocked(state, "wiring_coils"), false);
+});
+
+test("Slots arrive at Manufacturing 12 and 35; queues grow at 8 and 25", () => {
+  assert.equal(getWorkshopSlotCount(gameWithWorkshop(11)), 1);
+  assert.equal(getWorkshopSlotCount(gameWithWorkshop(12)), 2);
+  assert.equal(getWorkshopSlotCount(gameWithWorkshop(35)), 3);
+  assert.equal(getQueueLimit(gameWithWorkshop(7)), 3);
+  assert.equal(getQueueLimit(gameWithWorkshop(8)), 4);
+  assert.equal(getQueueLimit(gameWithWorkshop(25)), 5);
+});
+
+test("An order of 3 plating: 90 t of bars in, 90 t of plating out, 36 XP, then the slot goes idle", () => {
+  const state = gameWithWorkshop();
+  state.inventory.iron_bar = 200;
+  assert.equal(addOrder(state, 0, "hull_plating", 3, START).ok, true);
+  assert.equal(state.inventory.iron_bar, 170);              // the first batch took its bars at once
+
+  advanceTo(state, START + PLATING_MS * 3 - 1);             // just short of the third batch
+  assert.equal(state.inventory.hull_plating, 60);
+  advanceTo(state, START + PLATING_MS * 3);
+  assert.equal(state.inventory.hull_plating, 90);           // tonnage kept: 90 t in, 90 t out
+  assert.equal(state.inventory.iron_bar, 110);
+  assert.equal(state.skills.manufacturing.xp, XP_TABLE[1] + 3 * PLATING.xp);
+  assert.equal(getWorkshopJob(state, 0), undefined);        // idle: the order is done
+
+  advanceTo(state, START + HOUR);                           // and it stays idle
+  assert.equal(state.inventory.iron_bar, 110);
+});
+
+test("A 20-batch plating order takes 30 minutes at Manufacturing 1", () => {
+  assert.equal(getWorkshopBatchMs(gameWithWorkshop(1), "hull_plating") * 20, 30 * MINUTE);
+});
+
+test("Orders run in the order they were queued", () => {
+  const state = gameWithWorkshop(5);                        // wiring coils open
+  state.inventory.iron_bar = 30;
+  state.inventory.nickel_bar = 30;
+  addOrder(state, 0, "wiring_coils", 1, START);
+  addOrder(state, 0, "hull_plating", 1, START);
+  const coilsMs = getWorkshopBatchMs(state, "wiring_coils");
+  advanceTo(state, START + coilsMs);
+  assert.equal(state.inventory.wiring_coils, 30);           // the first order finished first
+  assert.equal(state.inventory.hull_plating || 0, 0);       // the second has only just started
+  assert.equal(getWorkshopJob(state, 0).orders[0].recipeId, "hull_plating");
+});
+
+test("An order waits for metal, then starts the moment the refinery makes it", () => {
+  const state = gameWithWorkshop();
+  state.inventory.iron_ore = 60;                            // enough for one refinery batch
+  setRecipe(state, 0, "iron_bar", START);                   // 60 t ore -> 30 t bars
+  addOrder(state, 0, "hull_plating", 1, START);
+  assert.equal(getWorkshopJob(state, 0).status, "waiting"); // no bars yet
+
+  const smeltMs = getBatchMs(state, "iron_bar");
+  advanceTo(state, START + smeltMs);                        // bars arrive...
+  assert.equal(getWorkshopJob(state, 0).status, "working"); // ...and go straight in
+  assert.equal(getWorkshopJob(state, 0).startedAt, START + smeltMs);
+  advanceTo(state, START + smeltMs + PLATING_MS);
+  assert.equal(state.inventory.hull_plating, 30);
+});
+
+test("Orders are refused when the queue is full, the size is wrong, or the recipe is locked", () => {
+  const state = gameWithWorkshop();
+  for (let i = 0; i < 3; i++) {
+    assert.equal(addOrder(state, 0, "hull_plating", 1, START).ok, true);
+  }
+  assert.match(addOrder(state, 0, "hull_plating", 1, START).reason, /full/);
+  const fresh = gameWithWorkshop();
+  for (const bad of [0, WORKSHOP.maxOrderBatches + 1, 2.5]) {
+    assert.match(addOrder(fresh, 0, "hull_plating", bad, START).reason, /1 to 20/);
+  }
+  assert.match(addOrder(fresh, 0, "wiring_coils", 5, START).reason, /Manufacturing 5/);
+  assert.match(addOrder(fresh, 1, "hull_plating", 5, START).reason, /slot/);
+  assert.equal(fresh.jobs.length, 0);                       // nothing half-made by a refusal
+});
+
+test("Cancelling the current order mid-batch hands the metal back; finished batches stay", () => {
+  const state = gameWithWorkshop();
+  state.inventory.iron_bar = 90;
+  addOrder(state, 0, "hull_plating", 5, START);
+  advanceTo(state, START + PLATING_MS + 10 * SECOND);       // one batch done, the second underway
+  assert.equal(state.inventory.iron_bar, 30);               // 60 t taken so far
+  assert.equal(cancelOrder(state, 0, 0, START + PLATING_MS + 10 * SECOND), true);
+  assert.equal(state.inventory.iron_bar, 60);               // the running batch's 30 t came back
+  assert.equal(state.inventory.hull_plating, 30);           // the finished batch is kept
+  assert.equal(getWorkshopJob(state, 0), undefined);        // nothing else queued: idle
+});
+
+test("Cancelling a queued order leaves the current one running", () => {
+  const state = gameWithWorkshop();
+  state.inventory.iron_bar = 300;
+  addOrder(state, 0, "hull_plating", 2, START);
+  addOrder(state, 0, "hull_plating", 4, START);
+  cancelOrder(state, 0, 1, START + SECOND);
+  const job = getWorkshopJob(state, 0);
+  assert.equal(job.orders.length, 1);
+  assert.equal(job.status, "working");
+  assert.equal(job.startedAt, START);                       // the running batch wasn't restarted
+});
+
+test("Offline: a queue of 3 orders drains while away, then the slot sits idle", () => {
+  const state = gameWithWorkshop();
+  state.inventory.iron_bar = 1000;
+  for (let i = 0; i < 3; i++) addOrder(state, 0, "hull_plating", 10, START);
+  const report = applyOfflineProgress(state, START + 8 * HOUR);   // an evening away
+  const made = report.results.find((r) => r.kind === "workshop");
+  assert.equal(made.trips, 30);                             // 3 orders x 10 batches
+  assert.equal(made.ordersFinished, 3);
+  assert.equal(made.slotIdle, true);
+  assert.equal(state.inventory.hull_plating, 900);
+  assert.equal(state.inventory.iron_bar, 100);              // untouched once the queue ran out
+  assert.equal(getWorkshopJob(state, 0), undefined);
+});
+
+test("The workshop gets metal before a freighter does", () => {
+  const state = gameWithWorkshop();
+  state.credits = SHIP_TYPES.courier.cost;
+  buyShip(state, "courier").haulMode = "constant";          // would take anything in the hold
+  startHaulJob(state, "ship-2", START);                     // nothing to haul yet: waits
+  addOrder(state, 0, "hull_plating", 1, START);             // waits for bars too
+  state.inventory.iron_bar = 30;                            // 30 t of bars appear...
+  advanceTo(state, START + SECOND);
+  assert.equal(getWorkshopJob(state, 0).status, "working"); // ...and the workshop took them
+  assert.equal(state.jobs.find((j) => j.type === "haul").status, "waiting");
+});
+
+test("Every workshop recipe keeps tonnage: tonnes in = tonnes out", () => {
+  for (const [id, recipe] of Object.entries(WORKSHOP_RECIPES)) {
+    const tonnesIn = Object.values(recipe.inputs).reduce((sum, t) => sum + t, 0);
+    assert.equal(tonnesIn, recipe.outputAmount, id);
+  }
+});
+
+test("Every product sells for more than the metal that goes into it", () => {
+  for (const [id, recipe] of Object.entries(WORKSHOP_RECIPES)) {
+    const inputValue = Object.entries(recipe.inputs).reduce((sum, [item, t]) => sum + t * ITEMS[item].sellPrice, 0);
+    assert.ok(recipe.outputAmount * ITEMS[recipe.output].sellPrice > inputValue, id);
+  }
+});
+
+test("Every workshop recipe uses items that exist, and content.js lists the same recipes as the balance sheet", () => {
+  for (const [id, recipe] of Object.entries(WORKSHOP_RECIPES)) {
+    assert.ok(ITEMS[recipe.output], `${id} makes unknown item "${recipe.output}"`);
+    for (const itemId of Object.keys(recipe.inputs)) {
+      assert.ok(ITEMS[itemId], `${id} uses unknown item "${itemId}"`);
+    }
+  }
+  assert.deepEqual(Object.keys(WORKSHOP_RECIPES).sort(), Object.keys(BALANCE_FILE.workshopRecipes).sort());
+  assert.deepEqual(Object.keys(ITEMS).sort(), Object.keys(BALANCE_FILE.items).sort());
+});
+
+test("A workshop mid-order survives saving and finishes while away", () => {
+  const state = gameWithWorkshop();
+  state.inventory.iron_bar = 60;
+  addOrder(state, 0, "hull_plating", 2, START);
+  advanceTo(state, START + 30 * SECOND);
+  const loaded = importSave(exportSave(state)).state;
+  applyOfflineProgress(loaded, START + HOUR);
+  assert.equal(loaded.inventory.hull_plating, 60);
+  assert.equal(getWorkshopJob(loaded, 0), undefined);
+});
+
+test("A version 8 save gains the Manufacturing skill at 0 XP", () => {
+  const oldSave = {
+    version: 8, credits: 100, inventory: { iron_bar: 30 }, commandUpgrades: 0, nextShipNumber: 2,
+    ships: [{ id: "ship-1", name: "Rusty Pick", type: "prospector", destination: "inner_belt" }],
+    skills: { mining: { xp: 900 }, trade: { xp: 0 }, refining: { xp: 650 } },
+    jobs: [], lastSavedAt: START, simulatedUpTo: START, simulatedMs: 0,
+  };
+  const state = parseSave(JSON.stringify(oldSave));
+  assert.equal(state.version, SAVE_VERSION);
+  assert.deepEqual(state.skills.manufacturing, { xp: 0 });
+  assert.equal(state.skills.refining.xp, 650);
+});
+
+test("Engine: 6 hours with the workshop running, ticked or jumped, end identical", () => {
+  // The busy empire from the engine tests, plus a workshop with
+  // a full queue fed by its own refinery. Every number must match.
+  function busyWithWorkshop() {
+    const state = busyEmpire();
+    state.skills.manufacturing.xp = XP_TABLE[4];            // levels up to 5 during the run
+    // No bars are added by hand: the empire's own refinery makes
+    // them, so every bar arrives through a timed event.
+    addOrder(state, 0, "hull_plating", 20, START);
+    addOrder(state, 0, "hull_plating", 20, START);
+    addOrder(state, 0, "hull_plating", 20, START);
+    return state;
+  }
+  const jumped = busyWithWorkshop();
+  advanceTo(jumped, START + 6 * HOUR);
+  const ticked = busyWithWorkshop();
+  for (let t = 250; t <= 6 * HOUR; t += 250) {
+    advanceTo(ticked, START + t);
+  }
+  assert.ok(jumped.skills.manufacturing.xp > XP_TABLE[5]);  // the workshop really ran
+  assert.deepEqual(ticked, jumped);
 });
 
 // -------------------------------------------------------------

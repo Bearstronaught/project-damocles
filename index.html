@@ -43,6 +43,7 @@
     <span class="status-item">Mining <b id="mining-level">Lv 1</b></span>
     <span class="status-item">Trade <b id="trade-level">Lv 1</b></span>
     <span class="status-item">Refining <b id="refining-level">Lv 1</b></span>
+    <span class="status-item">Manufacturing <b id="manufacturing-level">Lv 1</b></span>
     <span class="status-item status-save"><i class="pulse-dot"></i> Autosave on</span>
   </div>
 
@@ -166,8 +167,8 @@
     </section>
 
     <!-- ===================== INDUSTRY SCREEN ===================== -->
-    <!-- Making things at Anvil Station. The refinery for now;
-         manufacturing and automation join it later. -->
+    <!-- Making things at Anvil Station: the refinery (ore into
+         metal) and the workshop (metal into products). -->
     <section class="screen layout" data-screen="industry" hidden>
 
       <!-- Refinery: turns ore from the hold into metal. One box
@@ -180,6 +181,19 @@
         <!-- While the refinery is closed, this says when it opens -->
         <p class="price-note" id="refinery-note"></p>
         <div id="refinery-slots"></div>
+      </div>
+
+      <!-- Workshop: turns metal into products through WORK ORDERS.
+           Each slot works through a short queue, then goes idle.
+           One box per slot (built by ui.js). -->
+      <div class="panel">
+        <div class="panel-head">
+          <h2 class="panel-title">Workshop</h2>
+          <span class="panel-tag" id="workshop-tag"></span>
+        </div>
+        <!-- While the workshop is closed, this says when it opens -->
+        <p class="price-note" id="workshop-note"></p>
+        <div id="workshop-slots"></div>
       </div>
 
       <!-- What's in the station's hold, so ore and metal can be

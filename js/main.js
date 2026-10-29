@@ -13,7 +13,7 @@
 //   5. Start autosaving.
 // =============================================================
 
-import { RULES, ITEMS, FIELDS, SHIP_TYPES, SKILLS, HUB, HOME, HAUL_MODES, RECIPES, REFINERY } from "../data/content.js";
+import { RULES, ITEMS, FIELDS, SHIP_TYPES, SKILLS, HUB, HOME, HAUL_MODES, RECIPES, REFINERY, WORKSHOP_RECIPES, WORKSHOP } from "../data/content.js";
 import { createNewGame, findShip } from "./state.js";
 import { startMiningJob, startHaulJob, recallJob, resumeJob, getJobForShip } from "./jobs.js";
 import { advanceTo } from "./simulation.js";
@@ -22,6 +22,7 @@ import { buyShip, sellShip, renameShip } from "./shipyard.js";
 import { buyUpgrade, getCommandCapacity } from "./command.js";
 import { getUnlocksAtLevel, getFieldUnlocksAtLevel, isFieldUnlocked } from "./skills.js";
 import { setRecipe, getRefineJob, getRecipeUnlocksAtLevel, getSlotUnlocksAtLevel } from "./refinery.js";
+import { addOrder, cancelOrder, getWorkshopJob, getWorkshopRecipeUnlocksAtLevel, getWorkshopSlotUnlocksAtLevel, isQueueUnlockLevel, getQueueLimit } from "./workshop.js";
 import { saveGame, loadGame, deleteSave, applyOfflineProgress, exportSave, importSave } from "./save.js";
 import { showLevelBanner } from "./banner.js";
 import { setupUI, buildFleetViews, render, addLog, formatNumber, formatXp, formatTonnes, formatDuration } from "./ui.js";
@@ -144,6 +145,35 @@ const actions = {
     }
     if (returning) {
       addLog(`The unfinished batch's ${describeCargo(returning)} went back into the hold.`, "refine");
+    }
+    refresh();
+  },
+
+  // Puts a work order at the back of a workshop slot's queue.
+  // Returns { ok, reason } so the screen can say why it was refused.
+  queueOrder(slot, recipeId, batches) {
+    const result = addOrder(state, slot, recipeId, batches, Date.now());
+    if (result.ok) {
+      const name = WORKSHOP_RECIPES[recipeId].name.toLowerCase();
+      addLog(`Workshop slot ${slot + 1}: order queued for ${batches} ${batches === 1 ? "batch" : "batches"} of ${name}.`, "make");
+    }
+    refresh();
+    return result;
+  },
+
+  // Removes one order from a slot's queue (0 = the current one).
+  cancelOrder(slot, index) {
+    const job = getWorkshopJob(state, slot);
+    if (!job || !job.orders[index]) return;
+    const order = job.orders[index];
+    // Metal comes back only if the current batch was underway.
+    const returning = index === 0 && job.status === "working" ? job.inputs : null;
+
+    if (cancelOrder(state, slot, index, Date.now())) {
+      addLog(`Workshop slot ${slot + 1}: ${WORKSHOP_RECIPES[order.recipeId].name.toLowerCase()} order cancelled.`, "make");
+      if (returning) {
+        addLog(`The unfinished batch's ${describeCargo(returning)} went back into the hold.`, "make");
+      }
     }
     refresh();
   },
@@ -306,6 +336,12 @@ function tick() {
       continue;   // on to the next result
     }
 
+    // Workshop batches have no ship either.
+    if (result.kind === "workshop") {
+      logWorkshopResult(result);
+      continue;
+    }
+
     const ship = findShip(state, result.shipId);
     if (result.kind === "mining") {
       const itemName = ITEMS[result.itemId].name.toLowerCase();
@@ -330,6 +366,26 @@ function tick() {
 function refresh() {
   render(state, Date.now());
   saveGame(state);
+}
+
+
+// -------------------------------------------------------------
+// logWorkshopResult(result)
+// Log lines for workshop batches, e.g.
+//   "Workshop slot 1 made 30 t of hull plating (+12 Manufacturing XP)."
+//   "Workshop slot 1 finished its order."
+//   "Workshop slot 1 is idle: its queue is empty."  (amber: needs you)
+// -------------------------------------------------------------
+function logWorkshopResult(result) {
+  const name = ITEMS[result.itemId].name.toLowerCase();
+  const batches = result.trips === 1 ? "" : ` in ${result.trips} batches`;
+  addLog(`Workshop slot ${result.slot + 1} made ${formatTonnes(result.amount)} of ${name}${batches} (+${formatXp(result.xpGained)} Manufacturing XP).`, "make");
+  if (result.slotIdle) {
+    addLog(`Workshop slot ${result.slot + 1} is idle: its queue is empty. Queue more orders on the Industry tab.`, "make");
+  } else if (result.ordersFinished > 0) {
+    addLog(`Workshop slot ${result.slot + 1} finished ${result.ordersFinished === 1 ? "an order" : result.ordersFinished + " orders"}; starting the next.`, "make");
+  }
+  logLevelUps(result.skillId, result.newLevels);
 }
 
 
@@ -371,6 +427,20 @@ function getUnlockLines(skillId, level) {
     for (const slotNumber of getSlotUnlocksAtLevel(level)) {
       lines.push("New refinery slot: slot " + slotNumber);
     }
+    if (level === WORKSHOP.openAtRefiningLevel) {
+      lines.push("New: the workshop (Industry tab)");
+    }
+  }
+  if (skillId === "manufacturing") {
+    for (const recipeId of getWorkshopRecipeUnlocksAtLevel(level)) {
+      lines.push("New recipe: " + WORKSHOP_RECIPES[recipeId].name);
+    }
+    for (const slotNumber of getWorkshopSlotUnlocksAtLevel(level)) {
+      lines.push("New workshop slot: slot " + slotNumber);
+    }
+    if (isQueueUnlockLevel(level)) {
+      lines.push("Longer queues: one more order per slot");
+    }
   }
   return lines;
 }
@@ -405,6 +475,20 @@ function logLevelUps(skillId, levels, showBanners = true) {
       for (const slotNumber of getSlotUnlocksAtLevel(level)) {
         addLog(`Refinery slot ${slotNumber} unlocked.`, "level");
       }
+      if (level === WORKSHOP.openAtRefiningLevel) {
+        addLog(`The ${HOME.name} workshop is open. Queue work orders on the Industry tab.`, "level");
+      }
+    }
+    if (skillId === "manufacturing") {
+      for (const recipeId of getWorkshopRecipeUnlocksAtLevel(level)) {
+        addLog(`New recipe unlocked: ${WORKSHOP_RECIPES[recipeId].name}. Pick it in a workshop order.`, "level");
+      }
+      for (const slotNumber of getWorkshopSlotUnlocksAtLevel(level)) {
+        addLog(`Workshop slot ${slotNumber} unlocked.`, "level");
+      }
+      if (isQueueUnlockLevel(level)) {
+        addLog(`Workshop queues now hold ${getQueueLimit(state)} orders per slot.`, "level");
+      }
     }
 
     if (showBanners) {
@@ -437,6 +521,9 @@ function reportOfflineProgress(report) {
   let tradeXp = 0;
   const refined = {};    // metal made, e.g. { iron_bar: 600 }
   let refiningXp = 0;
+  const made = {};       // products made, e.g. { hull_plating: 900 }
+  let manufacturingXp = 0;
+  const idleSlots = [];  // workshop slots whose queue ran out
 
   for (const result of report.results) {
     if (result.kind === "mining") {
@@ -451,6 +538,10 @@ function reportOfflineProgress(report) {
     } else if (result.kind === "refine") {
       refined[result.itemId] = (refined[result.itemId] || 0) + result.amount;
       refiningXp += result.xpGained;
+    } else if (result.kind === "workshop") {
+      made[result.itemId] = (made[result.itemId] || 0) + result.amount;
+      manufacturingXp += result.xpGained;
+      if (result.slotIdle) idleSlots.push(result.slot + 1);
     }
   }
 
@@ -462,6 +553,12 @@ function reportOfflineProgress(report) {
   }
   if (Object.keys(refined).length > 0) {
     message += ` The refinery made ${describeCargo(refined)}, earning ${formatXp(refiningXp)} Refining XP.`;
+  }
+  if (Object.keys(made).length > 0) {
+    message += ` The workshop made ${describeCargo(made)}, earning ${formatXp(manufacturingXp)} Manufacturing XP.`;
+  }
+  if (idleSlots.length > 0) {
+    message += ` Workshop ${idleSlots.length === 1 ? "slot " + idleSlots[0] + " ran out of orders and is" : "slots " + idleSlots.join(" and ") + " ran out of orders and are"} idle.`;
   }
   addLog(message, "system");
 
