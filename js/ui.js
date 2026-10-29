@@ -17,7 +17,7 @@
 // flicker and sometimes swallow clicks.)
 // =============================================================
 
-import { ITEMS, SHIP_TYPES, FIELDS, SKILLS, HULL_SIZES, COMMAND, HUB, HOME, HAUL_MODES } from "../data/content.js";
+import { ITEMS, SHIP_TYPES, FIELDS, SKILLS, HULL_SIZES, COMMAND, HUB, HOME, HAUL_MODES, RECIPES, REFINERY } from "../data/content.js";
 import { getJobForShip, getJobPhase, getTripPlan, getHaulPlan, getOreInHold } from "./jobs.js";
 import { getLevel, getLevelProgress, isShipTypeUnlocked, isFieldUnlocked } from "./skills.js";
 import { canBuyShip, canSellShip, getSellValue, MAX_NAME_LENGTH } from "./shipyard.js";
@@ -25,6 +25,7 @@ import { getShipPoints, getCommandCapacity, getCommandUsed, getNextUpgradeCost, 
 import { getCargoValue, getTradeXp } from "./trade.js";
 import { getSchematic } from "./art.js";
 import { getRoleGroups, describeGroup } from "./fleet-groups.js";
+import { getRefineJob, getSlotCount, getSlotUnlockLevel, isRecipeUnlocked, getBatchMs, hasInputs, describeInputs } from "./refinery.js";
 
 // The screens that exist, in nav order. The first is the default.
 const SCREENS = ["command", "fleet", "shipyard", "skills"];
@@ -93,6 +94,7 @@ export function setupUI(state, actions) {
   buildFleetViews(state, actions);
   buildShipyard(actions);
   buildSkillCards();
+  buildRefinery(actions);
 }
 
 
@@ -745,6 +747,56 @@ function buildOwnedList(state, actions) {
 
 
 // -------------------------------------------------------------
+// buildRefinery(actions)
+// One box per refinery slot, including slots still locked (so
+// the player can see what's coming). Each box has a recipe
+// dropdown, a progress bar and a status line.
+// Built once; renderRefinery() keeps the words and bar current.
+// -------------------------------------------------------------
+function buildRefinery(actions) {
+  const area = byId("refinery-slots");
+  area.innerHTML = "";
+
+  // One <option> per recipe, plus "Off" at the top.
+  const options = Object.entries(RECIPES).map(([recipeId, recipe]) => `
+    <option value="${recipeId}">${recipe.name}</option>
+  `).join("");
+
+  // REFINERY.slotLevels has one entry per slot: [1, 10, 25]
+  REFINERY.slotLevels.forEach((unlockLevel, slot) => {
+    const box = document.createElement("div");
+    box.className = "refine-slot";
+    box.id = "refine-slot-" + slot;
+    box.innerHTML = `
+      <div class="card-header">
+        <span class="card-name">Slot ${slot + 1}</span>
+        <span class="card-sub" data-part="tag"></span>
+      </div>
+      <label class="dest-select-row">
+        <span class="dest-label">Recipe</span>
+        <select class="dest-select" data-part="recipe">
+          <option value="">Off</option>
+          ${options}
+        </select>
+      </label>
+      <div class="progress"><div class="progress-fill refine-fill" data-part="bar"></div></div>
+      <div class="ship-status" data-part="status"></div>
+      <div class="ship-specs" data-part="specs"></div>
+    `;
+
+    // Picking a recipe (or "Off") tells the game. An empty value
+    // means Off, which the game calls null.
+    const select = part(box, "recipe");
+    select.addEventListener("change", () => {
+      actions.setRecipe(slot, select.value || null);
+    });
+
+    area.appendChild(box);
+  });
+}
+
+
+// -------------------------------------------------------------
 // buildShipyard(actions)
 // One card per ship TYPE. Ship types come from content.js and
 // don't change while playing, so this only runs once.
@@ -810,6 +862,14 @@ function buildSkillCards() {
         unlocks.push({ level: field.unlockLevel, name: field.name, kind: "Field", key: "field:" + fieldId });
       }
     }
+    if (skillId === "refining") {
+      for (const [recipeId, recipe] of Object.entries(RECIPES)) {
+        unlocks.push({ level: recipe.unlockLevel, name: recipe.name, kind: "Recipe", key: "recipe:" + recipeId });
+      }
+      REFINERY.slotLevels.forEach((slotLevel, slot) => {
+        unlocks.push({ level: slotLevel, name: `Refinery slot ${slot + 1}`, kind: "Slot", key: "slot:" + slot });
+      });
+    }
     unlocks.sort((a, b) => a.level - b.level);   // lowest level first
 
     // Turn each unlock into a line of the list. A skill with
@@ -868,6 +928,7 @@ export function render(state, now) {
   renderCommand(state);
   renderShipyard(state);
   renderSkills(state);
+  renderRefinery(state, now);
 }
 
 
@@ -896,6 +957,7 @@ function renderStatusStrip(state, now) {
   byId("clock").textContent = new Date(now).toLocaleTimeString("en-GB");
   byId("mining-level").textContent = "Lv " + getLevel(state, "mining");
   byId("trade-level").textContent = "Lv " + getLevel(state, "trade");
+  byId("refining-level").textContent = "Lv " + getLevel(state, "refining");
   byId("command-readout").textContent = getCommandUsed(state) + "/" + getCommandCapacity(state);
 
   // "1 ship" / "2 ships" in the panel corners
@@ -1280,14 +1342,103 @@ function renderSkills(state) {
 
     // Mark each unlock as done or still to come.
     for (const line of card.querySelectorAll("[data-unlock]")) {
-      // The key is "ship:excavator" or "field:outer_belt";
+      // The key is "ship:excavator", "field:outer_belt",
+      // "recipe:steel" or "slot:1";
       // .split(":") breaks it into its two halves.
       const [kind, id] = line.dataset.unlock.split(":");
-      const unlocked = kind === "ship" ? isShipTypeUnlocked(state, id) : isFieldUnlocked(state, id);
+      let unlocked;
+      if (kind === "ship") unlocked = isShipTypeUnlocked(state, id);
+      else if (kind === "field") unlocked = isFieldUnlocked(state, id);
+      else if (kind === "recipe") unlocked = isRecipeUnlocked(state, id);
+      else unlocked = Number(id) < getSlotCount(state);   // "slot:1" = the second slot
       line.classList.toggle("unlocked", unlocked);
       part(line, "state").textContent = unlocked ? "Unlocked" : "Locked";
     }
   }
+}
+
+
+// -------------------------------------------------------------
+// renderRefinery(state, now)
+// Each slot's dropdown, progress bar and status line, e.g.
+//   "Smelting iron bars — 42s left"
+//   "Waiting for 60 t iron ore"
+// -------------------------------------------------------------
+function renderRefinery(state, now) {
+  const unlockedSlots = getSlotCount(state);
+  byId("refinery-tag").textContent = `${unlockedSlots} of ${REFINERY.slotLevels.length} slots`;
+
+  REFINERY.slotLevels.forEach((unlockLevel, slot) => {
+    const box = byId("refine-slot-" + slot);
+    const select = part(box, "recipe");
+    const status = part(box, "status");
+    const specs = part(box, "specs");
+    const bar = part(box, "bar");
+    const tag = part(box, "tag");
+
+    // --- A slot the player hasn't unlocked yet ---
+    const locked = slot >= unlockedSlots;
+    box.classList.toggle("locked", locked);
+    if (select.disabled !== locked) select.disabled = locked;
+    if (locked) {
+      tag.textContent = "Locked";
+      status.textContent = `Unlocks at Refining ${getSlotUnlockLevel(slot)}`;
+      specs.textContent = "";
+      bar.style.width = "0%";
+      return;   // (inside forEach, "return" skips to the next slot)
+    }
+
+    // --- The recipe dropdown ---
+    // Locked recipes are greyed out with the level they need.
+    // Only change what's different, so an open dropdown isn't
+    // closed by the 4-times-a-second redraw.
+    for (const option of select.options) {
+      if (!option.value) continue;   // the "Off" line
+      const recipe = RECIPES[option.value];
+      const unlocked = isRecipeUnlocked(state, option.value);
+      const label = unlocked ? recipe.name : `${recipe.name} (Refining ${recipe.unlockLevel})`;
+      if (option.textContent !== label) option.textContent = label;
+      if (option.disabled === unlocked) option.disabled = !unlocked;
+    }
+
+    const job = getRefineJob(state, slot);
+    const chosen = job ? job.recipeId : "";
+    if (select.value !== chosen) select.value = chosen;
+
+    // --- Off: nothing to show but a hint ---
+    if (!job) {
+      tag.textContent = "Off";
+      status.textContent = "Pick a recipe to start smelting";
+      specs.textContent = "";
+      bar.style.width = "0%";
+      box.classList.remove("busy", "waiting");
+      return;
+    }
+
+    // --- What one batch takes and makes, e.g.
+    //     "60 t iron ore → 30 t iron bars · 1m 0s · 8 XP" ---
+    const recipe = RECIPES[job.recipeId];
+    specs.textContent =
+      `${describeInputs(job.recipeId, formatTonnes)} → ${formatTonnes(recipe.outputAmount)} ` +
+      `${ITEMS[recipe.output].name.toLowerCase()} · ${formatDuration(getBatchMs(state, job.recipeId))} · ${formatXp(recipe.xp)} XP`;
+
+    if (job.status === "working") {
+      const elapsed = Math.min(Math.max(now - job.startedAt, 0), job.durationMs);
+      bar.style.width = (elapsed / job.durationMs * 100) + "%";
+      tag.textContent = "Working";
+      status.textContent = `Smelting ${recipe.name.toLowerCase()} — ${formatDuration(job.durationMs - elapsed)} left`;
+      box.classList.add("busy");
+      box.classList.remove("waiting");
+    } else {
+      bar.style.width = "0%";
+      tag.textContent = "Waiting";
+      status.textContent = hasInputs(state, job.recipeId)
+        ? "Starting the next batch"
+        : `Waiting for ${describeInputs(job.recipeId, formatTonnes)}`;
+      box.classList.add("waiting");
+      box.classList.remove("busy");
+    }
+  });
 }
 
 
@@ -1302,10 +1453,11 @@ function renderSkills(state) {
 // different events are easy to tell apart:
 //   "trip"   a ship came home        "trade"  something sold
 //   "level"  a level-up or unlock    "fleet"  ships and command
-//   "system" anything else
+//   "refine" the refinery            "system" anything else
 // -------------------------------------------------------------
 const LOG_TAGS = {
   trip: "TRIP",
+  refine: "REFINE",
   trade: "TRADE",
   level: "LEVEL",
   fleet: "FLEET",

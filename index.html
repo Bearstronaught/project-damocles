@@ -42,6 +42,7 @@
     <span class="status-item">Command <b id="command-readout">1/4</b></span>
     <span class="status-item">Mining <b id="mining-level">Lv 1</b></span>
     <span class="status-item">Trade <b id="trade-level">Lv 1</b></span>
+    <span class="status-item">Refining <b id="refining-level">Lv 1</b></span>
     <span class="status-item status-save"><i class="pulse-dot"></i> Autosave on</span>
   </div>
 
@@ -67,6 +68,9 @@
         </div>
         <div id="fleet-list"></div>
       </div>
+
+      <!-- The right-hand column: cargo, with the refinery under it -->
+      <div class="side-stack">
 
       <!-- Cargo: what's in storage, and selling -->
       <div class="panel">
@@ -102,6 +106,18 @@
         <!-- ui.js adds the station's name; "Sell all" shows if it can't -->
         <button id="sell-all" class="btn btn-primary">Sell all</button>
       </div>
+
+      <!-- Refinery: turns ore from the hold into metal. One box
+           per slot (built by ui.js); locked slots show when they open. -->
+      <div class="panel">
+        <div class="panel-head">
+          <h2 class="panel-title">Refinery</h2>
+          <span class="panel-tag" id="refinery-tag"></span>
+        </div>
+        <div id="refinery-slots"></div>
+      </div>
+
+      </div> <!-- end of the right-hand column -->
 
       <!-- Log: messages about what happened -->
       <div class="panel panel-wide">

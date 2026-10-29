@@ -22,8 +22,8 @@
 import assert from "node:assert/strict";
 import { SHIP_TYPES, ITEMS, COMMAND, FIELDS, HULL_SIZES } from "../data/content.js";
 import { BALANCE } from "../data/balance.js";
-import { createNewGame } from "../js/state.js";
-import { startMiningJob, startHaulJob, processJobs, cancelJob, recallJob, resumeJob, getJobProgress, getJobPhase, getTripPlan, getHaulPlan, loadCargo } from "../js/jobs.js";
+import { createNewGame, SAVE_VERSION } from "../js/state.js";
+import { startMiningJob, startHaulJob, getJobForShip, processJobs, cancelJob, recallJob, resumeJob, getJobProgress, getJobPhase, getTripPlan, getHaulPlan, loadCargo } from "../js/jobs.js";
 import { sellAll, sellEverything, getCargoValue, sellAtHub, getTradeXp, getPrice } from "../js/trade.js";
 import { parseSave, applyOfflineProgress, exportSave, importSave } from "../js/save.js";
 import { XP_TABLE, getLevelForXp, getLevel, getLevelProgress, addXp, isShipTypeUnlocked, MAX_LEVEL } from "../js/skills.js";
@@ -31,6 +31,8 @@ import { canBuyShip, buyShip, canSellShip, sellShip, getSellValue, renameShip } 
 import { getCommandCapacity, getCommandUsed, getNextUpgradeCost, buyUpgrade } from "../js/command.js";
 import { isFieldUnlocked } from "../js/skills.js";
 import { getRoleGroups, describeGroup, getShipActivity } from "../js/fleet-groups.js";
+import { setRecipe, getRefineJob, getSlotCount, getBatchMs, isRecipeUnlocked, getRecipeUnlocksAtLevel, getSlotUnlocksAtLevel } from "../js/refinery.js";
+import { RECIPES } from "../data/content.js";
 
 const SECOND = 1000;                 // milliseconds in a second
 const MINUTE = 60 * SECOND;
@@ -467,7 +469,7 @@ test("Two ships with different trip lengths each pay out on their own timer", ()
 // SAVE UPGRADES
 // =============================================================
 
-test("A version 1 save (first commit) upgrades all the way to version 6", () => {
+test("A version 1 save (first commit) upgrades all the way to the latest version", () => {
   // Exactly what the first commit's game saved.
   const oldSave = {
     version: 1,
@@ -478,10 +480,10 @@ test("A version 1 save (first commit) upgrades all the way to version 6", () => 
     lastSavedAt: START,
   };
   const state = parseSave(JSON.stringify(oldSave));
-  assert.equal(state.version, 6);
+  assert.equal(state.version, SAVE_VERSION);
   assert.equal(state.credits, 500);                // x10 for tonnes, nothing lost
   assert.equal(state.inventory.iron_ore, 100);
-  assert.deepEqual(state.skills, { mining: { xp: 0 }, trade: { xp: 0 } });
+  assert.deepEqual(state.skills, { mining: { xp: 0 }, trade: { xp: 0 }, refining: { xp: 0 } });
   assert.equal(state.nextShipNumber, 2);
 });
 
@@ -500,7 +502,7 @@ test("A version 2 save's old 20s trip is re-timed to the new three-phase trip", 
   };
   const state = parseSave(JSON.stringify(oldSave));
   const job = state.jobs[0];
-  assert.equal(state.version, 6);
+  assert.equal(state.version, SAVE_VERSION);
   assert.equal(job.durationMs, PROSPECTOR.durationMs);
   assert.equal(job.outboundMs, PROSPECTOR.outboundMs);
   assert.equal(job.miningMs, PROSPECTOR.miningMs);
@@ -688,7 +690,7 @@ test("A version 3 save gains command upgrades and destinations, keeping its ship
     lastSavedAt: START,
   };
   const state = parseSave(JSON.stringify(oldSave));
-  assert.equal(state.version, 6);
+  assert.equal(state.version, SAVE_VERSION);
   assert.equal(state.commandUpgrades, 0);
   assert.ok(state.ships.every((ship) => ship.destination === "inner_belt"));
   assert.equal(state.ships.length, 3);                  // nobody loses a ship...
@@ -709,8 +711,8 @@ test("A version 4 save gains the Trade skill at 0 XP, keeping its Mining XP", ()
     lastSavedAt: START,
   };
   const state = parseSave(JSON.stringify(oldSave));
-  assert.equal(state.version, 6);
-  assert.deepEqual(state.skills, { mining: { xp: 900 }, trade: { xp: 0 } });
+  assert.equal(state.version, SAVE_VERSION);
+  assert.deepEqual(state.skills, { mining: { xp: 900 }, trade: { xp: 0 }, refining: { xp: 0 } });
   assert.equal(state.credits, 12000);              // x10 at version 6
 });
 
@@ -974,11 +976,11 @@ test("A version 5 save moves to tonnes: credits and ore x10, XP unchanged", () =
     lastSavedAt: START,
   };
   const state = parseSave(JSON.stringify(oldSave));
-  assert.equal(state.version, 6);
+  assert.equal(state.version, SAVE_VERSION);
   assert.equal(state.credits, 26000);
   assert.deepEqual(state.inventory, { iron_ore: 300, nickel_ore: 40 });
   assert.deepEqual(state.jobs[0].cargo, { nickel_ore: 200, iron_ore: 400 });
-  assert.deepEqual(state.skills, { mining: { xp: 900 }, trade: { xp: 180 } });
+  assert.deepEqual(state.skills, { mining: { xp: 900 }, trade: { xp: 180 }, refining: { xp: 0 } });
 });
 
 test("A bogus 'version 5' save with no inventory is refused, not a crash", () => {
@@ -1053,7 +1055,7 @@ test("Plain JSON from the browser's own storage imports too", () => {
   assert.equal(importSave(JSON.stringify(state)).ok, true);
 });
 
-test("An old version 1 save imports and upgrades to version 6", () => {
+test("An old version 1 save imports and upgrades to the latest version", () => {
   const oldSave = {
     version: 1, credits: 50, inventory: { iron_ore: 10 },
     ships: [{ id: "ship-1", name: "Rusty Pick", type: "prospector" }],
@@ -1061,7 +1063,7 @@ test("An old version 1 save imports and upgrades to version 6", () => {
   };
   const result = importSave("DAMOCLES:" + btoa(JSON.stringify(oldSave)));
   assert.equal(result.ok, true);
-  assert.equal(result.state.version, 6);
+  assert.equal(result.state.version, SAVE_VERSION);
   assert.equal(result.state.credits, 500);
 });
 
@@ -1385,6 +1387,7 @@ test("content.js and balance.js list the same items, ships, fields and hull size
   assert.deepEqual(idsOf(SHIP_TYPES), idsOf(BALANCE.ships));
   assert.deepEqual(idsOf(FIELDS), idsOf(BALANCE.fields));
   assert.deepEqual(idsOf(HULL_SIZES), idsOf(BALANCE.hullSizes));
+  assert.deepEqual(idsOf(RECIPES), idsOf(BALANCE.recipes));
 });
 
 test("Every ship has the numbers it needs (and barges have a drill)", () => {
@@ -1402,6 +1405,176 @@ test("Every ship has the numbers it needs (and barges have a drill)", () => {
 test("Every field mines an item that exists", () => {
   for (const [fieldId, field] of Object.entries(FIELDS)) {
     assert.ok(ITEMS[field.yields], `${fieldId} yields unknown item "${field.yields}"`);
+  }
+});
+
+// =============================================================
+// THE REFINERY (js/refinery.js)
+// Batches run on the same timeline as the ships, so these use
+// processJobs exactly like the mining tests do.
+// =============================================================
+
+const IRON_BATCH = RECIPES.iron_bar;                 // 60 t ore -> 30 t bars
+const IRON_BATCH_MS = IRON_BATCH.seconds * SECOND;   // at Refining level 1
+
+// A game at a chosen Refining level.
+function gameAtRefining(level) {
+  const state = createNewGame();
+  state.skills.refining.xp = XP_TABLE[level];
+  return state;
+}
+
+test("A new game has 1 refinery slot and only the iron bar recipe", () => {
+  const state = createNewGame();
+  assert.equal(getSlotCount(state), 1);
+  assert.equal(isRecipeUnlocked(state, "iron_bar"), true);
+  assert.equal(isRecipeUnlocked(state, "nickel_bar"), false);
+  assert.equal(isRecipeUnlocked(state, "steel"), false);
+});
+
+test("Locked recipes and slots can't be used", () => {
+  const state = createNewGame();
+  assert.equal(setRecipe(state, 0, "nickel_bar", START), false);   // needs Refining 5
+  assert.equal(setRecipe(state, 1, "iron_bar", START), false);     // slot 2 needs Refining 10
+  assert.equal(state.jobs.length, 0);
+});
+
+test("Slots unlock at Refining 1, 10 and 25; recipes at 1, 5 and 15", () => {
+  assert.equal(getSlotCount(gameAtRefining(9)), 1);
+  assert.equal(getSlotCount(gameAtRefining(10)), 2);
+  assert.equal(getSlotCount(gameAtRefining(25)), 3);
+  assert.deepEqual(getSlotUnlocksAtLevel(10), [2]);
+  assert.deepEqual(getRecipeUnlocksAtLevel(5), ["nickel_bar"]);
+  assert.deepEqual(getRecipeUnlocksAtLevel(15), ["steel"]);
+});
+
+test("With no ore, a slot waits; ore arriving starts the batch", () => {
+  const state = createNewGame();
+  setRecipe(state, 0, "iron_bar", START);
+  assert.equal(getRefineJob(state, 0).status, "waiting");
+
+  state.inventory.iron_ore = 60;
+  processJobs(state, START + SECOND);
+  assert.equal(getRefineJob(state, 0).status, "working");
+  assert.equal(state.inventory.iron_ore, 0);           // taken at the start of the batch
+});
+
+test("One batch: 60 t iron ore becomes 30 t iron bars and 8 Refining XP after 60s", () => {
+  const state = createNewGame();
+  state.inventory.iron_ore = 60;
+  setRecipe(state, 0, "iron_bar", START);
+
+  processJobs(state, START + IRON_BATCH_MS - 1);       // a moment too soon
+  assert.equal(state.inventory.iron_bar, 0);
+
+  processJobs(state, START + IRON_BATCH_MS);
+  assert.equal(state.inventory.iron_bar, 30);
+  assert.equal(state.skills.refining.xp, 8);
+  assert.equal(getRefineJob(state, 0).status, "waiting");   // out of ore now
+});
+
+test("Batches run back to back: 150 t ore makes 2 batches in 2 minutes, 30 t left over", () => {
+  const state = createNewGame();
+  state.inventory.iron_ore = 150;
+  setRecipe(state, 0, "iron_bar", START);
+  processJobs(state, START + 2 * IRON_BATCH_MS);
+  assert.equal(state.inventory.iron_bar, 60);
+  assert.equal(state.inventory.iron_ore, 30);
+});
+
+test("Stopping mid-batch gives the ore back and earns no XP", () => {
+  const state = createNewGame();
+  state.inventory.iron_ore = 60;
+  setRecipe(state, 0, "iron_bar", START);
+  processJobs(state, START + 30 * SECOND);
+  setRecipe(state, 0, null, START + 30 * SECOND);
+  assert.equal(state.inventory.iron_ore, 60);
+  assert.equal(state.inventory.iron_bar, 0);
+  assert.equal(state.skills.refining.xp, 0);
+  assert.equal(getRefineJob(state, 0), undefined);
+});
+
+test("Steel needs both ores: it waits until the nickel arrives", () => {
+  const state = gameAtRefining(15);
+  state.inventory.iron_ore = 60;
+  setRecipe(state, 0, "steel", START);
+  assert.equal(getRefineJob(state, 0).status, "waiting");
+  state.inventory.nickel_ore = 30;
+  processJobs(state, START + SECOND);
+  assert.equal(getRefineJob(state, 0).status, "working");
+  assert.equal(state.inventory.iron_ore, 0);
+  assert.equal(state.inventory.nickel_ore, 0);
+});
+
+test("Higher levels are faster: iron bars take 57s at Refining 11 (5% faster)", () => {
+  assert.equal(getBatchMs(createNewGame(), "iron_bar"), 60 * SECOND);
+  assert.equal(getBatchMs(gameAtRefining(11), "iron_bar"), 57 * SECOND);
+});
+
+test("Two slots waiting on the same ore: slot 1 gets first pick", () => {
+  const state = gameAtRefining(10);
+  setRecipe(state, 1, "iron_bar", START);              // both set up with an empty hold
+  setRecipe(state, 0, "iron_bar", START);
+  state.inventory.iron_ore = 60;                       // enough for only one batch
+  processJobs(state, START + SECOND);
+  assert.equal(getRefineJob(state, 0).status, "working");
+  assert.equal(getRefineJob(state, 1).status, "waiting");
+});
+
+test("The refinery takes its ore before a waiting freighter loads", () => {
+  const state = gameWithCourier("full");               // Courier wants 600 t
+  setRecipe(state, 0, "iron_bar", START);
+  startHaulJob(state, "ship-2", START);
+  state.inventory.iron_ore = 600;
+  processJobs(state, START + SECOND);
+  assert.equal(getRefineJob(state, 0).status, "working");   // took 60 t first
+  assert.equal(getJobForShip(state, "ship-2").status, "waiting");  // 540 t isn't a full load
+});
+
+test("Offline: a barge feeds the refinery for an hour, and no ore is lost or made up", () => {
+  const state = createNewGame();
+  startMiningJob(state, "ship-1", "inner_belt", START);
+  setRecipe(state, 0, "iron_bar", START);
+  state.lastSavedAt = START;
+  applyOfflineProgress(state, START + HOUR);
+
+  // Every tonne mined is either still ore, in the furnace, or became bars (2 t ore -> 1 t bar).
+  const mined = 24 * PROSPECTOR.orePerTrip;            // 24 trips in an hour
+  const inFurnace = getRefineJob(state, 0).inputs?.iron_ore || 0;
+  assert.equal(state.inventory.iron_ore + inFurnace + state.inventory.iron_bar * 2, mined);
+  assert.ok(state.inventory.iron_bar >= 1200, "made plenty of bars");
+  assert.equal(state.skills.refining.xp, (state.inventory.iron_bar / 30) * 8);
+});
+
+test("A batch in the furnace survives saving, and finishes while away", () => {
+  const state = createNewGame();
+  state.inventory.iron_ore = 60;
+  setRecipe(state, 0, "iron_bar", START);
+  state.lastSavedAt = START + 10 * SECOND;
+  const loaded = importSave(exportSave(state)).state;
+  loaded.lastSavedAt = START + 10 * SECOND;            // (export stamps "now")
+  applyOfflineProgress(loaded, START + HOUR);
+  assert.equal(loaded.inventory.iron_bar, 30);
+});
+
+test("Refining and mining results come back separately for the log", () => {
+  const state = createNewGame();
+  state.inventory.iron_ore = 120;
+  setRecipe(state, 0, "iron_bar", START);
+  startMiningJob(state, "ship-1", "inner_belt", START);
+  const results = processJobs(state, START + TRIP);
+  const refine = results.find((r) => r.kind === "refine");
+  assert.equal(refine.trips, 2);                       // two batches, added together
+  assert.equal(refine.amount, 60);
+  assert.ok(results.find((r) => r.kind === "mining"));
+});
+
+test("Every recipe uses items that exist", () => {
+  for (const [recipeId, recipe] of Object.entries(RECIPES)) {
+    assert.ok(ITEMS[recipe.output], `${recipeId} makes unknown item "${recipe.output}"`);
+    for (const itemId of Object.keys(recipe.inputs)) {
+      assert.ok(ITEMS[itemId], `${recipeId} uses unknown item "${itemId}"`);
+    }
   }
 });
 

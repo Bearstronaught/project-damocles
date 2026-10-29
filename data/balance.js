@@ -8,6 +8,9 @@ export const BALANCE = {
   items: {
     iron_ore: { sellPrice: 5, hubPrice: 8 },
     nickel_ore: { sellPrice: 12, hubPrice: 19 },
+    iron_bar: { sellPrice: 14, hubPrice: 22 },
+    nickel_bar: { sellPrice: 34, hubPrice: 54 },
+    steel: { sellPrice: 22, hubPrice: 35 },
   },
   ships: {
     prospector: { role: 'mining', size: 'small', skill: 'mining', unlockLevel: 1, cost: 8000, cargoCapacity: 120, miningRate: 120, speed: 1 },
@@ -17,6 +20,11 @@ export const BALANCE = {
   fields: {
     inner_belt: { yields: 'iron_ore', travelSeconds: 45, tonnesPerXp: 10, unlockLevel: 1 },
     outer_belt: { yields: 'nickel_ore', travelSeconds: 90, tonnesPerXp: 5, unlockLevel: 5 },
+  },
+  recipes: {
+    iron_bar: { unlockLevel: 1, inputs: { iron_ore: 60 }, output: 'iron_bar', outputAmount: 30, seconds: 60, xp: 8 },
+    nickel_bar: { unlockLevel: 5, inputs: { nickel_ore: 60 }, output: 'nickel_bar', outputAmount: 30, seconds: 90, xp: 20 },
+    steel: { unlockLevel: 15, inputs: { iron_ore: 60, nickel_ore: 30 }, output: 'steel', outputAmount: 45, seconds: 120, xp: 30 },
   },
   hullSizes: {
     small: { commandPoints: 1 },
@@ -28,5 +36,6 @@ export const BALANCE = {
   sellRate: 0.5,
   trade: { creditsPerXp: 100, hubTonnesPerBonusXp: 10 },
   hub: { travelSeconds: 180, tradeSeconds: 30 },
+  refinery: { slotLevels: [1, 10, 25], speedPerLevel: 0.005 },
   rules: { offlineCapHours: 24 },
 };

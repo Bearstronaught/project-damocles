@@ -44,6 +44,19 @@ export const ITEMS = {
     name: "Nickel ore",
     ...BALANCE.items.nickel_ore,
   },
+  // Refined metals, made at the refinery (see RECIPES below)
+  iron_bar: {
+    name: "Iron bars",
+    ...BALANCE.items.iron_bar,
+  },
+  nickel_bar: {
+    name: "Nickel bars",
+    ...BALANCE.items.nickel_bar,
+  },
+  steel: {
+    name: "Steel",
+    ...BALANCE.items.steel,
+  },
 };
 
 
@@ -61,6 +74,10 @@ export const SKILLS = {
   trade: {
     name: "Trade",
     description: "Sell goods for credits. Selling at home is instant; hauling to the merchant hub pays more and earns bonus XP. Levels unlock freighters.",
+  },
+  refining: {
+    name: "Refining",
+    description: "Smelt ore into metal at the Anvil Station refinery. Metal sells for more than the ore it came from. Levels unlock recipes, extra refinery slots and faster batches.",
   },
 };
 
@@ -189,6 +206,47 @@ export const FIELDS = {
     ...BALANCE.fields.outer_belt,
   },
 };
+
+
+// -------------------------------------------------------------
+// RECIPES: what the refinery can make.
+// -------------------------------------------------------------
+// Each recipe is listed under the ID of the item it makes.
+// The refinery has a few SLOTS; each slot runs one recipe over
+// and over, taking ore from the home hold for every batch.
+//
+// Written here: the name the player sees.
+// From the balance sheet (Recipes tab):
+//   unlockLevel   Refining level needed to use it
+//   inputs        what one batch takes from the hold, in tonnes,
+//                 e.g. { iron_ore: 60, nickel_ore: 30 }
+//   output        the item one batch makes
+//   outputAmount  how many tonnes of it
+//   seconds       how long one batch takes at Refining level 1
+//   xp            Refining XP for each finished batch
+export const RECIPES = {
+  iron_bar: {
+    name: "Iron bars",
+    ...BALANCE.recipes.iron_bar,
+  },
+  nickel_bar: {
+    name: "Nickel bars",
+    ...BALANCE.recipes.nickel_bar,
+  },
+  steel: {
+    name: "Steel",
+    ...BALANCE.recipes.steel,
+  },
+};
+
+// THE REFINERY: slots and speed. From the balance sheet
+// (Settings tab):
+//   slotLevels     the Refining level each slot unlocks at,
+//                  e.g. [1, 10, 25] = slot 1 from the start,
+//                  slot 2 at level 10, slot 3 at level 25
+//   speedPerLevel  each level above 1 makes batches this much
+//                  faster (0.005 = 0.5% per level)
+export const REFINERY = BALANCE.refinery;
 
 
 // -------------------------------------------------------------

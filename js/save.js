@@ -302,7 +302,16 @@ function upgradeSave(state) {
     state.version = 6;
   }
 
-  // (Future: if (state.version === 6) { ...; state.version = 7; })
+  // --- Version 6 -> 7: the Refining skill ---
+  // Nobody has refined anything yet, so Refining starts at 0 XP.
+  // (The new metals start at 0 t on their own: the cargo hold
+  // treats a missing item as 0.)
+  if (state.version === 6) {
+    state.skills.refining = { xp: 0 };
+    state.version = 7;
+  }
+
+  // (Future: if (state.version === 7) { ...; state.version = 8; })
 
   if (state.version > SAVE_VERSION) {
     // A save from a NEWER version of the game than this one.

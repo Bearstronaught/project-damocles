@@ -38,6 +38,7 @@ js/skills.js        XP, levels, and which ships each level unlocks
 js/shipyard.js      buying and selling ships
 js/command.js       command capacity: points per hull, upgrades
 js/trade.js         selling goods for credits
+js/refinery.js      the Anvil Station refinery: recipes, slots, batches
 js/save.js          save, load, version upgrades, offline progress
 js/ui.js            drawing the screens and handling button clicks
 js/fleet-groups.js  sorting ships into role groups (Mining, Freight) and their summaries

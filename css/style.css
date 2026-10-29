@@ -1613,3 +1613,57 @@ body {
     transition: opacity 0.35s ease-out;
   }
 }
+
+
+/* =============================================================
+   THE REFINERY (build 12)
+   ============================================================= */
+
+/* The right-hand column on the Command screen: cargo on top,
+   the refinery underneath, with the same gap as the grid. */
+.side-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
+/* One box per refinery slot, like a small ship card */
+.refine-slot {
+  background: var(--panel-raised);
+  border: 1px solid var(--line);
+  padding: 10px 12px;
+  margin-bottom: 10px;
+}
+
+.refine-slot:last-child {
+  margin-bottom: 0;
+}
+
+/* The batch progress bar: teal while smelting (something's moving) */
+.progress-fill.refine-fill {
+  background: var(--teal);
+  box-shadow: var(--glow-teal);
+}
+
+/* A working slot's status is teal, like a ship in flight */
+.refine-slot.busy .ship-status {
+  color: var(--teal);
+}
+
+/* Waiting for ore: amber, because the player might want to know */
+.refine-slot.waiting .ship-status {
+  color: var(--amber-dim);
+}
+
+/* A slot not unlocked yet is dimmed */
+.refine-slot.locked {
+  opacity: 0.5;
+}
+
+.refine-slot .progress {
+  margin: 8px 0 4px;
+}
+
+/* The log's REFINE tag, in the cooler secondary tone */
+.log-refine .log-tag { color: var(--teal); }

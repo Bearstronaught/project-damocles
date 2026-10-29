@@ -20,7 +20,8 @@
 //   Version 4: command upgrades, and each ship has a destination
 //   Version 5: added the Trade skill
 //   Version 6: cargo in tonnes - all amounts and credits x10
-export const SAVE_VERSION = 6;
+//   Version 7: added the Refining skill (and refinery jobs)
+export const SAVE_VERSION = 7;
 
 
 // -------------------------------------------------------------
@@ -39,6 +40,9 @@ export function createNewGame() {
     inventory: {
       iron_ore: 0,
       nickel_ore: 0,
+      iron_bar: 0,
+      nickel_bar: 0,
+      steel: 0,
     },
 
     // The player's fleet. Each ship has its own unique ID
@@ -64,10 +68,11 @@ export function createNewGame() {
     skills: {
       mining: { xp: 0 },
       trade: { xp: 0 },
+      refining: { xp: 0 },
     },
 
-    // Jobs that are currently running (empty at the start).
-    // See jobs.js for what a job looks like.
+    // Jobs that are currently running (empty at the start):
+    // ships' trips (see jobs.js) and refinery slots (refinery.js).
     jobs: [],
 
     // When the game was last saved, as a timestamp.

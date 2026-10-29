@@ -11,7 +11,9 @@
 // open the whole time or closed for 6 hours - the maths is the
 // same. Offline progress comes for free.
 //
-// There are two kinds of job.
+// There are two kinds of SHIP job. (The refinery's batches are
+// jobs too - see js/refinery.js - so they play out on the same
+// timeline as the ships.)
 //
 // A MINING trip has three phases, one after the other:
 //   OUTBOUND  fly from home to the field
@@ -54,6 +56,7 @@ import { FIELDS, SHIP_TYPES, ITEMS, HUB } from "../data/content.js";
 import { addItem, findShip } from "./state.js";
 import { addXp, isFieldUnlocked } from "./skills.js";
 import { sellAtHub } from "./trade.js";
+import { startWaitingBatches, finishBatch } from "./refinery.js";
 
 
 // =============================================================
@@ -552,6 +555,9 @@ export function getJobPhase(job, now) {
 //           ship arriving home to stand down
 //   haul:   { kind: "haul", shipId, cargo, tonnes, credits,
 //             trips, skillId: "trade", xpGained, newLevels }
+//   refine: { kind: "refine", slot, recipeId, itemId, amount,
+//             trips, skillId: "refining", xpGained, newLevels }
+//           (one entry per slot and recipe, batches added up)
 // -------------------------------------------------------------
 export function processJobs(state, now) {
   const results = [];
@@ -559,8 +565,12 @@ export function processJobs(state, now) {
   // A freighter might be able to leave because of something the
   // player just did (like switching to constant runs). The
   // earliest that can count is the next event, or now.
+  // The same goes for a refinery slot waiting for ore.
+  // The refinery gets first pick of the ore, then freighters.
   const first = findNextEvent(state, now);
-  departWaitingFreighters(state, first ? Math.min(first.time, now) : now);
+  const startTime = first ? Math.min(first.time, now) : now;
+  startWaitingBatches(state, startTime);
+  departWaitingFreighters(state, startTime);
 
   // Then replay every due event, earliest first.
   // (The safety limit stops a bug from freezing the browser.)
@@ -573,8 +583,10 @@ export function processJobs(state, now) {
       results.push(result);
     }
 
-    // Ore may have just arrived, or a freighter just docked:
-    // anyone waiting gets a chance to load up and leave.
+    // Ore may have just arrived, a batch just finished, or a
+    // freighter just docked: anyone waiting gets a chance to
+    // start. The refinery gets first pick, then freighters.
+    startWaitingBatches(state, next.time);
     departWaitingFreighters(state, next.time);
   }
 
@@ -588,7 +600,9 @@ export function processJobs(state, now) {
 // { job, time }, or null if nothing is due yet.
 //   Mining job:  the trip finishing (ship docks with ore)
 //   Haul job:    selling at the hub, then docking back home
-//   Waiting freighters have no event - they wait for ore.
+//   Refinery job: the current batch finishing
+//   Waiting freighters and refinery slots have no event - they
+//   wait for ore.
 // -------------------------------------------------------------
 function findNextEvent(state, now) {
   let best = null;
@@ -598,6 +612,8 @@ function findNextEvent(state, now) {
 
     if (job.type === "mining") {
       time = job.startedAt + job.durationMs;
+    } else if (job.type === "refine" && job.status === "working") {
+      time = job.startedAt + job.durationMs;              // batch done
     } else if (job.type === "haul" && job.status === "travelling") {
       time = (job.sold || job.noSale)
         ? job.startedAt + job.durationMs                  // docks back home
@@ -623,6 +639,11 @@ function findNextEvent(state, now) {
 // null for events with nothing to report (a freighter docking).
 // -------------------------------------------------------------
 function runEvent(state, job, time) {
+  // --- A refinery batch finishes: metal into the hold ---
+  if (job.type === "refine") {
+    return finishBatch(state, job);
+  }
+
   // --- A mining trip finishes: unload ore, earn Mining XP ---
   if (job.type === "mining") {
     const ship = findShip(state, job.shipId);
@@ -729,7 +750,10 @@ function mergeResultsByShip(results) {
   const byShip = {};   // shipId -> its merged result
 
   for (const result of results) {
-    const key = result.shipId + ":" + result.kind;
+    // Ships are grouped by ship; refinery batches by slot and
+    // recipe ("??" means: use the right side if the left is missing).
+    const who = result.shipId ?? ("slot-" + result.slot + "-" + result.recipeId);
+    const key = who + ":" + result.kind;
     const total = byShip[key];
 
     if (!total) {
@@ -751,7 +775,7 @@ function mergeResultsByShip(results) {
     total.xpGained += result.xpGained;
     total.newLevels.push(...result.newLevels);
 
-    if (result.kind === "mining") {
+    if (result.kind === "mining" || result.kind === "refine") {
       total.amount += result.amount;
     } else {
       total.tonnes += result.tonnes;

@@ -13,13 +13,14 @@
 //   5. Start autosaving.
 // =============================================================
 
-import { RULES, ITEMS, FIELDS, SHIP_TYPES, SKILLS, HUB, HOME, HAUL_MODES } from "../data/content.js";
+import { RULES, ITEMS, FIELDS, SHIP_TYPES, SKILLS, HUB, HOME, HAUL_MODES, RECIPES } from "../data/content.js";
 import { createNewGame, findShip } from "./state.js";
 import { startMiningJob, startHaulJob, recallJob, resumeJob, getJobForShip, processJobs } from "./jobs.js";
 import { sellAll, sellEverything } from "./trade.js";
 import { buyShip, sellShip, renameShip } from "./shipyard.js";
 import { buyUpgrade, getCommandCapacity } from "./command.js";
 import { getUnlocksAtLevel, getFieldUnlocksAtLevel, isFieldUnlocked } from "./skills.js";
+import { setRecipe, getRefineJob, getRecipeUnlocksAtLevel, getSlotUnlocksAtLevel } from "./refinery.js";
 import { saveGame, loadGame, deleteSave, applyOfflineProgress, exportSave, importSave } from "./save.js";
 import { showLevelBanner } from "./banner.js";
 import { setupUI, buildFleetViews, render, addLog, formatNumber, formatXp, formatTonnes, formatDuration } from "./ui.js";
@@ -121,6 +122,28 @@ const actions = {
     const ship = findShip(state, shipId);
     if (!ship || !HAUL_MODES[mode]) return;
     ship.haulMode = mode;
+    refresh();
+  },
+
+  // Gives a refinery slot a recipe, or switches it off (null).
+  setRecipe(slot, recipeId) {
+    const before = getRefineJob(state, slot);
+    // Ore in a half-finished batch comes back if it's stopped.
+    const returning = before && before.status === "working" ? before.inputs : null;
+
+    if (!setRecipe(state, slot, recipeId, Date.now())) {
+      refresh();   // (redraws the dropdown back to what it was)
+      return;
+    }
+
+    if (recipeId === null) {
+      addLog(`Refinery slot ${slot + 1} switched off.`, "refine");
+    } else {
+      addLog(`Refinery slot ${slot + 1} now smelting ${RECIPES[recipeId].name.toLowerCase()}.`, "refine");
+    }
+    if (returning) {
+      addLog(`The unfinished batch's ${describeCargo(returning)} went back into the hold.`, "refine");
+    }
     refresh();
   },
 
@@ -228,6 +251,14 @@ function tick() {
   // Finish any trips that are due and log what came back.
   const results = processJobs(state, now);
   for (const result of results) {
+    // Refinery batches have no ship.
+    if (result.kind === "refine") {
+      const batches = result.trips === 1 ? "" : ` in ${result.trips} batches`;
+      addLog(`Refinery slot ${result.slot + 1} made ${formatTonnes(result.amount)} of ${ITEMS[result.itemId].name.toLowerCase()}${batches} (+${formatXp(result.xpGained)} Refining XP).`, "refine");
+      logLevelUps(result.skillId, result.newLevels);
+      continue;   // on to the next result
+    }
+
     const ship = findShip(state, result.shipId);
     if (result.kind === "mining") {
       const itemName = ITEMS[result.itemId].name.toLowerCase();
@@ -283,6 +314,14 @@ function getUnlockLines(skillId, level) {
       lines.push("New field: " + FIELDS[fieldId].name);
     }
   }
+  if (skillId === "refining") {
+    for (const recipeId of getRecipeUnlocksAtLevel(level)) {
+      lines.push("New recipe: " + RECIPES[recipeId].name);
+    }
+    for (const slotNumber of getSlotUnlocksAtLevel(level)) {
+      lines.push("New refinery slot: slot " + slotNumber);
+    }
+  }
   return lines;
 }
 
@@ -304,6 +343,14 @@ function logLevelUps(skillId, levels, showBanners = true) {
     if (skillId === "mining") {
       for (const fieldId of getFieldUnlocksAtLevel(level)) {
         addLog(`New field unlocked: ${FIELDS[fieldId].name}. Pick it on a docked ship's card.`, "level");
+      }
+    }
+    if (skillId === "refining") {
+      for (const recipeId of getRecipeUnlocksAtLevel(level)) {
+        addLog(`New recipe unlocked: ${RECIPES[recipeId].name}. Pick it in a refinery slot.`, "level");
+      }
+      for (const slotNumber of getSlotUnlocksAtLevel(level)) {
+        addLog(`Refinery slot ${slotNumber} unlocked.`, "level");
       }
     }
 
@@ -335,6 +382,8 @@ function reportOfflineProgress(report) {
   const hauled = {};     // ore sold at the hub
   let hubCredits = 0;
   let tradeXp = 0;
+  const refined = {};    // metal made, e.g. { iron_bar: 600 }
+  let refiningXp = 0;
 
   for (const result of report.results) {
     if (result.kind === "mining") {
@@ -346,6 +395,9 @@ function reportOfflineProgress(report) {
       }
       hubCredits += result.credits;
       tradeXp += result.xpGained;
+    } else if (result.kind === "refine") {
+      refined[result.itemId] = (refined[result.itemId] || 0) + result.amount;
+      refiningXp += result.xpGained;
     }
   }
 
@@ -354,6 +406,9 @@ function reportOfflineProgress(report) {
   }
   if (Object.keys(hauled).length > 0) {
     message += ` Your freighters sold ${describeCargo(hauled)} at the ${HUB.name.toLowerCase()} for ${formatNumber(hubCredits)} cr, earning ${formatXp(tradeXp)} Trade XP.`;
+  }
+  if (Object.keys(refined).length > 0) {
+    message += ` The refinery made ${describeCargo(refined)}, earning ${formatXp(refiningXp)} Refining XP.`;
   }
   addLog(message, "system");
 
