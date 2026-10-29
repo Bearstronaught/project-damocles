@@ -2063,3 +2063,54 @@ body {
      .cargo-table above can check how much room it has. */
   container-type: inline-size;
 }
+
+
+/* ================================================================
+   SHIP UPGRADES AND LEVEL PERKS
+   ================================================================ */
+
+/* A small teal "+15%" after a boosted stat */
+.stat-bonus {
+  color: var(--teal);
+  font-size: 11px;
+}
+
+/* The dock stop on a trip bar: loading or unloading at a station.
+   Striped amber, so the short stop is easy to tell from flying. */
+.seg-dock .seg-fill {
+  background: repeating-linear-gradient(135deg, var(--amber) 0 3px, var(--amber-dim) 3px 6px);
+}
+
+/* Refits: one heading per hull type */
+.refit-group + .refit-group {
+  margin-top: 16px;
+}
+
+/* The grade pips beside a part's name: filled = fitted */
+.grade-pips {
+  margin-left: 6px;
+  letter-spacing: 2px;
+  color: var(--teal);
+  font-size: 11px;
+}
+
+/* The perk line on a skill card: what EVERY level gives */
+.skill-perk {
+  margin: 6px 0 2px;
+  font-size: 12px;
+  color: var(--steel);
+}
+
+.skill-perk b {
+  color: var(--teal);
+}
+
+/* Time played in the dev panel */
+.dev-played {
+  color: var(--amber);
+}
+
+.dev-hint {
+  font-size: 11px;
+  color: var(--steel-dim);
+}

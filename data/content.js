@@ -89,22 +89,29 @@ export const ITEMS = {
 // How much XP each level needs isn't listed here: it follows
 // RuneScape's formula, worked out in js/skills.js. (The balance
 // sheet's Levels tab uses the same formula.)
+// "perk" names what EVERY level gives (the numbers are in the
+// balance sheet; skills.js getLevelPerk adds them up), e.g.
+// "drill speed" -> "Every level: +0.5% drill speed".
 export const SKILLS = {
   mining: {
     name: "Mining",
-    description: "Send barges to asteroid fields to bring back ore. Levels unlock better mining ships and richer fields.",
+    description: "Send barges to asteroid fields to bring back ore. Levels unlock better mining ships, richer fields and ship refits, and every level makes your drills a little faster.",
+    perk: "drill speed",
   },
   trade: {
     name: "Trade",
-    description: "Haul goods to markets for better prices. Trade XP comes from freighters: tonnes delivered times the distance flown. Selling at home is instant but earns no XP. Levels unlock bigger freighters.",
+    description: "Haul goods to markets for better prices. Trade XP comes from freighters: tonnes delivered times the distance flown. Selling at home is instant but earns no XP. Levels unlock bigger freighters and freighter refits, and every level adds to what the hub pays.",
+    perk: "hub prices",
   },
   refining: {
     name: "Refining",
-    description: "Smelt ore into metal at the Anvil Station refinery, which opens at a Mining milestone. Metal sells for more than the ore it came from. Levels unlock recipes, extra refinery slots and faster batches.",
+    description: "Smelt ore into metal at the Anvil Station refinery, which opens at a Mining milestone. Metal sells for more than the ore it came from. Levels unlock recipes and extra refinery slots, and every level makes batches a little faster.",
+    perk: "refinery speed",
   },
   manufacturing: {
     name: "Manufacturing",
-    description: "Turn metal into components and assemblies at the Anvil Station workshop, which opens at a Refining milestone. Queue work orders: each runs a set number of batches, then the slot goes idle. Products sell for more than their metal. Levels unlock recipes, workshop slots, longer queues and faster batches.",
+    description: "Turn metal into components and assemblies at the Anvil Station workshop, which opens at a Refining milestone. Queue work orders: each runs a set number of batches, then the slot goes idle. Products sell for more than their metal. Levels unlock recipes, workshop slots and longer queues, and every level makes batches a little faster.",
+    perk: "workshop speed",
   },
 };
 
@@ -476,12 +483,43 @@ export const HOME = {
 // The name is a placeholder until the lore names it.
 // From the balance sheet (Settings tab):
 //   travelSeconds  one way, for a ship with speed 1.0
-//   tradeSeconds   time spent docked at the hub, selling
+// (Time docked at the hub is unloading time: see each hull
+// size's loadingRate in HULL_SIZES.)
 export const HUB = {
   name: "Merchant hub",
   description: "A busy trading post a few minutes' flight from home. Pays well for ore you bring in.",
   ...BALANCE.hub,
 };
+
+// LEVEL PERKS for Mining and Trade (balance sheet, Settings tab).
+// Refining and Manufacturing have theirs in REFINERY and WORKSHOP
+// (speedPerLevel). Each counts from level 1, so level 1 = +0%.
+//   miningDrillPerLevel    every mining ship drills this much faster
+//   tradeHubPricePerLevel  every hub sale pays this much more
+export const LEVEL_PERKS = BALANCE.levelPerks;
+
+// SHIP PARTS: the three parts ship upgrades improve. "stat" is
+// the ship stat the part's bonus adds to (see ship-upgrades.js).
+export const SHIP_PARTS = {
+  drill: { name: "Drill",      stat: "miningRate",    says: "mining rate" },
+  hold:  { name: "Cargo hold", stat: "cargoCapacity", says: "cargo" },
+  drive: { name: "Drive",      stat: "speed",         says: "speed" },
+};
+
+// SHIP UPGRADES: grades Mk I to Mk III of each part, per hull
+// TYPE (one purchase fits every ship of that type, now and later).
+// Numbers from the balance sheet's Ship upgrades tab:
+//   hull, part, grade (1-3), skill + level needed, credits,
+//   costs (products, {} for none), bonus (0.15 = +15%)
+// The name is built here, e.g. "Prospector drill Mk II".
+const GRADE_NAMES = { 1: "Mk I", 2: "Mk II", 3: "Mk III" };
+export const SHIP_UPGRADES = {};
+for (const [id, upgrade] of Object.entries(BALANCE.shipUpgrades)) {
+  SHIP_UPGRADES[id] = {
+    ...upgrade,
+    gradeName: GRADE_NAMES[upgrade.grade],
+  };
+}
 
 // HAUL MODES: how a freighter decides when to leave home.
 //   full      waits until it can fill its whole hold

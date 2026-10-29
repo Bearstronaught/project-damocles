@@ -13,7 +13,7 @@
 //   5. Start autosaving.
 // =============================================================
 
-import { RULES, ITEMS, FIELDS, SHIP_TYPES, SKILLS, HUB, HOME, HAUL_MODES, RECIPES, REFINERY, WORKSHOP_RECIPES, WORKSHOP, UPGRADES } from "../data/content.js";
+import { RULES, ITEMS, FIELDS, SHIP_TYPES, SKILLS, HUB, HOME, HAUL_MODES, RECIPES, REFINERY, WORKSHOP_RECIPES, WORKSHOP, UPGRADES, SHIP_UPGRADES, SHIP_PARTS } from "../data/content.js";
 import { createNewGame, findShip } from "./state.js";
 import { startMiningJob, startHaulJob, recallJob, resumeJob, getJobForShip } from "./jobs.js";
 import { advanceTo } from "./simulation.js";
@@ -31,9 +31,11 @@ import { getUnlocksAtLevel, getFieldUnlocksAtLevel, isFieldUnlocked } from "./sk
 import { setRecipe, getRefineJob, getRecipeUnlocksAtLevel, getSlotUnlocksAtLevel } from "./refinery.js";
 import { addOrder, cancelOrder, getWorkshopJob, getWorkshopRecipeUnlocksAtLevel, getWorkshopSlotUnlocksAtLevel, isQueueUnlockLevel, getQueueLimit, addStandingOrder, removeStandingOrder, getStandingOrders } from "./workshop.js";
 import { buyIndustryUpgrade, getUpgradeUnlocksAtLevel } from "./upgrades.js";
+import { buyShipUpgrade, getShipUpgradeUnlocksAtLevel, getUpgradeName } from "./ship-upgrades.js";
+import { getLevelPerk } from "./skills.js";
 import { saveGame, loadGame, deleteSave, applyOfflineProgress, exportSave, importSave } from "./save.js";
 import { showLevelBanner } from "./banner.js";
-import { setupUI, buildFleetViews, render, addLog, formatNumber, formatXp, formatTonnes, formatDuration, showDevPanel } from "./ui.js";
+import { setupUI, buildFleetViews, render, addLog, formatNumber, formatXp, formatTonnes, formatDuration, formatPercent, showDevPanel } from "./ui.js";
 
 
 // -------------------------------------------------------------
@@ -289,6 +291,19 @@ const actions = {
     refresh();
   },
 
+  // A ship refit (ship-upgrades.js): fits every ship of a type.
+  // Returns { ok } or { ok: false, reason } for the screen.
+  buyShipUpgrade(upgradeId) {
+    const result = buyShipUpgrade(state, upgradeId);
+    if (result.ok) {
+      const upgrade = SHIP_UPGRADES[upgradeId];
+      addLog(`Refit bought: ${getUpgradeName(upgrade)} (+${formatPercent(upgrade.bonus)} ${SHIP_PARTS[upgrade.part].says}). ` +
+        `Every ${SHIP_TYPES[upgrade.hull].name} gets it from its next trip.`, "fleet");
+      refresh();
+    }
+    return result;
+  },
+
   // Returns the save as one line of text (see save.js).
   exportSave() {
     return exportSave(state);
@@ -522,9 +537,10 @@ function describeCargo(cargo) {
 // getUnlockLines(skillId, level)
 // Short lines for everything one level unlocks, e.g.
 //   ["New ship: Excavator-class barge"]   or   [] for nothing.
-// Used by the level-up banner.
+// Used by the level-up banner. withPerk adds the level perk
+// line at the end (left off when several levels are combined).
 // -------------------------------------------------------------
-function getUnlockLines(skillId, level) {
+function getUnlockLines(skillId, level, withPerk = true) {
   const lines = [];
   for (const typeId of getUnlocksAtLevel(skillId, level)) {
     lines.push("New ship: " + SHIP_TYPES[typeId].name);
@@ -551,6 +567,9 @@ function getUnlockLines(skillId, level) {
   for (const upgradeId of getUpgradeUnlocksAtLevel(skillId, level)) {
     lines.push("New upgrade to buy: " + UPGRADES[upgradeId].name);
   }
+  for (const upgradeId of getShipUpgradeUnlocksAtLevel(skillId, level)) {
+    lines.push("New refit (Shipyard): " + getUpgradeName(SHIP_UPGRADES[upgradeId]));
+  }
   if (skillId === "manufacturing") {
     for (const recipeId of getWorkshopRecipeUnlocksAtLevel(level)) {
       lines.push("New recipe: " + WORKSHOP_RECIPES[recipeId].name);
@@ -562,7 +581,21 @@ function getUnlockLines(skillId, level) {
       lines.push("Longer queues: one more order per slot");
     }
   }
+  // Last, what every level gives: "+0.5% drill speed (now +4.5%)".
+  if (withPerk) {
+    lines.push(perkLine(skillId, level));
+  }
   return lines;
+}
+
+
+// -------------------------------------------------------------
+// perkLine(skillId, level)
+// The level perk as one line, e.g. "+0.5% drill speed (now +4.5%)".
+// -------------------------------------------------------------
+function perkLine(skillId, level) {
+  const perk = getLevelPerk(state, skillId, level);
+  return `+${formatPercent(perk.perLevel)} ${SKILLS[skillId].perk} (now +${formatPercent(perk.total)})`;
 }
 
 
@@ -575,7 +608,7 @@ function getUnlockLines(skillId, level) {
 // -------------------------------------------------------------
 function logLevelUps(skillId, levels, showBanners = true) {
   for (const level of levels) {
-    addLog(`${SKILLS[skillId].name} reached level ${level}.`, "level");
+    addLog(`${SKILLS[skillId].name} reached level ${level}: ${perkLine(skillId, level)}.`, "level");
 
     for (const typeId of getUnlocksAtLevel(skillId, level)) {
       addLog(`New ship unlocked: ${SHIP_TYPES[typeId].name}. It's now in the Shipyard.`, "level");
@@ -601,6 +634,9 @@ function logLevelUps(skillId, levels, showBanners = true) {
     }
     for (const upgradeId of getUpgradeUnlocksAtLevel(skillId, level)) {
       addLog(`New upgrade available: ${UPGRADES[upgradeId].name}. Find it under Upgrades on the Industry tab.`, "level");
+    }
+    for (const upgradeId of getShipUpgradeUnlocksAtLevel(skillId, level)) {
+      addLog(`New refit available: ${getUpgradeName(SHIP_UPGRADES[upgradeId])}. Find it under Refits on the Shipyard tab.`, "level");
     }
     if (skillId === "manufacturing") {
       for (const recipeId of getWorkshopRecipeUnlocksAtLevel(level)) {
@@ -709,7 +745,10 @@ function reportOfflineProgress(report, opening = null) {
   for (const [skillId, levels] of Object.entries(levelsGained)) {
     const highest = Math.max(...levels);
     // .flatMap joins each level's unlock list into one list
-    const unlocks = levels.flatMap((level) => getUnlockLines(skillId, level));
+    // (Each level's perk line is left off, and the total perk at
+    // the highest level is added once at the end.)
+    const unlocks = levels.flatMap((level) => getUnlockLines(skillId, level, false));
+    unlocks.push(perkLine(skillId, highest));
     showLevelBanner(`${SKILLS[skillId].name} level ${highest}`, unlocks);
   }
 }

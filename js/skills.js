@@ -9,7 +9,7 @@
 // if we change the curve later, everyone's levels update.
 // =============================================================
 
-import { SHIP_TYPES, FIELDS, RULES } from "../data/content.js";
+import { SHIP_TYPES, FIELDS, RULES, LEVEL_PERKS, REFINERY, WORKSHOP } from "../data/content.js";
 
 // The highest level (99, set in content.js).
 export const MAX_LEVEL = RULES.maxLevel;
@@ -165,4 +165,46 @@ export function getUnlocksAtLevel(skillId, level) {
 // -------------------------------------------------------------
 export function getFieldUnlocksAtLevel(level) {
   return Object.keys(FIELDS).filter((fieldId) => FIELDS[fieldId].unlockLevel === level);
+}
+
+
+// =============================================================
+// LEVEL PERKS (the bonus every level gives)
+// =============================================================
+
+// -------------------------------------------------------------
+// getMiningDrillPerk(state)
+// Mining's level perk: drills this much faster, e.g. 0.045 at
+// Mining 10 (+4.5%). Level 1 gives nothing; each level after
+// adds LEVEL_PERKS.miningDrillPerLevel.
+// -------------------------------------------------------------
+export function getMiningDrillPerk(state) {
+  return LEVEL_PERKS.miningDrillPerLevel * (getLevel(state, "mining") - 1);
+}
+
+// -------------------------------------------------------------
+// getTradeHubPerk(state)
+// Trade's level perk: hub sales pay this much more, e.g. 0.045
+// at Trade 10 (+4.5%).
+// -------------------------------------------------------------
+export function getTradeHubPerk(state) {
+  return LEVEL_PERKS.tradeHubPricePerLevel * (getLevel(state, "trade") - 1);
+}
+
+// -------------------------------------------------------------
+// getLevelPerk(state, skillId, level)
+// What EVERY level of a skill gives, for the screen:
+//   { perLevel: 0.005, total: 0.045 }   (at level 10)
+// "level" defaults to the player's level; the level-up banner
+// passes the level just reached. Each skill's perk counts from
+// level 1 (level 1 = +0%). The words are SKILLS[skillId].perk.
+// -------------------------------------------------------------
+export function getLevelPerk(state, skillId, level = getLevel(state, skillId)) {
+  const perLevel = {
+    mining: LEVEL_PERKS.miningDrillPerLevel,
+    trade: LEVEL_PERKS.tradeHubPricePerLevel,
+    refining: REFINERY.speedPerLevel,
+    manufacturing: WORKSHOP.speedPerLevel,
+  }[skillId];
+  return { perLevel: perLevel, total: perLevel * (level - 1) };
 }

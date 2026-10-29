@@ -16,17 +16,27 @@
 // and js/workshop.js - so they play out on the same timeline
 // as the ships.)
 //
-// A MINING trip has three phases, one after the other:
+// A MINING trip has four phases, one after the other:
 //   OUTBOUND  fly from home to the field
 //   MINING    fill the hold
-//   RETURNING fly home and unload the ore into the home hold
+//   RETURNING fly home
+//   UNLOADING move the ore into the home hold (it arrives at the end)
 //
 // A HAUL run (freighters) is a loop:
 //   WAITING   docked at home until there's ore to load
 //             (a full hold, or any ore at all - see HAUL_MODES)
+//   LOADING   move the cargo aboard (it leaves the hold at the start)
 //   OUTBOUND  fly the cargo to the merchant hub
-//   TRADING   dock at the hub and sell (paid at the END of this)
+//   TRADING   unload at the hub and sell (paid at the END of this)
 //   RETURNING fly home empty, then back to WAITING
+//
+// Loading and unloading take time by tonnes moved, at a rate set
+// by hull size (bigger hulls, bigger cargo doors - loadingRate in
+// HULL_SIZES), so a part load is quicker than a full one.
+//
+// Every trip is planned FRESH from the ship's current stats
+// (ship-upgrades.js), so a new level or upgrade shows up on the
+// ship's next trip. The trip already under way keeps its timings.
 //
 // A mining job looks like this:
 //   {
@@ -38,7 +48,9 @@
 //     outboundMs: 45000,               length of each phase (ms)
 //     miningMs: 60000,
 //     returnMs: 45000,
-//     durationMs: 150000,              the three added together
+//     unloadMs: 6000,
+//     durationMs: 156000,              the four added together
+//     orePerTrip: 120,                 tonnes it brings back (a full hold)
 //     repeat: true,                    start another trip when done?
 //   }
 //
@@ -47,19 +59,20 @@
 //     id, type: "haul", shipId, repeat: true,
 //     status: "waiting",       "waiting" at home, or "travelling"
 //     startedAt: 1712345678901, when the current run LEFT home
-//     outboundMs, tradeMs, returnMs, durationMs,
+//     loadMs, outboundMs, tradeMs, returnMs, durationMs,
 //     cargo: { iron_ore: 60 }, what's on board (null when empty)
 //     sold: false,             has this run's cargo been sold yet?
 //   }
 // =============================================================
 
-import { FIELDS, SHIP_TYPES, ITEMS, HUB, FLEET_XP_EXPONENT } from "../data/content.js";
+import { FIELDS, SHIP_TYPES, ITEMS, HUB, FLEET_XP_EXPONENT, HULL_SIZES } from "../data/content.js";
 import { addItem, findShip } from "./state.js";
 import { addXp, isFieldUnlocked } from "./skills.js";
 import { sellAtHub } from "./trade.js";
 import { startWaitingBatches, finishBatch } from "./refinery.js";
 import { startWaitingOrders, finishWorkshopBatch } from "./workshop.js";
 import { getSellable } from "./bonded.js";
+import { getShipStats } from "./ship-upgrades.js";
 
 
 // =============================================================
@@ -67,28 +80,46 @@ import { getSellable } from "./bonded.js";
 // =============================================================
 
 // -------------------------------------------------------------
-// getTripPlan(shipTypeId, fieldId)
-// Works out how long each phase of a MINING trip takes for this
-// kind of ship at this field, plus what one trip brings back.
-// Used to start jobs AND to show stats in the shipyard.
+// getLoadMs(shipTypeId, tonnes)
+// How long a ship of this type takes to load or unload this much
+// cargo, in ms. The rate comes from its hull size:
+//   Prospector (small, 20 t/s), 120 t  ->  6,000 ms (6 seconds)
+//   Excavator (medium, 40 t/s), 480 t  -> 12,000 ms
+//   0 t = no time.
 // -------------------------------------------------------------
-export function getTripPlan(shipTypeId, fieldId) {
-  const shipType = SHIP_TYPES[shipTypeId];
+export function getLoadMs(shipTypeId, tonnes) {
+  const rate = HULL_SIZES[SHIP_TYPES[shipTypeId].size].loadingRate;
+  return Math.round((tonnes / rate) * 1000);
+}
+
+
+// -------------------------------------------------------------
+// getTripPlan(state, shipTypeId, fieldId)
+// Works out one mining trip for a ship of this type, using its
+// stats RIGHT NOW (upgrades and the Mining level perk included -
+// see getShipStats in ship-upgrades.js).
+// -------------------------------------------------------------
+export function getTripPlan(state, shipTypeId, fieldId) {
+  const stats = getShipStats(state, shipTypeId);
   const field = FIELDS[fieldId];
 
   // Travel: a speed of 0.75 makes the trip take 1 ÷ 0.75 = 1.33x as long.
-  const travelMs = Math.round((field.travelSeconds / shipType.speed) * 1000);
+  const travelMs = Math.round((field.travelSeconds / stats.speed) * 1000);
 
   // Mining: minutes to fill the hold = cargo ÷ (tonnes per minute).
-  const miningMs = Math.round((shipType.cargoCapacity / shipType.miningRate) * 60 * 1000);
+  const miningMs = Math.round((stats.cargoCapacity / stats.miningRate) * 60 * 1000);
+
+  // Unloading a full hold at home.
+  const unloadMs = getLoadMs(shipTypeId, stats.cargoCapacity);
 
   return {
     outboundMs: travelMs,
     miningMs: miningMs,
     returnMs: travelMs,
-    durationMs: travelMs + miningMs + travelMs,
-    orePerTrip: shipType.cargoCapacity,
-    xpPerTrip: shipType.cargoCapacity / field.tonnesPerXp,   // e.g. 120 t ÷ 10 = 12 XP
+    unloadMs: unloadMs,
+    durationMs: travelMs + miningMs + travelMs + unloadMs,
+    orePerTrip: stats.cargoCapacity,
+    xpPerTrip: stats.cargoCapacity / field.tonnesPerXp,   // e.g. 120 t ÷ 10 = 12 XP
   };
 }
 
@@ -138,20 +169,26 @@ function getFleetXpShare(shipsWorking) {
 
 
 // -------------------------------------------------------------
-// getHaulPlan(shipTypeId)
-// How long each phase of a freighter's hub run takes.
+// getHaulPlan(state, shipTypeId, tonnes)
+// Works out one hub run for a freighter of this type carrying
+// "tonnes" (leave it out for a full hold), using its stats now.
+//   loadMs   loading at home      (by tonnes)
+//   tradeMs  unloading at the hub (by tonnes; it's paid at the end)
 // -------------------------------------------------------------
-export function getHaulPlan(shipTypeId) {
-  const shipType = SHIP_TYPES[shipTypeId];
-  const travelMs = Math.round((HUB.travelSeconds / shipType.speed) * 1000);
-  const tradeMs = HUB.tradeSeconds * 1000;
+export function getHaulPlan(state, shipTypeId, tonnes) {
+  const stats = getShipStats(state, shipTypeId);
+  // "??" means: use tonnes, unless it was left out.
+  const load = tonnes ?? stats.cargoCapacity;
+  const travelMs = Math.round((HUB.travelSeconds / stats.speed) * 1000);
+  const loadMs = getLoadMs(shipTypeId, load);
 
   return {
+    loadMs: loadMs,
     outboundMs: travelMs,
-    tradeMs: tradeMs,
+    tradeMs: loadMs,          // unloading takes as long as loading
     returnMs: travelMs,
-    durationMs: travelMs + tradeMs + travelMs,
-    capacity: shipType.cargoCapacity,
+    durationMs: loadMs + travelMs + loadMs + travelMs,
+    capacity: stats.cargoCapacity,
   };
 }
 
@@ -185,20 +222,16 @@ export function startMiningJob(state, shipId, fieldId, now) {
     return null;
   }
 
-  const plan = getTripPlan(ship.type, fieldId);
-
   const job = {
     id: "job-" + now + "-" + shipId,
     type: "mining",
     shipId: shipId,
     fieldId: fieldId,
     startedAt: now,
-    outboundMs: plan.outboundMs,
-    miningMs: plan.miningMs,
-    returnMs: plan.returnMs,
-    durationMs: plan.durationMs,
     repeat: true,                            // keep mining until recalled
   };
+  // The trip's timings and load (see planNextTrip below).
+  planNextTrip(state, job);
 
   state.jobs.push(job);
   return job;
@@ -223,7 +256,10 @@ export function startHaulJob(state, shipId, now) {
     return null;
   }
 
-  const plan = getHaulPlan(ship.type);
+  // A full run's timings, for now. The real ones are set when it
+  // loads up and leaves (departWaitingFreighters), once it's
+  // known how much cargo it took.
+  const plan = getHaulPlan(state, ship.type);
 
   const job = {
     id: "job-" + now + "-" + shipId,
@@ -231,6 +267,7 @@ export function startHaulJob(state, shipId, now) {
     shipId: shipId,
     status: "waiting",
     startedAt: now,
+    loadMs: plan.loadMs,
     outboundMs: plan.outboundMs,
     tradeMs: plan.tradeMs,
     returnMs: plan.returnMs,
@@ -245,6 +282,25 @@ export function startHaulJob(state, shipId, now) {
   // Ore already waiting? Then it loads and leaves right now.
   departWaitingFreighters(state, now);
   return job;
+}
+
+
+// -------------------------------------------------------------
+// planNextTrip(state, job)
+// Sets a mining job's timings and load for its next trip from
+// the ship's stats right now. Called when the job starts, and
+// again at the end of every trip, so an upgrade or level-up
+// counts from the very next trip.
+// -------------------------------------------------------------
+function planNextTrip(state, job) {
+  const ship = findShip(state, job.shipId);
+  const plan = getTripPlan(state, ship.type, job.fieldId);
+  job.outboundMs = plan.outboundMs;
+  job.miningMs = plan.miningMs;
+  job.returnMs = plan.returnMs;
+  job.unloadMs = plan.unloadMs;
+  job.durationMs = plan.durationMs;
+  job.orePerTrip = plan.orePerTrip;
 }
 
 
@@ -280,8 +336,11 @@ export function cancelJob(state, jobId) {
 //   Barge, outbound     turns round: the flight home takes as long
 //                       as it had flown out. No ore.
 //   Barge, at the field leaves now with what it has mined so far
-//                       (a part-full hold), then the normal flight.
+//                       (a part-full hold, quicker to unload),
+//                       then the normal flight.
 //   Barge, returning    carries on home and unloads as normal.
+//   Freighter, loading  still at the dock: the cargo goes back in
+//                       the hold and it stands down straight away.
 //   Freighter, outbound turns round and brings the cargo back.
 //   Freighter, at hub   finishes selling, then flies home.
 //   Freighter, returning carries on home.
@@ -316,26 +375,44 @@ export function recallJob(state, jobId, now) {
   // How far into this trip it is (kept within the trip).
   const at = Math.min(Math.max(now - job.startedAt, 0), job.durationMs);
 
+  // A freighter still loading hasn't left the dock: the cargo goes
+  // back in the hold (cancelJob does that) and it stands down.
+  // ("|| 0": runs saved before loading time existed have none.)
+  const loadMs = job.type === "haul" ? (job.loadMs || 0) : 0;
+  if (job.type === "haul" && at < loadMs) {
+    cancelJob(state, jobId);
+    return { mode: "stoodDown" };
+  }
+
   // Remember the normal timings, in case the player resumes.
   const original = {
     outboundMs: job.outboundMs,
     returnMs: job.returnMs,
     durationMs: job.durationMs,
   };
-  if (job.type === "mining") original.miningMs = job.miningMs;
+  if (job.type === "mining") {
+    original.miningMs = job.miningMs;
+    original.unloadMs = job.unloadMs;
+  }
   if (job.type === "haul") original.tradeMs = job.tradeMs;
+
+  // How long it has been FLYING out (a freighter loads first).
+  const flownOut = at - loadMs;
 
   let mode;
 
-  if (at < job.outboundMs) {
-    // STILL FLYING OUT: turn round. The trip becomes "fly out
-    // for 'at' ms, then fly back for 'at' ms", with no middle.
+  if (flownOut < job.outboundMs) {
+    // STILL FLYING OUT: turn round. The trip becomes "fly out for
+    // 'flownOut' ms, then fly back for the same", with no middle.
+    // (A freighter keeps its loading time at the start; its cargo
+    // goes back in the hold the moment it docks.)
     mode = "turnback";
-    job.outboundMs = at;
-    job.returnMs = at;
-    job.durationMs = at * 2;
+    job.outboundMs = flownOut;
+    job.returnMs = flownOut;
+    job.durationMs = loadMs + flownOut * 2;
     if (job.type === "mining") {
       job.miningMs = 0;
+      job.unloadMs = 0;            // nothing to unload
       job.amountOverride = 0;      // nothing mined
     } else {
       job.tradeMs = 0;
@@ -345,12 +422,12 @@ export function recallJob(state, jobId, now) {
     // AT THE FIELD: stop mining now, keep what's in the hold.
     mode = "leftEarly";
     const minedMs = at - job.outboundMs;
-    const capacity = SHIP_TYPES[findShip(state, job.shipId).type].cargoCapacity;
     // The hold fills evenly while mining, so half the time = half
     // the hold. Math.floor rounds down to whole tonnes.
-    job.amountOverride = Math.floor(capacity * (minedMs / job.miningMs));
+    job.amountOverride = Math.floor(job.orePerTrip * (minedMs / job.miningMs));
     job.miningMs = minedMs;
-    job.durationMs = job.outboundMs + minedMs + job.returnMs;
+    job.unloadMs = getLoadMs(findShip(state, job.shipId).type, job.amountOverride);   // a part load unloads quicker
+    job.durationMs = job.outboundMs + minedMs + job.returnMs + job.unloadMs;
   } else {
     // ALREADY HEADING HOME (or selling at the hub): carry on as
     // normal, just don't start another trip.
@@ -361,7 +438,7 @@ export function recallJob(state, jobId, now) {
   job.recall = { mode: mode, at: at, original: original };
 
   const amount = job.type === "mining"
-    ? (job.amountOverride ?? getTripPlan(findShip(state, job.shipId).type, job.fieldId).orePerTrip)
+    ? (job.amountOverride ?? job.orePerTrip)
     : null;
   // ("??" means: use the left side unless it's missing, then the right.)
 
@@ -388,15 +465,21 @@ export function resumeJob(state, jobId, now) {
   const { mode, at, original } = job.recall;
 
   if (mode === "turnback") {
-    // Where is it? It flew out for "at" ms, then has been heading
-    // home for (elapsed - at) ms, so it's this far out:
-    const elapsed = Math.min(Math.max(now - job.startedAt, 0), job.durationMs);
-    const distanceOut = Math.max(0, at - (elapsed - at));
+    // A freighter loaded before flying; a barge flies straight off.
+    const loadMs = job.type === "haul" ? (job.loadMs || 0) : 0;
 
-    // Put the normal trip back, and pretend it left home just
-    // long enough ago to be exactly where it is now.
+    // Where is it? It flew out for "flownOut" ms, then has been
+    // heading home for (flying time - flownOut) ms, so it's this
+    // far out:
+    const elapsed = Math.min(Math.max(now - job.startedAt, 0), job.durationMs);
+    const flownOut = at - loadMs;
+    const flying = Math.max(0, elapsed - loadMs);
+    const distanceOut = Math.max(0, flownOut - (flying - flownOut));
+
+    // Put the normal trip back, and pretend it set off just long
+    // enough ago to be exactly where it is now.
     Object.assign(job, original);
-    job.startedAt = now - distanceOut;
+    job.startedAt = now - loadMs - distanceOut;
     delete job.amountOverride;
     delete job.noSale;
   } else if (mode === "leftEarly") {
@@ -486,7 +569,7 @@ function departWaitingFreighters(state, time) {
     if (job.type !== "haul" || job.status !== "waiting") continue;
 
     const ship = findShip(state, job.shipId);
-    const capacity = SHIP_TYPES[ship.type].cargoCapacity;
+    const capacity = getShipStats(state, ship.type).cargoCapacity;
     const cargo = loadCargo(state, capacity, ship.haulMode || "full");
 
     if (cargo) {
@@ -494,6 +577,17 @@ function departWaitingFreighters(state, time) {
       job.startedAt = time;
       job.cargo = cargo;
       job.sold = false;
+
+      // Plan this run for what it actually loaded: a part load
+      // loads and unloads quicker. The stats are the ship's now,
+      // so an upgrade counts from the next run.
+      const tonnes = Object.values(cargo).reduce((sum, t) => sum + t, 0);
+      const plan = getHaulPlan(state, ship.type, tonnes);
+      job.loadMs = plan.loadMs;
+      job.outboundMs = plan.outboundMs;
+      job.tradeMs = plan.tradeMs;
+      job.returnMs = plan.returnMs;
+      job.durationMs = plan.durationMs;
     }
   }
 }
@@ -530,48 +624,67 @@ export function getJobProgress(job, now) {
 // Which phase the trip is in right now, and how full each
 // phase is, for the route tracker on screen. Returns:
 //   {
-//     phase: "outbound" | "mining" | "trading" | "returning" | "waiting",
+//     phase: one of the names below, or "waiting",
 //     msLeftInPhase: 12000,
-//     fills: [1, 0.4, 0],   how full each phase is, 0 to 1
+//     fills: [1, 0.4, 0, 0],   how full each phase is, 0 to 1
 //   }
+// The four phases, in order:
+//   barge:      outbound, mining, returning, unloading
+//   freighter:  loading, outbound, trading, returning
 // -------------------------------------------------------------
 export function getJobPhase(job, now) {
   // A freighter waiting at home hasn't started its run yet.
   if (job.type === "haul" && job.status === "waiting") {
-    return { phase: "waiting", msLeftInPhase: 0, fills: [0, 0, 0] };
+    return { phase: "waiting", msLeftInPhase: 0, fills: [0, 0, 0, 0] };
   }
 
-  // The middle phase is mining for barges, trading for freighters.
-  const middleMs = job.type === "haul" ? job.tradeMs : job.miningMs;
-  const middleName = job.type === "haul" ? "trading" : "mining";
+  // Each phase's name and length, in order. ("|| 0" covers trips
+  // saved before loading time existed.)
+  const phases = job.type === "haul"
+    ? [
+        ["loading", job.loadMs || 0],
+        ["outbound", job.outboundMs],
+        ["trading", job.tradeMs],
+        ["returning", job.returnMs],
+      ]
+    : [
+        ["outbound", job.outboundMs],
+        ["mining", job.miningMs],
+        ["returning", job.returnMs],
+        ["unloading", job.unloadMs || 0],
+      ];
 
   // Time into this trip, kept between 0 and the trip length.
   const elapsed = Math.min(Math.max(now - job.startedAt, 0), job.durationMs);
 
-  const outEnd = job.outboundMs;              // when outbound finishes
-  const middleEnd = job.outboundMs + middleMs; // when the middle phase finishes
-
-  // How full each phase is: "elapsed minus where the phase
-  // starts, divided by its length", kept between 0 and 1.
-  // A phase of length 0 (a recalled ship that never reached the
-  // field) counts as full once we're past it, so we never divide by 0.
-  const fill = (start, length) => {
-    if (length === 0) return elapsed >= start ? 1 : 0;
-    return Math.min(Math.max((elapsed - start) / length, 0), 1);
-  };
-  const fills = [
-    fill(0, job.outboundMs),
-    fill(outEnd, middleMs),
-    fill(middleEnd, job.returnMs),
-  ];
-
-  if (elapsed < outEnd) {
-    return { phase: "outbound", msLeftInPhase: outEnd - elapsed, fills };
+  // Walk through the phases, adding up where each one starts.
+  const fills = [];
+  let current = null;
+  let start = 0;
+  for (const [name, length] of phases) {
+    const end = start + length;
+    // How full: "elapsed minus where the phase starts, divided by
+    // its length", kept between 0 and 1. A phase of length 0 (a
+    // recalled ship that never reached the field) counts as full
+    // once we're past it, so we never divide by 0.
+    if (length === 0) {
+      fills.push(elapsed >= start ? 1 : 0);
+    } else {
+      fills.push(Math.min(Math.max((elapsed - start) / length, 0), 1));
+    }
+    // The first phase that hasn't finished is the one we're in.
+    if (current === null && elapsed < end) {
+      current = { phase: name, msLeftInPhase: end - elapsed };
+    }
+    start = end;
   }
-  if (elapsed < middleEnd) {
-    return { phase: middleName, msLeftInPhase: middleEnd - elapsed, fills };
+
+  // Past every phase: it's in the last moment of the last one.
+  if (current === null) {
+    const [lastName] = phases[phases.length - 1];
+    current = { phase: lastName, msLeftInPhase: 0 };
   }
-  return { phase: "returning", msLeftInPhase: job.durationMs - elapsed, fills };
+  return { ...current, fills };
 }
 
 
@@ -689,7 +802,7 @@ function findNextEvent(state, now) {
     } else if (job.type === "haul" && job.status === "travelling") {
       time = (job.sold || job.noSale)
         ? job.startedAt + job.durationMs                  // docks back home
-        : job.startedAt + job.outboundMs + job.tradeMs;   // sells at the hub
+        : job.startedAt + (job.loadMs || 0) + job.outboundMs + job.tradeMs;   // sells at the hub
     } else {
       continue;   // waiting, or a job type we don't know
     }
@@ -723,12 +836,12 @@ function runEvent(state, job, time) {
 
   // --- A mining trip finishes: unload ore, earn Mining XP ---
   if (job.type === "mining") {
-    const ship = findShip(state, job.shipId);
-    const plan = getTripPlan(ship.type, job.fieldId);
     const field = FIELDS[job.fieldId];
 
     // A full hold - unless it was recalled before filling up.
-    const amount = job.amountOverride ?? plan.orePerTrip;
+    // (The load was fixed when the trip was planned, so an upgrade
+    // bought mid-trip can't add ore the ship never mined.)
+    const amount = job.amountOverride ?? job.orePerTrip;
     // Full XP for the ore, times this ship's share of the fleet's XP.
     // Worked out BEFORE a recalled ship leaves the job list below.
     const xp = (amount / field.tonnesPerXp) * getMiningXpShare(state);
@@ -744,11 +857,11 @@ function runEvent(state, job, time) {
       // The next trip starts the moment this one ends, so no
       // time is lost between trips.
       job.startedAt += job.durationMs;
-      // A trip cut short (then resumed) is over: back to normal.
-      if (job.restoreAfterTrip) {
-        Object.assign(job, job.restoreAfterTrip);
-        delete job.restoreAfterTrip;
-      }
+      // Plan the next trip from the ship's stats NOW: a level just
+      // gained or an upgrade just bought counts from here. (This
+      // also puts a trip that was cut short back to normal.)
+      delete job.restoreAfterTrip;
+      planNextTrip(state, job);
     } else {
       // Recalled: it docks and stays docked.
       state.jobs = state.jobs.filter((j) => j !== job);

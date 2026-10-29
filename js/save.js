@@ -9,7 +9,7 @@
 // lives only in THIS browser on THIS device.
 // =============================================================
 
-import { RULES } from "../data/content.js";
+import { RULES, SHIP_TYPES } from "../data/content.js";
 import { SAVE_VERSION } from "./state.js";
 import { getTripPlan } from "./jobs.js";
 import { advanceTo } from "./simulation.js";
@@ -204,7 +204,8 @@ function looksLikeASave(state) {
     typeof state.clock === "object" && state.clock !== null &&
     typeof state.clock.speed === "number" &&
     typeof state.clock.realAt === "number" &&
-    typeof state.clock.gameAt === "number"
+    typeof state.clock.gameAt === "number" &&
+    typeof state.shipUpgrades === "object" && state.shipUpgrades !== null
   );
 }
 
@@ -261,11 +262,13 @@ function upgradeSave(state) {
       if (job.type !== "mining") continue;
       const ship = state.ships.find((s) => s.id === job.shipId);
       if (!ship) continue;
-      const plan = getTripPlan(ship.type, job.fieldId);
+      const plan = getTripPlan(state, ship.type, job.fieldId);
       job.outboundMs = plan.outboundMs;
       job.miningMs = plan.miningMs;
       job.returnMs = plan.returnMs;
+      job.unloadMs = plan.unloadMs;
       job.durationMs = plan.durationMs;
+      job.orePerTrip = plan.orePerTrip;
     }
     state.version = 3;
   }
@@ -375,7 +378,30 @@ function upgradeSave(state) {
     state.version = 13;
   }
 
-  // (Future: if (state.version === 13) { ...; state.version = 14; })
+  // --- Version 13 -> 14: ship upgrades, and loading time ---
+  // Nobody owns a ship upgrade yet. Trips already under way were
+  // planned before loading time existed, so they get none (0 ms)
+  // and finish exactly when they would have. Every trip after
+  // that is planned with loading time. A mining trip also now
+  // remembers its load: a full hold, as there were no upgrades.
+  if (state.version === 13) {
+    state.shipUpgrades = {};
+    for (const job of state.jobs) {
+      if (job.type === "mining") {
+        if (job.unloadMs === undefined) job.unloadMs = 0;
+        if (job.orePerTrip === undefined) {
+          const ship = state.ships.find((s) => s.id === job.shipId);
+          job.orePerTrip = SHIP_TYPES[ship.type].cargoCapacity;
+        }
+      }
+      if (job.type === "haul" && job.loadMs === undefined) {
+        job.loadMs = 0;
+      }
+    }
+    state.version = 14;
+  }
+
+  // (Future: if (state.version === 14) { ...; state.version = 15; })
 
   if (state.version > SAVE_VERSION) {
     // A save from a NEWER version of the game than this one.

@@ -29,7 +29,8 @@ import { createClock } from "./clock.js";
 //   Version 11: refinery and workshop upgrades, and part-tonnes
 //   Version 12: standing orders (the Control centre)
 //   Version 13: the game clock (playtest speed) and the playtest mark
-export const SAVE_VERSION = 13;
+//   Version 14: ship upgrades, and loading/unloading time on trips
+export const SAVE_VERSION = 14;
 
 
 // -------------------------------------------------------------
@@ -89,6 +90,10 @@ export function createNewGame() {
     // tonnes, so the half waits here until the next one tops it
     // up. See addItemWithCarry below.
     carry: {},
+
+    // Ship upgrades: the grade each hull type's parts have reached,
+    // e.g. { prospector: { drill: 2, hold: 1 } }. (ship-upgrades.js)
+    shipUpgrades: {},
 
     // Workshop standing orders, per slot, e.g.
     // { 0: [{ recipeId: "cargo_pod", target: 50 }] }. (workshop.js)

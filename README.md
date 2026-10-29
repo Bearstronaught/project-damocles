@@ -44,6 +44,7 @@ js/bonded.js        bonded stock: goods set aside so they're never sold
 js/refinery.js      the Anvil Station refinery: recipes, slots, batches
 js/workshop.js      the Anvil Station workshop: Manufacturing work orders and queues
 js/upgrades.js      refinery and workshop upgrades: buying them and adding up their effects
+js/ship-upgrades.js ship refits (drill, hold, drive, Mk I-III per hull type) and every ship's live stats
 js/playtest.js      the dev panel's tools (set levels, add goods or credits, jump an hour)
 js/dev-switch.js    the hidden dev mode switch (type "damocles", or tap the title 7 times)
 js/save.js          save, load, version upgrades, offline progress
@@ -70,6 +71,7 @@ The full design lives in the Project Damocles design doc (Claude Docs).
 
 Type `damocles` anywhere on the page (not in a text box), or tap the game title 7 times quickly on a phone, to show the playtest tools under the status strip. Do the same again to hide them (this also puts the speed back to 1×). The switch lives in this browser, not in the save.
 
+- **Played** shows game time played on this save (not real time).
 - **Speed** 1×, 2×, 5×, 10×, 60×: the game clock runs that much faster, offline time included. The 24-hour offline cap counts game time.
 - **Jump 1 hour**, **set a skill level**, **add credits**, **add goods**.
 

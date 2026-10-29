@@ -69,6 +69,13 @@
         <div class="dev-controls" id="dev-speeds"></div>
       </div>
 
+      <!-- Game time played on this save (not real time): the run
+           clock, which skips time past the offline cap -->
+      <div class="dev-row">
+        <span class="dev-label">Played</span>
+        <div class="dev-controls"><b class="dev-played" id="dev-played">0s</b> <span class="dev-hint">game time</span></div>
+      </div>
+
       <!-- Jump the game clock forward -->
       <div class="dev-row">
         <span class="dev-label">Time</span>
@@ -232,6 +239,21 @@
         <div id="shipyard-list" class="card-grid"></div>
         <!-- How many ships are still locked (text written by ui.js) -->
         <p id="shipyard-note" class="price-note"></p>
+      </div>
+
+      <!-- Refits: ship upgrades (ship-upgrades.js). One purchase fits
+           every ship of that type, now and later. One group per hull
+           type you own; one row per part (drill, hold, drive) showing
+           what's fitted and the next grade. Built by ui.js. -->
+      <div class="panel panel-wide">
+        <div class="panel-head">
+          <h2 class="panel-title">Refits</h2>
+          <span class="panel-tag" id="refits-tag"></span>
+        </div>
+        <p class="price-note">Each refit fits every ship of that type, including ones you buy later. Ships already out finish their trip first.</p>
+        <p class="order-message" id="refit-message" role="status"></p>
+        <div id="refits-list"></div>
+        <p class="price-note" id="refits-empty">Buy a ship to see its refits.</p>
       </div>
     </section>
 

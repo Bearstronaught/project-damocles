@@ -17,11 +17,12 @@
 // flicker and sometimes swallow clicks.)
 // =============================================================
 
-import { ITEMS, SHIP_TYPES, FIELDS, SKILLS, HULL_SIZES, COMMAND, HUB, HOME, HAUL_MODES, RECIPES, REFINERY, WORKSHOP_RECIPES, WORKSHOP, UPGRADES } from "../data/content.js";
+import { ITEMS, SHIP_TYPES, FIELDS, SKILLS, HULL_SIZES, COMMAND, HUB, HOME, HAUL_MODES, RECIPES, REFINERY, WORKSHOP_RECIPES, WORKSHOP, UPGRADES, SHIP_UPGRADES, SHIP_PARTS } from "../data/content.js";
 import { isOwned, isShown, canBuyIndustryUpgrade } from "./upgrades.js";
 import { gameNow, SPEEDS } from "./clock.js";
+import { getShipStats, getHullParts, getPartGrade, getPartBonus, getNextUpgrade, canBuyShipUpgrade, getUpgradeName, getHullShortName, findUpgrade } from "./ship-upgrades.js";
 import { getJobForShip, getJobPhase, getTripPlan, getHaulPlan, getOreInHold, getMiningXpShare } from "./jobs.js";
-import { getLevel, getLevelProgress, isShipTypeUnlocked, isFieldUnlocked } from "./skills.js";
+import { getLevel, getLevelProgress, isShipTypeUnlocked, isFieldUnlocked, getMiningDrillPerk, getTradeHubPerk, getLevelPerk } from "./skills.js";
 import { canBuyShip, canSellShip, getSellValue, getShipPrice, MAX_NAME_LENGTH } from "./shipyard.js";
 import { getShipPoints, getCommandCapacity, getCommandUsed, getNextUpgradeCost, canBuyUpgrade } from "./command.js";
 import { getCargoValue, getTradeXp } from "./trade.js";
@@ -102,6 +103,7 @@ export function setupUI(state, actions) {
   buildWorkshop(actions);
   buildUpgrades(actions);
   buildStationHold(actions);
+  buildRefits(actions);
   buildDevPanel(actions);
 }
 
@@ -301,23 +303,66 @@ function setupBackup(actions) {
 
 
 // -------------------------------------------------------------
-// statsList(typeId)
-// The full stat block for a ship type, as HTML: its hull stats,
-// then a small table of what a round trip to each field gives.
-// Used for both owned ships and the shipyard, so they always
-// match and can be compared.
+// statsBox(typeId)
+// An empty box for a ship type's stat block. render() fills it
+// with statsList() and refills it whenever the stats change (an
+// upgrade, or a level that raises a perk). Used for owned ships
+// and the shipyard, so they always match and can be compared.
 // -------------------------------------------------------------
-function statsList(typeId) {
+function statsBox(typeId) {
+  return `<div class="stats-box" data-stats="${typeId}"></div>`;
+}
+
+// -------------------------------------------------------------
+// renderStatsBoxes(state)
+// Refills every stat box whose numbers have changed. Each box
+// remembers a "key" made from the ship's stats and the levels
+// that feed them; if the key is the same as last time, nothing
+// is redrawn (rebuilding HTML 4 times a second would be wasteful
+// and would reset anything the player had scrolled).
+// -------------------------------------------------------------
+function renderStatsBoxes(state) {
+  for (const box of document.querySelectorAll("[data-stats]")) {
+    const typeId = box.dataset.stats;
+    const key = JSON.stringify(getShipStats(state, typeId)) +
+      getLevel(state, "trade") + "/" + getLevel(state, "mining");
+    if (box.dataset.key !== key) {
+      box.dataset.key = key;
+      box.innerHTML = statsList(state, typeId);
+    }
+  }
+}
+
+// -------------------------------------------------------------
+// bonusTag(bonus)
+// A small "+15%" tag after a stat that's been boosted by
+// upgrades or a level perk, or nothing when there's no bonus.
+// -------------------------------------------------------------
+function bonusTag(bonus) {
+  if (bonus <= 0) return "";
+  return ` <span class="stat-bonus">+${formatPercent(bonus)}</span>`;
+}
+
+// -------------------------------------------------------------
+// statsList(state, typeId)
+// The full stat block for a ship type, as HTML: its hull stats
+// (with any bonus shown), then a small table of what a round
+// trip to each field gives right now.
+// -------------------------------------------------------------
+function statsList(state, typeId) {
   const shipType = SHIP_TYPES[typeId];
   if (shipType.role === "freight") {
-    return freighterStats(typeId);
+    return freighterStats(state, typeId);
   }
   const sizeName = HULL_SIZES[shipType.size].name;
+  const stats = getShipStats(state, typeId);
+  // The drill's bonus includes the Mining level perk.
+  const drillBonus = getPartBonus(state, typeId, "drill") + getMiningDrillPerk(state);
 
   // One row per field: trip length, income and XP per hour.
   // data-field lets render() dim the fields that are locked.
   const fieldRows = Object.entries(FIELDS).map(([fieldId, field]) => {
-    const plan = getTripPlan(typeId, fieldId);
+    const plan = getTripPlan(state, typeId, fieldId);
     const price = ITEMS[field.yields].sellPrice;
     const tripsPerHour = (60 * 60 * 1000) / plan.durationMs;
 
@@ -336,9 +381,10 @@ function statsList(typeId) {
     <div class="stat-block">
       <dl class="stats">
         <dt>Hull</dt>         <dd>${sizeName} · ${getShipPoints(typeId)} cmd pt${getShipPoints(typeId) === 1 ? "" : "s"}</dd>
-        <dt>Cargo hold</dt>   <dd>${formatTonnes(shipType.cargoCapacity)}</dd>
-        <dt>Mining rate</dt>  <dd>${formatTonnes(shipType.miningRate)}/min</dd>
-        <dt>Drive speed</dt>  <dd>${shipType.speed.toFixed(2)}×</dd>
+        <dt>Cargo hold</dt>   <dd>${formatTonnes(stats.cargoCapacity)}${bonusTag(getPartBonus(state, typeId, "hold"))}</dd>
+        <dt>Mining rate</dt>  <dd>${formatTonnes(Math.round(stats.miningRate))}/min${bonusTag(drillBonus)}</dd>
+        <dt>Drive speed</dt>  <dd>${stats.speed.toFixed(2)}×${bonusTag(getPartBonus(state, typeId, "drive"))}</dd>
+        <dt>Unloading</dt>    <dd>${HULL_SIZES[shipType.size].loadingRate} t/s</dd>
       </dl>
       <table class="trip-table">
         <thead>
@@ -352,18 +398,20 @@ function statsList(typeId) {
 
 
 // -------------------------------------------------------------
-// freighterStats(typeId)
+// freighterStats(state, typeId)
 // A freighter's stat block: its hull, then what ONE full run to
-// the hub earns for each kind of ore, compared with selling the
-// same load at home.
+// the hub earns for each kind of goods (Trade perk included),
+// compared with selling the same load at home.
 // -------------------------------------------------------------
-function freighterStats(typeId) {
+function freighterStats(state, typeId) {
   const shipType = SHIP_TYPES[typeId];
   const sizeName = HULL_SIZES[shipType.size].name;
-  const plan = getHaulPlan(typeId);
+  const stats = getShipStats(state, typeId);
+  const plan = getHaulPlan(state, typeId);
+  const perk = getTradeHubPerk(state);
 
   const oreRows = Object.entries(ITEMS).map(([itemId, item]) => {
-    const hubCredits = plan.capacity * item.hubPrice;
+    const hubCredits = Math.round(plan.capacity * item.hubPrice * (1 + perk));
     const homeCredits = plan.capacity * item.sellPrice;
     return `
       <tr>
@@ -379,9 +427,11 @@ function freighterStats(typeId) {
     <div class="stat-block">
       <dl class="stats">
         <dt>Hull</dt>         <dd>${sizeName} · ${getShipPoints(typeId)} cmd pt${getShipPoints(typeId) === 1 ? "" : "s"}</dd>
-        <dt>Cargo hold</dt>   <dd>${formatTonnes(shipType.cargoCapacity)}</dd>
-        <dt>Drive speed</dt>  <dd>${shipType.speed.toFixed(2)}×</dd>
+        <dt>Cargo hold</dt>   <dd>${formatTonnes(stats.cargoCapacity)}${bonusTag(getPartBonus(state, typeId, "hold"))}</dd>
+        <dt>Drive speed</dt>  <dd>${stats.speed.toFixed(2)}×${bonusTag(getPartBonus(state, typeId, "drive"))}</dd>
+        <dt>Loading</dt>      <dd>${HULL_SIZES[shipType.size].loadingRate} t/s</dd>
         <dt>Hub run</dt>      <dd>${formatDuration(plan.durationMs)} round trip</dd>
+        <dt>Hub prices</dt>   <dd>${perk > 0 ? bonusTag(perk).trim() + " (Trade level)" : "Base"}</dd>
       </dl>
       <table class="trip-table">
         <thead>
@@ -396,17 +446,21 @@ function freighterStats(typeId) {
 
 // -------------------------------------------------------------
 // routeTracker()
-// The three-part bar showing a trip: out, mine (or trade), back.
-// Each segment's width is set later to match how long that
-// phase takes, so a long mining stop LOOKS long.
+// The four-part bar showing a trip, in order:
+//   barge:      out, mine, back, unload (at home)
+//   freighter:  load (at home), out, sell at the hub, back
+// Each segment's width and look are set later (setRoute below)
+// to match how long that phase takes, so a long mining stop
+// LOOKS long and the short loading stops look short.
 // -------------------------------------------------------------
 function routeTracker() {
   return `
     <div class="route" data-part="route">
       <div class="route-track">
-        <div class="seg seg-out"  data-part="seg-out"><div class="seg-fill"></div></div>
-        <div class="seg seg-mine" data-part="seg-mine"><div class="seg-fill"></div></div>
-        <div class="seg seg-back" data-part="seg-back"><div class="seg-fill"></div></div>
+        <div class="seg" data-part="seg-0"><div class="seg-fill"></div></div>
+        <div class="seg" data-part="seg-1"><div class="seg-fill"></div></div>
+        <div class="seg" data-part="seg-2"><div class="seg-fill"></div></div>
+        <div class="seg" data-part="seg-3"><div class="seg-fill"></div></div>
       </div>
       <div class="route-labels">
         <span>Home</span>
@@ -415,6 +469,24 @@ function routeTracker() {
       </div>
     </div>
   `;
+}
+
+
+// -------------------------------------------------------------
+// setRoute(card, segments)
+// Sizes and styles the four route segments. "segments" lists
+// [style, lengthMs] in order, e.g. for a barge:
+//   [["out", 45000], ["mine", 60000], ["back", 45000], ["dock", 6000]]
+// The style picks the colour (seg-out, seg-mine, seg-back,
+// seg-dock in style.css).
+// -------------------------------------------------------------
+function setRoute(card, segments) {
+  segments.forEach(([style, lengthMs], i) => {
+    const segment = part(card, "seg-" + i);
+    const className = "seg seg-" + style;
+    if (segment.className !== className) segment.className = className;
+    segment.style.flexGrow = lengthMs;
+  });
 }
 
 
@@ -630,7 +702,6 @@ function buildShipCard(ship, actions) {
   // Barges pick a field; freighters pick a haul mode.
   // (Freighters have no drill, so their specs skip it.)
   const picker = isFreighter ? haulModePicker() : destinationPicker();
-  const drill = isFreighter ? "" : ` · Drill <b>${formatTonnes(shipType.miningRate)}/min</b>`;
 
   // The card's layout. Parts we update later get a
   // "data-part" label so we can find them again.
@@ -644,10 +715,9 @@ function buildShipCard(ship, actions) {
       ${picker}
       ${routeTracker()}
       <div class="ship-status" data-part="status">Idle</div>
-      <div class="ship-specs">
-        Hold <b>${formatTonnes(shipType.cargoCapacity)}</b>${drill}
-        · Drive <b>${shipType.speed.toFixed(2)}×</b>
-      </div>
+      <!-- Hold, drill and drive, filled in by render (they change
+           with upgrades and levels) -->
+      <div class="ship-specs" data-part="specs"></div>
       <button class="btn" data-part="button">Dispatch</button>
     </div>
   `;
@@ -725,7 +795,7 @@ function buildOwnedList(state, actions) {
           <button class="btn btn-sell" data-part="sell"></button>
           <div class="sell-note" data-part="sell-note"></div>
         </div>
-        ${statsList(ship.type)}
+        ${statsBox(ship.type)}
       </div>
     `;
     rememberOpenState(row);
@@ -1091,7 +1161,7 @@ function buildShipyard(actions) {
       </div>
       <div class="yard-art">${getSchematic(shipType.art)}</div>
       <p class="ship-desc">${shipType.description}</p>
-      ${statsList(typeId)}
+      ${statsBox(typeId)}
       <dl class="stats stats-yard">
         <dt>Requires</dt>  <dd>${skillName} level ${shipType.unlockLevel}</dd>
         <dt>Next one</dt>  <dd data-part="price"></dd>
@@ -1143,6 +1213,12 @@ function buildSkillCards() {
       });
       unlocks.push({ level: WORKSHOP.openAtRefiningLevel, name: "Workshop (Industry tab)", kind: "Station", key: "workshop:open" });
     }
+    // Ship refits this skill's levels make available to buy
+    for (const [upgradeId, upgrade] of Object.entries(SHIP_UPGRADES)) {
+      if (upgrade.skill === skillId) {
+        unlocks.push({ level: upgrade.level, name: getUpgradeName(upgrade), kind: "Refit", key: "refit:" + upgradeId });
+      }
+    }
     // Upgrades this skill's levels make available to buy
     for (const [upgradeId, upgrade] of Object.entries(UPGRADES)) {
       if (upgrade.skill === skillId) {
@@ -1192,6 +1268,9 @@ function buildSkillCards() {
           <span data-part="xp"></span>
           <span class="expand-hint" aria-hidden="true"></span>
         </div>
+        <!-- What every level gives, e.g. "Every level: +0.5% drill
+             speed · now +4.5%" (filled in by renderSkills) -->
+        <p class="skill-perk" data-part="perk"></p>
       </summary>
       <div class="skill-detail">
         <p class="skill-desc">${skill.description}</p>
@@ -1212,6 +1291,9 @@ function buildSkillCards() {
 // =============================================================
 
 export function render(state, now) {
+  // Stat blocks first: the shipyard and fleet then dim the rows
+  // inside them, so the rows must exist.
+  renderStatsBoxes(state);
   renderCargo(state);
   renderStatusStrip(state, now);
   renderFleet(state, now);
@@ -1223,6 +1305,7 @@ export function render(state, now) {
   renderRefinery(state, now);
   renderWorkshop(state, now);
   renderUpgrades(state);
+  renderRefits(state);
 }
 
 
@@ -1273,6 +1356,13 @@ function renderCargo(state) {
     part(holdRow, "release").hidden = getBond(state, itemId) === 0;
   }
 
+  // The note under the table, with the Trade perk once it's earned.
+  const perk = getTradeHubPerk(state);
+  const note = `Selling here is instant at the home price. The ${HUB.name.toLowerCase()} pays the hub price` +
+    (perk > 0 ? ` (+${formatPercent(perk)} from your Trade level)` : "") +
+    `, but needs a freighter to haul the goods there. Only freighters earn Trade XP.`;
+  if (byId("hub-note").textContent !== note) byId("hub-note").textContent = note;
+
   const total = getCargoValue(state);
   byId("cargo-total").textContent = formatCreditsShort(total);
   byId("sell-all").disabled = total === 0;
@@ -1290,6 +1380,10 @@ function renderStatusStrip(state, now) {
   byId("speed-readout").hidden = state.clock.speed === 1;
   byId("speed-value").textContent = state.clock.speed + "×";
   byId("playtest-badge").hidden = !state.playtest;
+
+  // Dev panel: game time played on this save (simulation.js keeps
+  // this; time past the offline cap isn't played, so isn't counted).
+  byId("dev-played").textContent = formatDuration(state.simulatedMs);
 
   // Light up the speed button that's running (if the panel's shown).
   for (const button of document.querySelectorAll(".dev-speed")) {
@@ -1348,10 +1442,14 @@ function renderFleet(state, now) {
 
     // Segment widths: from the running job, or (when docked)
     // from the trip this ship WOULD make, as a preview.
-    const timing = job || getTripPlan(ship.type, fieldId);
-    part(card, "seg-out").style.flexGrow = timing.outboundMs;
-    part(card, "seg-mine").style.flexGrow = timing.miningMs;
-    part(card, "seg-back").style.flexGrow = timing.returnMs;
+    renderSpecs(state, ship, card);
+    const timing = job || getTripPlan(state, ship.type, fieldId);
+    setRoute(card, [
+      ["out", timing.outboundMs],
+      ["mine", timing.miningMs],
+      ["back", timing.returnMs],
+      ["dock", timing.unloadMs || 0],   // unloading at home
+    ]);
 
     const fills = part(card, "route").querySelectorAll(".seg-fill");
     const status = part(card, "status");
@@ -1371,6 +1469,10 @@ function renderFleet(state, now) {
       if (phase.phase === "outbound") text = `Outbound to ${fieldName} — arrives in ${timeLeft}`;
       if (phase.phase === "mining") text = `Mining ${fieldName} — hold full in ${timeLeft}`;
       if (phase.phase === "returning") text = `Returning home — docks in ${timeLeft}`;
+      if (phase.phase === "unloading") {
+        const load = job.amountOverride ?? job.orePerTrip;
+        text = `Unloading ${formatTonnes(load)} at ${HOME.name} — done in ${timeLeft}`;
+      }
       if (job.recall) text = recallStatus(state, job, now);
 
       status.textContent = text;
@@ -1423,23 +1525,35 @@ function recallStatus(state, job, now) {
   }
   // A barge: a part-full hold if it left the field early,
   // otherwise a full one.
-  const full = SHIP_TYPES[findShipType(state, job.shipId)].cargoCapacity;
-  const load = job.amountOverride ?? full;
+  const load = job.amountOverride ?? job.orePerTrip;
   return load === 0
     ? `Recalled — turning back empty, docks in ${docksIn}`
     : `Recalled — returning with ${formatTonnes(load)}, docks in ${docksIn}`;
 }
 
-// The ship type ID of one of the player's ships.
-function findShipType(state, shipId) {
-  return state.ships.find((ship) => ship.id === shipId).type;
+// -------------------------------------------------------------
+// renderSpecs(state, ship, card)
+// The one-line specs on a ship card, e.g.
+//   "Hold 138 t · Drill 144 t/min · Drive 1.10×"
+// from the ship's stats right now (upgrades and levels counted).
+// Only rewritten when it changes.
+// -------------------------------------------------------------
+function renderSpecs(state, ship, card) {
+  const stats = getShipStats(state, ship.type);
+  // Freighters have no drill, so their specs skip it.
+  const drill = stats.miningRate === undefined
+    ? ""
+    : ` · Drill <b>${formatTonnes(Math.round(stats.miningRate))}/min</b>`;
+  const html = `Hold <b>${formatTonnes(stats.cargoCapacity)}</b>${drill} · Drive <b>${stats.speed.toFixed(2)}×</b>`;
+  const specs = part(card, "specs");
+  if (specs.innerHTML !== html) specs.innerHTML = html;
 }
 
 
 // Every phase class a card can have, so each frame can clear
 // last frame's before adding the current one.
 const ALL_PHASE_CLASSES = ["phase-outbound", "phase-mining", "phase-trading",
-  "phase-returning", "phase-waiting", "busy"];
+  "phase-returning", "phase-waiting", "phase-loading", "phase-unloading", "busy"];
 
 
 // -------------------------------------------------------------
@@ -1449,8 +1563,9 @@ const ALL_PHASE_CLASSES = ["phase-outbound", "phase-mining", "phase-trading",
 // -------------------------------------------------------------
 function renderFreighterCard(state, ship, card, now) {
   const job = getJobForShip(state, ship.id);
-  const capacity = SHIP_TYPES[ship.type].cargoCapacity;
+  const capacity = getShipStats(state, ship.type).cargoCapacity;
   const mode = ship.haulMode || "full";
+  renderSpecs(state, ship, card);
 
   // Highlight the chosen haul mode.
   for (const modeButton of part(card, "modes").querySelectorAll(".dest-btn")) {
@@ -1460,10 +1575,13 @@ function renderFreighterCard(state, ship, card, now) {
   // The tracker's middle stop is the hub; its segments are
   // sized from the job, or from a planned run while docked.
   part(card, "route-field").textContent = HUB.name;
-  const timing = job || getHaulPlan(ship.type);
-  part(card, "seg-out").style.flexGrow = timing.outboundMs;
-  part(card, "seg-mine").style.flexGrow = timing.tradeMs;
-  part(card, "seg-back").style.flexGrow = timing.returnMs;
+  const timing = job || getHaulPlan(state, ship.type);
+  setRoute(card, [
+    ["dock", timing.loadMs || 0],   // loading at home
+    ["out", timing.outboundMs],
+    ["mine", timing.tradeMs],       // unloading and selling at the hub
+    ["back", timing.returnMs],
+  ]);
 
   const fills = part(card, "route").querySelectorAll(".seg-fill");
   const status = part(card, "status");
@@ -1494,8 +1612,9 @@ function renderFreighterCard(state, ship, card, now) {
       ? `Waiting for a full hold — ${formatTonnes(Math.min(ore, capacity))} of ${formatTonnes(capacity)} ready`
       : `Waiting for ore to load`;
   }
+  if (phase.phase === "loading") text = `Loading ${formatTonnes(tonnes)} at ${HOME.name} — leaves in ${timeLeft}`;
   if (phase.phase === "outbound") text = `Hauling ${formatTonnes(tonnes)} to the hub — arrives in ${timeLeft}`;
-  if (phase.phase === "trading") text = `Selling at the hub — done in ${timeLeft}`;
+  if (phase.phase === "trading") text = `Unloading and selling at the hub — done in ${timeLeft}`;
   if (phase.phase === "returning") text = `Returning home — docks in ${timeLeft}`;
   if (job.recall) text = recallStatus(state, job, now);
 
@@ -1670,11 +1789,16 @@ function renderShipyard(state) {
 
 // Each skill on the Skills screen
 function renderSkills(state) {
-  for (const skillId of Object.keys(SKILLS)) {
+  for (const [skillId, skill] of Object.entries(SKILLS)) {
     const card = byId("skill-" + skillId);
     const progress = getLevelProgress(state, skillId);
 
     part(card, "level").textContent = progress.level;
+
+    // The level perk: what every level adds, and the total so far.
+    const perk = getLevelPerk(state, skillId);
+    const perkHtml = `Every level: +${formatPercent(perk.perLevel)} ${skill.perk} · now <b>+${formatPercent(perk.total)}</b>`;
+    if (part(card, "perk").innerHTML !== perkHtml) part(card, "perk").innerHTML = perkHtml;
     part(card, "bar").style.width = (progress.fraction * 100) + "%";
     part(card, "total").textContent = formatNumber(progress.xp) + " XP total";
 
@@ -1711,6 +1835,7 @@ function renderSkills(state) {
       else if (kind === "wslot") unlocked = Number(id) < getWorkshopSlotCount(state);
       else if (kind === "queue") unlocked = getLevel(state, "manufacturing") >= Number(id);
       else if (kind === "upgrade") unlocked = getLevel(state, UPGRADES[id].skill) >= UPGRADES[id].level;
+      else if (kind === "refit") unlocked = getLevel(state, SHIP_UPGRADES[id].skill) >= SHIP_UPGRADES[id].level;
       else unlocked = Number(id) < getSlotCount(state);   // "slot:1" = the second slot
       line.classList.toggle("unlocked", unlocked);
       part(line, "state").textContent = unlocked ? "Unlocked" : "Locked";
@@ -2146,6 +2271,12 @@ function threeFigures(number) {
   return number.toLocaleString("en-GB", { maximumFractionDigits: decimals });
 }
 
+// A fraction as a percentage, to one decimal place at most:
+//   0.005 -> "0.5%"    0.045 -> "4.5%"    0.15 -> "15%"
+export function formatPercent(fraction) {
+  return (Math.round(fraction * 1000) / 10).toLocaleString("en-GB") + "%";
+}
+
 // XP can be a fraction (14.4 XP for a 1,440 cr sale), so show
 // one decimal place when needed:  6 -> "6",  14.4 -> "14.4"
 export function formatXp(xp) {
@@ -2164,6 +2295,143 @@ export function formatDuration(ms) {
   if (hours > 0) return `${hours}h ${minutes}m`;
   if (minutes > 0) return `${minutes}m ${seconds}s`;
   return `${seconds}s`;
+}
+
+
+// =============================================================
+// REFITS (ship upgrades, on the Shipyard tab)
+// -------------------------------------------------------------
+// One group per hull type, shown once you own one of that type.
+// One row per part (drill, hold, drive), showing the grade fitted
+// as pips (●●○ = Mk II of III) and the next grade to buy, with
+// its cost and a Buy button. Rules live in ship-upgrades.js.
+// =============================================================
+
+// -------------------------------------------------------------
+// buildRefits(actions)
+// Makes every group and row once; renderRefits fills them in.
+// -------------------------------------------------------------
+function buildRefits(actions) {
+  const list = byId("refits-list");
+  list.innerHTML = "";
+
+  for (const hullId of Object.keys(SHIP_TYPES)) {
+    const parts = getHullParts(hullId);
+    if (parts.length === 0) continue;   // a hull with no refits yet
+
+    const group = document.createElement("div");
+    group.className = "refit-group";
+    group.id = "refits-" + hullId;
+    group.innerHTML = `<h3 class="sub-title">${SHIP_TYPES[hullId].name}</h3>`;
+
+    for (const partId of parts) {
+      const row = document.createElement("div");
+      row.className = "upgrade-row";
+      row.id = `refit-${hullId}-${partId}`;
+      row.innerHTML = `
+        <div class="upgrade-text">
+          <div class="upgrade-name">${SHIP_PARTS[partId].name}<span class="grade-pips" data-part="pips"></span>
+            <span class="upgrade-level" data-part="level"></span></div>
+          <div class="upgrade-desc" data-part="desc"></div>
+          <div class="upgrade-cost" data-part="cost"></div>
+          <div class="upgrade-reason" data-part="reason"></div>
+        </div>
+        <button class="btn btn-small" data-part="buy">Buy</button>
+      `;
+      // The button buys whatever the NEXT grade is at the time of
+      // the click, so it's looked up then, not now.
+      part(row, "buy").addEventListener("click", () => {
+        const state = actions.getState();
+        const next = getNextUpgrade(state, hullId, partId);
+        if (!next) return;
+        const result = actions.buyShipUpgrade(next.id);
+        byId("refit-message").textContent = result.ok ? "" : `${getUpgradeName(next)}: ${result.reason}`;
+      });
+      group.appendChild(row);
+    }
+    list.appendChild(group);
+  }
+}
+
+// -------------------------------------------------------------
+// renderRefits(state)
+// Shows the groups for hull types you own, and fills each row:
+//   Drill ●○○  Mining 12
+//   Mk I fitted: +15% mining rate. Next: Mk II, another +15%.
+//   40 t wiring coils + 12,000 cr        [Buy]
+// -------------------------------------------------------------
+function renderRefits(state) {
+  let fitted = 0;
+  let total = 0;
+  let anyShown = false;
+
+  for (const hullId of Object.keys(SHIP_TYPES)) {
+    const group = byId("refits-" + hullId);
+    if (!group) continue;
+    const owned = state.ships.some((ship) => ship.type === hullId);
+    group.hidden = !owned;
+    if (owned) anyShown = true;
+
+    for (const partId of getHullParts(hullId)) {
+      const row = byId(`refit-${hullId}-${partId}`);
+      const grade = getPartGrade(state, hullId, partId);
+      // How many grades this part has (3: Mk I to Mk III).
+      let maxGrade = 0;
+      while (findUpgrade(hullId, partId, maxGrade + 1)) maxGrade++;
+      fitted += grade;
+      total += maxGrade;
+
+      const says = SHIP_PARTS[partId].says;
+      const bonus = getPartBonus(state, hullId, partId);
+      const next = getNextUpgrade(state, hullId, partId);
+      // ● for each grade fitted, ○ for each still to buy.
+      setText(part(row, "pips"), "●".repeat(grade) + "○".repeat(maxGrade - grade));
+
+      const nowText = grade === 0
+        ? "Stock part."
+        : `${findUpgrade(hullId, partId, grade).gradeName} fitted: +${Math.round(bonus * 100)}% ${says}.`;
+      const button = part(row, "buy");
+      const reason = part(row, "reason");
+
+      if (!next) {
+        // Top grade reached
+        row.classList.add("owned");
+        row.classList.remove("blocked");
+        setText(part(row, "desc"), nowText + " Fully upgraded.");
+        setText(part(row, "cost"), "");
+        setText(part(row, "level"), "");
+        setText(reason, "");
+        setText(button, "Done");
+        button.disabled = true;
+        continue;
+      }
+
+      row.classList.remove("owned");
+      setText(part(row, "level"), `${SKILLS[next.skill].name} ${next.level}`);
+      setText(part(row, "desc"), `${nowText} Next: ${next.gradeName}, +${Math.round(next.bonus * 100)}% ${says}.`);
+      // The cost, e.g. "40 t wiring coils + 12,000 cr"
+      const goods = Object.entries(next.costs)
+        .map(([itemId, tonnes]) => `${formatTonnes(tonnes)} ${ITEMS[itemId].name.toLowerCase()}`);
+      setText(part(row, "cost"), [...goods, formatNumber(next.credits) + " cr"].join(" + "));
+
+      const check = canBuyShipUpgrade(state, next.id);
+      setText(button, "Buy " + next.gradeName);
+      button.disabled = !check.ok;
+      row.classList.toggle("blocked", !check.ok);
+      setText(reason, check.ok ? "" : check.reason);
+    }
+  }
+  byId("refits-empty").hidden = anyShown;
+  byId("refits-tag").textContent = `${fitted} of ${total} fitted`;
+}
+
+// -------------------------------------------------------------
+// setText(element, text)
+// Changes an element's text only if it's different, so the
+// screen isn't rewritten 4 times a second for nothing.
+// -------------------------------------------------------------
+function setText(element, text) {
+  if (element.textContent !== text) element.textContent = text;
 }
 
 

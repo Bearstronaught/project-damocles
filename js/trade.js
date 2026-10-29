@@ -17,7 +17,7 @@
 // =============================================================
 
 import { ITEMS, TRADE, HUB } from "../data/content.js";
-import { addXp } from "./skills.js";
+import { addXp, getTradeHubPerk } from "./skills.js";
 import { getSellable } from "./bonded.js";
 
 
@@ -102,17 +102,23 @@ export function sellEverything(state) {
 // freighters are flying too (1 = all of it; see jobs.js).
 // The goods have already left the home hold when the ship was
 // loaded, so this only pays out - it doesn't touch the hold.
+// The Trade level perk adds to the whole sale: at Trade 10
+// (+4.5%), a 4,800 cr cargo pays 5,016 cr. It uses the level
+// BEFORE this sale's XP is added.
 // Returns { credits, xp, tonnes, newLevels }.
 // -------------------------------------------------------------
 export function sellAtHub(state, cargo, xpShare = 1) {
-  let credits = 0;
+  let value = 0;
   let tonnes = 0;
 
   // Object.entries gives pairs: ["iron_ore", 40]
   for (const [itemId, amount] of Object.entries(cargo)) {
-    credits += amount * getPrice(itemId, "hub");
+    value += amount * getPrice(itemId, "hub");
     tonnes += amount;
   }
+
+  // Add the Trade perk, rounded to whole credits.
+  const credits = Math.round(value * (1 + getTradeHubPerk(state)));
 
   state.credits += credits;
 
