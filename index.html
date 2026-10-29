@@ -196,6 +196,19 @@
         <div id="workshop-slots"></div>
       </div>
 
+      <!-- Upgrades for the refinery and workshop, paid in products
+           and credits. A <details> box opens and closes on a click.
+           Only owned upgrades and the next tier of each line are
+           listed (built by ui.js). -->
+      <details class="panel upgrades-panel" id="upgrades-panel" open>
+        <summary class="panel-head">
+          <h2 class="panel-title">Upgrades</h2>
+          <span class="panel-tag" id="upgrades-tag"></span>
+        </summary>
+        <p class="order-message" id="upgrade-message" role="status"></p>
+        <div id="upgrades-list"></div>
+      </details>
+
       <!-- What's in the station's hold, and BONDED stock: an amount
            of each item set aside so it's never sold (bonded.js).
            Selling itself is on the Command screen. -->

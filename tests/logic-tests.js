@@ -28,6 +28,11 @@ import { sellAll, sellEverything, getCargoValue, sellAtHub, getTradeXp, getPrice
 import { parseSave, applyOfflineProgress, exportSave, importSave } from "../js/save.js";
 import { advanceTo } from "../js/simulation.js";
 import { getBond, getSellable, getBondedInHold, setBond } from "../js/bonded.js";
+import { isOwned, getEffect, canBuyIndustryUpgrade, buyIndustryUpgrade, isShown } from "../js/upgrades.js";
+import { addItemWithCarry } from "../js/state.js";
+import { UPGRADES } from "../data/content.js";
+import { getMaxSlots, getBatchOutput } from "../js/refinery.js";
+import { getMaxOrderBatches } from "../js/workshop.js";
 import { XP_TABLE, getLevelForXp, getLevel, getLevelProgress, addXp, isShipTypeUnlocked, MAX_LEVEL } from "../js/skills.js";
 import { canBuyShip, buyShip, canSellShip, sellShip, getSellValue, renameShip, getShipPrice } from "../js/shipyard.js";
 import { getCommandCapacity, getCommandUsed, getNextUpgradeCost, buyUpgrade } from "../js/command.js";
@@ -2238,6 +2243,230 @@ test("Engine: with bonds set, 6 hours ticked or jumped end identical, and bonds 
   assert.deepEqual(ticked, jumped);
   assert.ok(jumped.inventory.iron_bar >= 90);                 // the freighters left the bond alone
   assert.ok(jumped.inventory.nickel_bar >= 60);
+});
+
+
+// =============================================================
+// UPGRADES (js/upgrades.js) and their effects
+// =============================================================
+
+// A game that can afford anything: plenty of every product and
+// credits, at the given Refining and Manufacturing levels.
+function richGame(refiningLevel, manufacturingLevel) {
+  const state = gameWithWorkshop(manufacturingLevel);
+  state.skills.refining.xp = XP_TABLE[refiningLevel];
+  state.credits = 10_000_000;
+  for (const itemId of Object.keys(ITEMS)) state.inventory[itemId] = 10_000;
+  return state;
+}
+
+test("Buying an upgrade takes its goods and credits, once", () => {
+  const state = richGame(8, 1);
+  const lining = UPGRADES.furnace_lining_1;
+  assert.equal(buyIndustryUpgrade(state, "furnace_lining_1").ok, true);
+  assert.equal(isOwned(state, "furnace_lining_1"), true);
+  assert.equal(state.inventory.hull_plating, 10_000 - lining.costs.hull_plating);
+  assert.equal(state.credits, 10_000_000 - lining.credits);
+  assert.match(buyIndustryUpgrade(state, "furnace_lining_1").reason, /Already owned/);
+  assert.equal(state.credits, 10_000_000 - lining.credits);   // not charged twice
+});
+
+test("Upgrades are refused for level, missing tier, goods and credits, with the reason", () => {
+  assert.match(canBuyIndustryUpgrade(richGame(8, 1), "precision_tooling_1").reason, /Manufacturing 3/);
+  assert.match(canBuyIndustryUpgrade(richGame(20, 1), "furnace_lining_2").reason, /Furnace lining I first/);
+  const poor = richGame(8, 1);
+  poor.inventory.hull_plating = 5;
+  assert.match(canBuyIndustryUpgrade(poor, "furnace_lining_1").reason, /Need 15 t more hull plating/);
+  const broke = richGame(8, 1);
+  broke.credits = 1000;
+  assert.match(canBuyIndustryUpgrade(broke, "furnace_lining_1").reason, /cr more/);
+  assert.equal(buyIndustryUpgrade(broke, "furnace_lining_1").ok, false);
+  assert.equal(broke.inventory.hull_plating, 10_000);           // a refusal takes nothing
+});
+
+test("Bonded goods can pay for upgrades", () => {
+  const state = richGame(8, 1);
+  state.inventory.hull_plating = 20;
+  setBond(state, "hull_plating", 20);
+  assert.equal(buyIndustryUpgrade(state, "furnace_lining_1").ok, true);
+});
+
+test("Only owned upgrades and the next tier of each line are shown", () => {
+  const state = richGame(40, 1);
+  assert.equal(isShown(state, "furnace_lining_1"), true);
+  assert.equal(isShown(state, "furnace_lining_2"), false);     // hidden until I is owned
+  buyIndustryUpgrade(state, "furnace_lining_1");
+  assert.equal(isShown(state, "furnace_lining_2"), true);
+  assert.equal(isShown(state, "furnace_lining_3"), false);
+});
+
+test("Furnace linings make refinery batches 10% faster each, on top of levels", () => {
+  const state = richGame(40, 1);
+  const base = getBatchMs(state, "iron_bar");
+  buyIndustryUpgrade(state, "furnace_lining_1");
+  assert.equal(getBatchMs(state, "iron_bar"), Math.round(base * 0.9));
+  buyIndustryUpgrade(state, "furnace_lining_2");
+  assert.equal(getBatchMs(state, "iron_bar"), Math.round(base * 0.8));
+});
+
+test("Improved yield: an iron bar batch makes 30 t, then 33 t, then 36 t", () => {
+  const state = richGame(30, 1);
+  assert.equal(getBatchOutput(state, "iron_bar"), 30);
+  buyIndustryUpgrade(state, "improved_yield_1");
+  assert.equal(getBatchOutput(state, "iron_bar"), 33);
+  buyIndustryUpgrade(state, "improved_yield_2");
+  assert.equal(getBatchOutput(state, "iron_bar"), 36);
+});
+
+test("Improved yield on steel: 49.5 t a batch, the half tonne carried, so 2 batches = 99 t", () => {
+  const state = richGame(15, 1);
+  state.skills.refining.xp = XP_TABLE[15];
+  state.upgrades.improved_yield_1 = true;                   // (owned; level checks aside)
+  state.inventory.steel = 0;
+  state.inventory.iron_ore = 120;
+  state.inventory.nickel_ore = 60;
+  setRecipe(state, 0, "steel", START);
+  advanceTo(state, START + 2 * getBatchMs(state, "steel"));
+  assert.equal(state.inventory.steel, 99);
+  assert.deepEqual(state.carry, {});                        // the halves made a whole tonne
+});
+
+test("Carrying part-tonnes: 1.5 t then 1.5 t adds 1 t then 2 t", () => {
+  const state = createNewGame();
+  assert.equal(addItemWithCarry(state, "iron_bar", 1.5), 1);
+  assert.equal(state.carry.iron_bar, 0.5);
+  assert.equal(addItemWithCarry(state, "iron_bar", 1.5), 2);
+  assert.equal(state.inventory.iron_bar, 3);
+  assert.deepEqual(state.carry, {});
+});
+
+test("Refinery slot 4 adds a fourth slot at Refining 50", () => {
+  const state = richGame(50, 1);
+  assert.equal(getSlotCount(state), 3);
+  assert.equal(getMaxSlots(), 4);
+  buyIndustryUpgrade(state, "refinery_slot_4");
+  assert.equal(getSlotCount(state), 4);
+  assert.equal(setRecipe(state, 3, "iron_bar", START), true);
+});
+
+test("Precision tooling makes workshop batches 10% faster", () => {
+  const state = richGame(8, 3);
+  const base = getWorkshopBatchMs(state, "hull_plating");
+  buyIndustryUpgrade(state, "precision_tooling_1");
+  assert.equal(getWorkshopBatchMs(state, "hull_plating"), Math.round(base * 0.9));
+});
+
+test("Scrap recovery: 20 plating batches use 570 t of bars instead of 600", () => {
+  const state = richGame(8, 7);
+  state.upgrades.scrap_recovery_1 = true;
+  state.inventory.iron_bar = 600;
+  addOrder(state, 0, "hull_plating", 20, START);
+  advanceTo(state, START + 20 * getWorkshopBatchMs(state, "hull_plating"));
+  assert.equal(state.inventory.hull_plating, 10_000 + 600);  // all 20 batches made
+  assert.equal(state.inventory.iron_bar, 30);                // 5% of 600 t came back
+});
+
+test("Bigger work orders: the order cap goes 20, 40, 60", () => {
+  const state = richGame(8, 32);
+  assert.equal(getMaxOrderBatches(state), 20);
+  assert.match(addOrder(state, 0, "hull_plating", 40, START).reason, /1 to 20/);
+  buyIndustryUpgrade(state, "bigger_orders_1");
+  assert.equal(addOrder(state, 0, "hull_plating", 40, START).ok, true);
+  buyIndustryUpgrade(state, "bigger_orders_2");
+  assert.equal(getMaxOrderBatches(state), 60);
+});
+
+test("Without the smart queue, a blocked first order holds up the queue", () => {
+  const state = gameWithWorkshop(5);
+  state.inventory.nickel_bar = 60;                           // metal for coils, none for plating
+  addOrder(state, 0, "hull_plating", 1, START);
+  addOrder(state, 0, "wiring_coils", 1, START);
+  assert.equal(getWorkshopJob(state, 0).status, "waiting");
+  advanceTo(state, START + HOUR);
+  assert.equal(state.inventory.wiring_coils || 0, 0);
+});
+
+test("With the smart queue, the next order with metal runs, and nothing is reordered", () => {
+  const state = gameWithWorkshop(14);
+  state.upgrades.smart_queue = true;
+  state.inventory.nickel_bar = 60;                           // enough for 2 coil batches
+  addOrder(state, 0, "hull_plating", 1, START);              // blocked: no iron bars
+  addOrder(state, 0, "wiring_coils", 2, START);
+  const job = getWorkshopJob(state, 0);
+  assert.equal(job.status, "working");
+  assert.equal(job.runningIndex, 1);                         // the coils order is running
+  assert.equal(job.orders[0].recipeId, "hull_plating");      // the plating order kept its place
+
+  const coilsMs = getWorkshopBatchMs(state, "wiring_coils");
+  advanceTo(state, START + 2 * coilsMs);
+  assert.equal(state.inventory.wiring_coils, 60);            // both coil batches made
+  assert.equal(job.orders.length, 1);                        // the coil order is done and gone
+  assert.equal(job.orders[0].recipeId, "hull_plating");      // plating still waiting, still first
+
+  state.inventory.iron_bar = 30;                             // its metal arrives...
+  advanceTo(state, START + 2 * coilsMs + SECOND);
+  assert.equal(job.status, "working");                       // ...and it picks up again
+  assert.equal(job.runningIndex, 0);
+});
+
+test("Smart queue: cancelling the first order while the second runs keeps the batch going", () => {
+  const state = gameWithWorkshop(14);
+  state.upgrades.smart_queue = true;
+  state.inventory.nickel_bar = 30;
+  addOrder(state, 0, "hull_plating", 1, START);
+  addOrder(state, 0, "wiring_coils", 1, START);
+  cancelOrder(state, 0, 0, START + SECOND);                  // cancel the blocked plating order
+  const job = getWorkshopJob(state, 0);
+  assert.equal(job.status, "working");
+  assert.equal(job.runningIndex, 0);                         // the coils order moved up to first
+  assert.equal(job.startedAt, START);                        // its batch wasn't restarted
+  advanceTo(state, START + getWorkshopBatchMs(state, "wiring_coils"));
+  assert.equal(state.inventory.wiring_coils, 30);
+});
+
+test("Every upgrade's goods, skill and prerequisite exist", () => {
+  for (const [id, upgrade] of Object.entries(UPGRADES)) {
+    for (const itemId of Object.keys(upgrade.costs)) assert.ok(ITEMS[itemId], `${id} costs unknown item ${itemId}`);
+    assert.ok(state_skills_exist(upgrade.skill), `${id} uses unknown skill ${upgrade.skill}`);
+    if (upgrade.requires !== null) assert.ok(UPGRADES[upgrade.requires], `${id} requires unknown ${upgrade.requires}`);
+  }
+  assert.deepEqual(Object.keys(UPGRADES).sort(), Object.keys(BALANCE_FILE.upgrades).sort());
+});
+function state_skills_exist(skillId) { return createNewGame().skills[skillId] !== undefined; }
+
+test("A version 10 save gains no upgrades and no part-tonnes", () => {
+  const oldSave = {
+    version: 10, credits: 100, inventory: { iron_bar: 30 }, bonded: {}, commandUpgrades: 0, nextShipNumber: 2,
+    ships: [{ id: "ship-1", name: "Rusty Pick", type: "prospector", destination: "inner_belt" }],
+    skills: { mining: { xp: 0 }, trade: { xp: 0 }, refining: { xp: 0 }, manufacturing: { xp: 0 } },
+    jobs: [], lastSavedAt: START, simulatedUpTo: START, simulatedMs: 0,
+  };
+  const state = parseSave(JSON.stringify(oldSave));
+  assert.equal(state.version, SAVE_VERSION);
+  assert.deepEqual(state.upgrades, {});
+  assert.deepEqual(state.carry, {});
+});
+
+test("Engine: 6 hours with every upgrade and a smart queue, ticked or jumped, end identical", () => {
+  function upgradedEmpire() {
+    const state = busyEmpire();
+    for (const id of Object.keys(UPGRADES)) state.upgrades[id] = true;   // all of them
+    state.skills.manufacturing.xp = XP_TABLE[14];
+    // A plating order (needs iron bars, which the refinery makes)
+    // ahead of a coils order (nickel bars): the smart queue will
+    // keep switching between them as metal comes and goes.
+    addOrder(state, 0, "hull_plating", 20, START);
+    addOrder(state, 0, "wiring_coils", 20, START);
+    return state;
+  }
+  const jumped = upgradedEmpire();
+  advanceTo(jumped, START + 6 * HOUR);
+  const ticked = upgradedEmpire();
+  for (let t = 250; t <= 6 * HOUR; t += 250) {
+    advanceTo(ticked, START + t);
+  }
+  assert.ok(jumped.skills.manufacturing.xp > XP_TABLE[14]);  // the workshop really ran
+  assert.deepEqual(ticked, jumped);
 });
 
 // -------------------------------------------------------------

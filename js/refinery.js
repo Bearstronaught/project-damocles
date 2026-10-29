@@ -38,7 +38,8 @@
 // =============================================================
 
 import { RECIPES, REFINERY, ITEMS } from "../data/content.js";
-import { addItem } from "./state.js";
+import { addItem, addItemWithCarry } from "./state.js";
+import { getEffect, getEffectMax } from "./upgrades.js";
 import { getLevel, addXp } from "./skills.js";
 
 
@@ -57,9 +58,10 @@ export function isRefineryOpen(state) {
 
 // -------------------------------------------------------------
 // getSlotCount(state)
-// How many refinery slots the player can use at their current
-// Refining level. With slotLevels [1, 10, 25]: level 1-9 = 1,
-// level 10-24 = 2, level 25+ = 3.
+// How many refinery slots the player can use. Most come with
+// Refining levels - with slotLevels [1, 10, 25]: level 1-9 = 1,
+// level 10-24 = 2, level 25+ = 3 - and upgrades can add more
+// (Refinery slot 4).
 // -------------------------------------------------------------
 export function getSlotCount(state) {
   // A closed refinery has no slots to use at all.
@@ -69,7 +71,17 @@ export function getSlotCount(state) {
   const level = getLevel(state, "refining");
   // .filter keeps the slot levels the player has reached;
   // .length counts them.
-  return REFINERY.slotLevels.filter((slotLevel) => level >= slotLevel).length;
+  const fromLevels = REFINERY.slotLevels.filter((slotLevel) => level >= slotLevel).length;
+  return fromLevels + getEffect(state, "refineSlot");
+}
+
+// -------------------------------------------------------------
+// getMaxSlots()
+// Every refinery slot that could ever exist: the level ones plus
+// any an upgrade can add. The screen draws a box for each.
+// -------------------------------------------------------------
+export function getMaxSlots() {
+  return REFINERY.slotLevels.length + getEffectMax("refineSlot");
 }
 
 // The Refining level a slot unlocks at (slot 0 = the first).
@@ -107,18 +119,33 @@ export function getSlotUnlocksAtLevel(level) {
 
 // -------------------------------------------------------------
 // getBatchMs(state, recipeId)
-// Batch time in milliseconds at the player's Refining level.
-// Each level above 1 makes batches speedPerLevel faster:
-//   level 1:  60s x 1.000 = 60s
-//   level 11: 60s x 0.950 = 57s   (10 levels x 0.5% = 5% faster)
+// Batch time in milliseconds. Two things make it shorter, and
+// they MULTIPLY:
+//   Refining level:  each level above 1 is speedPerLevel faster
+//   Furnace linings: each one is 10% faster (upgrades.js)
+//   level 1, no lining:   60s x 1.000         = 60s
+//   level 11, no lining:  60s x 0.950         = 57s
+//   level 11, 1 lining:   60s x 0.950 x 0.90  = 51.3s
 // -------------------------------------------------------------
 export function getBatchMs(state, recipeId) {
   const level = getLevel(state, "refining");
-  const speedUp = REFINERY.speedPerLevel * (level - 1);
+  const levelFactor = 1 - REFINERY.speedPerLevel * (level - 1);
+  const upgradeFactor = 1 - getEffect(state, "refineSpeed");
   // Never let a batch get shorter than a tenth of its normal
   // time, even if someone sets a huge speed bonus in the sheet.
-  const factor = Math.max(0.1, 1 - speedUp);
+  const factor = Math.max(0.1, levelFactor * upgradeFactor);
   return Math.round(RECIPES[recipeId].seconds * 1000 * factor);
+}
+
+// -------------------------------------------------------------
+// getBatchOutput(state, recipeId)
+// Tonnes of metal one batch makes. Improved yield adds 10% each:
+//   iron bars: 30 t, then 33 t, then 36 t
+// (Steel's 45 t becomes 49.5 t: the half tonne is carried over
+// to the next batch, so nothing is lost - see addItemWithCarry.)
+// -------------------------------------------------------------
+export function getBatchOutput(state, recipeId) {
+  return RECIPES[recipeId].outputAmount * (1 + getEffect(state, "refineYield"));
 }
 
 
@@ -254,7 +281,9 @@ export function startWaitingBatches(state, time) {
 export function finishBatch(state, job) {
   const recipe = RECIPES[job.recipeId];
 
-  addItem(state, recipe.output, recipe.outputAmount);
+  // Whole tonnes into the hold now; any part-tonne waits for the
+  // next batch (Improved yield can make 49.5 t of steel).
+  const made = addItemWithCarry(state, recipe.output, getBatchOutput(state, job.recipeId));
   const newLevels = addXp(state, "refining", recipe.xp);
 
   job.status = "waiting";
@@ -265,7 +294,7 @@ export function finishBatch(state, job) {
     slot: job.slot,
     recipeId: job.recipeId,
     itemId: recipe.output,
-    amount: recipe.outputAmount,
+    amount: made,
     trips: 1,                 // (batches - called trips so results add up the same way)
     skillId: "refining",
     xpGained: recipe.xp,

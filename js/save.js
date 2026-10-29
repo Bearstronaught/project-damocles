@@ -196,7 +196,9 @@ function looksLikeASave(state) {
     typeof state.lastSavedAt === "number" &&
     typeof state.simulatedUpTo === "number" &&
     typeof state.simulatedMs === "number" &&
-    typeof state.bonded === "object" && state.bonded !== null
+    typeof state.bonded === "object" && state.bonded !== null &&
+    typeof state.upgrades === "object" && state.upgrades !== null &&
+    typeof state.carry === "object" && state.carry !== null
   );
 }
 
@@ -343,7 +345,15 @@ function upgradeSave(state) {
     state.version = 10;
   }
 
-  // (Future: if (state.version === 10) { ...; state.version = 11; })
+  // --- Version 10 -> 11: upgrades and part-tonnes ---
+  // Nobody owns any upgrades yet.
+  if (state.version === 10) {
+    state.upgrades = {};
+    state.carry = {};
+    state.version = 11;
+  }
+
+  // (Future: if (state.version === 11) { ...; state.version = 12; })
 
   if (state.version > SAVE_VERSION) {
     // A save from a NEWER version of the game than this one.

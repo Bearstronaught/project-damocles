@@ -42,6 +42,7 @@ js/trade.js         selling goods for credits
 js/bonded.js        bonded stock: goods set aside so they're never sold
 js/refinery.js      the Anvil Station refinery: recipes, slots, batches
 js/workshop.js      the Anvil Station workshop: Manufacturing work orders and queues
+js/upgrades.js      refinery and workshop upgrades: buying them and adding up their effects
 js/save.js          save, load, version upgrades, offline progress
 js/ui.js            drawing the screens and handling button clicks
 js/fleet-groups.js  sorting ships into role groups (Mining, Freight) and their summaries

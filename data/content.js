@@ -346,6 +346,102 @@ export const WORKSHOP = BALANCE.workshop;
 
 
 // -------------------------------------------------------------
+// UPGRADES: bought on the Industry tab with products + credits.
+// -------------------------------------------------------------
+// Written here: the name and a short description of the effect.
+// From the balance sheet (Upgrades tab):
+//   building  "refinery" or "workshop" (where it shows)
+//   skill     which skill's level unlocks it
+//   level     the level needed
+//   requires  an upgrade that must be owned first (null = none),
+//             e.g. Furnace lining II needs Furnace lining I
+//   costs     goods taken from the hold, e.g. { hull_plating: 20 }
+//             (bonded goods count: they're kept for this)
+//   credits   credits it costs too
+//   effect    what it changes (js/upgrades.js adds them up):
+//     refineSpeed    refinery batches this much faster (0.1 = 10%)
+//     refineYield    this much more metal per refinery batch
+//     refineSlot     extra refinery slots
+//     workshopSpeed  workshop batches this much faster
+//     workshopScrap  this share of a workshop batch's metal back
+//     orderSize      this many more batches allowed in one order
+//     smartQueue     a blocked work order can be skipped
+//   value     how much of the effect (see above)
+export const UPGRADES = {
+  furnace_lining_1: {
+    name: "Furnace lining I",
+    description: "Refinery batches 10% faster.",
+    ...BALANCE.upgrades.furnace_lining_1,
+  },
+  improved_yield_1: {
+    name: "Improved yield I",
+    description: "Each refinery batch makes 10% more metal.",
+    ...BALANCE.upgrades.improved_yield_1,
+  },
+  furnace_lining_2: {
+    name: "Furnace lining II",
+    description: "Refinery batches another 10% faster.",
+    ...BALANCE.upgrades.furnace_lining_2,
+  },
+  improved_yield_2: {
+    name: "Improved yield II",
+    description: "Each refinery batch makes another 10% more metal.",
+    ...BALANCE.upgrades.improved_yield_2,
+  },
+  furnace_lining_3: {
+    name: "Furnace lining III",
+    description: "Refinery batches another 10% faster.",
+    ...BALANCE.upgrades.furnace_lining_3,
+  },
+  refinery_slot_4: {
+    name: "Refinery slot 4",
+    description: "A fourth refinery slot.",
+    ...BALANCE.upgrades.refinery_slot_4,
+  },
+  precision_tooling_1: {
+    name: "Precision tooling I",
+    description: "Workshop batches 10% faster.",
+    ...BALANCE.upgrades.precision_tooling_1,
+  },
+  scrap_recovery_1: {
+    name: "Scrap recovery I",
+    description: "5% of the metal in each workshop batch comes back to the hold.",
+    ...BALANCE.upgrades.scrap_recovery_1,
+  },
+  smart_queue: {
+    name: "Smart queue",
+    description: "An order waiting for metal no longer holds up the queue: the next order with metal runs instead.",
+    ...BALANCE.upgrades.smart_queue,
+  },
+  bigger_orders_1: {
+    name: "Bigger work orders I",
+    description: "One order can hold 20 more batches.",
+    ...BALANCE.upgrades.bigger_orders_1,
+  },
+  precision_tooling_2: {
+    name: "Precision tooling II",
+    description: "Workshop batches another 10% faster.",
+    ...BALANCE.upgrades.precision_tooling_2,
+  },
+  scrap_recovery_2: {
+    name: "Scrap recovery II",
+    description: "Another 5% of each workshop batch's metal comes back.",
+    ...BALANCE.upgrades.scrap_recovery_2,
+  },
+  bigger_orders_2: {
+    name: "Bigger work orders II",
+    description: "One order can hold another 20 batches.",
+    ...BALANCE.upgrades.bigger_orders_2,
+  },
+  precision_tooling_3: {
+    name: "Precision tooling III",
+    description: "Workshop batches another 10% faster.",
+    ...BALANCE.upgrades.precision_tooling_3,
+  },
+};
+
+
+// -------------------------------------------------------------
 // TRADE: how freighters earn Trade XP (Dan, 29 Oct).
 // -------------------------------------------------------------
 // Trade XP comes from hauling, measured like real freight:

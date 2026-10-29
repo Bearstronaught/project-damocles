@@ -17,7 +17,8 @@
 // flicker and sometimes swallow clicks.)
 // =============================================================
 
-import { ITEMS, SHIP_TYPES, FIELDS, SKILLS, HULL_SIZES, COMMAND, HUB, HOME, HAUL_MODES, RECIPES, REFINERY, WORKSHOP_RECIPES, WORKSHOP } from "../data/content.js";
+import { ITEMS, SHIP_TYPES, FIELDS, SKILLS, HULL_SIZES, COMMAND, HUB, HOME, HAUL_MODES, RECIPES, REFINERY, WORKSHOP_RECIPES, WORKSHOP, UPGRADES } from "../data/content.js";
+import { isOwned, isShown, canBuyIndustryUpgrade } from "./upgrades.js";
 import { getJobForShip, getJobPhase, getTripPlan, getHaulPlan, getOreInHold, getMiningXpShare } from "./jobs.js";
 import { getLevel, getLevelProgress, isShipTypeUnlocked, isFieldUnlocked } from "./skills.js";
 import { canBuyShip, canSellShip, getSellValue, getShipPrice, MAX_NAME_LENGTH } from "./shipyard.js";
@@ -26,8 +27,8 @@ import { getCargoValue, getTradeXp } from "./trade.js";
 import { getBond, getSellable, getBondedInHold } from "./bonded.js";
 import { getSchematic } from "./art.js";
 import { getRoleGroups, describeGroup } from "./fleet-groups.js";
-import { isRefineryOpen, getRefineJob, getSlotCount, getSlotUnlockLevel, isRecipeUnlocked, getBatchMs, hasInputs, describeInputs } from "./refinery.js";
-import { isWorkshopOpen, getWorkshopSlotCount, getWorkshopSlotUnlockLevel, getQueueLimit, isWorkshopRecipeUnlocked, getWorkshopBatchMs, getWorkshopJob, hasWorkshopInputs, describeWorkshopInputs } from "./workshop.js";
+import { isRefineryOpen, getRefineJob, getSlotCount, getSlotUnlockLevel, isRecipeUnlocked, getBatchMs, getBatchOutput, hasInputs, describeInputs, getMaxSlots } from "./refinery.js";
+import { isWorkshopOpen, getWorkshopSlotCount, getWorkshopSlotUnlockLevel, getQueueLimit, isWorkshopRecipeUnlocked, getWorkshopBatchMs, getWorkshopJob, hasWorkshopInputs, describeWorkshopInputs, getMaxOrderBatches, getRunningIndex, hasSmartQueue } from "./workshop.js";
 
 // The screens that exist, in nav order. The first is the default.
 const SCREENS = ["command", "fleet", "shipyard", "industry", "skills"];
@@ -98,6 +99,7 @@ export function setupUI(state, actions) {
   buildSkillCards();
   buildRefinery(actions);
   buildWorkshop(actions);
+  buildUpgrades(actions);
   buildStationHold(actions);
 }
 
@@ -766,8 +768,9 @@ function buildRefinery(actions) {
     <option value="${recipeId}">${recipe.name}</option>
   `).join("");
 
-  // REFINERY.slotLevels has one entry per slot: [1, 10, 25]
-  REFINERY.slotLevels.forEach((unlockLevel, slot) => {
+  // One box per slot that could ever exist: the level slots
+  // ([1, 10, 25]) plus any an upgrade adds (slot 4).
+  for (let slot = 0; slot < getMaxSlots(); slot++) {
     const box = document.createElement("div");
     box.className = "refine-slot";
     box.id = "refine-slot-" + slot;
@@ -796,7 +799,7 @@ function buildRefinery(actions) {
     });
 
     area.appendChild(box);
-  });
+  }
 }
 
 
@@ -876,6 +879,99 @@ function buildWorkshop(actions) {
 
     area.appendChild(box);
   });
+}
+
+
+// -------------------------------------------------------------
+// buildUpgrades(actions)
+// One row per upgrade, under a heading for the refinery and one
+// for the workshop. Each row has the name, what it does, its
+// cost, and a Buy button. render() hides rows that aren't owned
+// or next in their line, and greys out what can't be bought yet.
+// -------------------------------------------------------------
+function buildUpgrades(actions) {
+  const list = byId("upgrades-list");
+  list.innerHTML = "";
+
+  for (const building of ["refinery", "workshop"]) {
+    const heading = document.createElement("h3");
+    heading.className = "sub-title";
+    heading.textContent = building === "refinery" ? "Refinery" : "Workshop";
+    list.appendChild(heading);
+
+    // Upgrades for this building, lowest level first
+    const ids = Object.keys(UPGRADES)
+      .filter((id) => UPGRADES[id].building === building)
+      .sort((a, b) => UPGRADES[a].level - UPGRADES[b].level);
+
+    for (const upgradeId of ids) {
+      const upgrade = UPGRADES[upgradeId];
+      // The cost, e.g. "20 t hull plating + 15,000 cr"
+      const goods = Object.entries(upgrade.costs)
+        .map(([itemId, tonnes]) => `${formatTonnes(tonnes)} ${ITEMS[itemId].name.toLowerCase()}`);
+      const cost = [...goods, formatNumber(upgrade.credits) + " cr"].join(" + ");
+
+      const row = document.createElement("div");
+      row.className = "upgrade-row";
+      row.id = "upgrade-" + upgradeId;
+      row.innerHTML = `
+        <div class="upgrade-text">
+          <div class="upgrade-name">${upgrade.name}
+            <span class="upgrade-level">${SKILLS[upgrade.skill].name} ${upgrade.level}</span></div>
+          <div class="upgrade-desc">${upgrade.description}</div>
+          <div class="upgrade-cost">${cost}</div>
+          <div class="upgrade-reason" data-part="reason"></div>
+        </div>
+        <button class="btn btn-small" data-part="buy">Buy</button>
+      `;
+      part(row, "buy").addEventListener("click", () => {
+        const result = actions.buyIndustryUpgrade(upgradeId);
+        byId("upgrade-message").textContent = result.ok ? "" : `${upgrade.name}: ${result.reason}`;
+      });
+      list.appendChild(row);
+    }
+  }
+}
+
+
+// -------------------------------------------------------------
+// renderUpgrades(state)
+// Shows owned upgrades (marked Owned) and the next tier of each
+// line; hides later tiers. The Buy button is only clickable when
+// the upgrade can be bought; otherwise it says why on the row.
+// -------------------------------------------------------------
+function renderUpgrades(state) {
+  // Nothing to upgrade until the refinery is open.
+  const panel = byId("upgrades-panel");
+  panel.hidden = !isRefineryOpen(state);
+
+  let owned = 0;
+  for (const upgradeId of Object.keys(UPGRADES)) {
+    const row = byId("upgrade-" + upgradeId);
+    row.hidden = !isShown(state, upgradeId);
+    const button = part(row, "buy");
+    const reason = part(row, "reason");
+
+    if (isOwned(state, upgradeId)) {
+      owned++;
+      row.classList.add("owned");
+      if (button.textContent !== "Owned") button.textContent = "Owned";
+      button.disabled = true;
+      reason.textContent = "";
+      continue;
+    }
+    row.classList.remove("owned");
+    const check = canBuyIndustryUpgrade(state, upgradeId);
+    if (button.textContent !== "Buy") button.textContent = "Buy";
+    button.disabled = !check.ok;
+    // A row that can't be bought yet says why under its cost,
+    // e.g. "Need 12 t more hull plating."
+    row.classList.toggle("blocked", !check.ok);
+    if (reason.textContent !== (check.ok ? "" : check.reason)) {
+      reason.textContent = check.ok ? "" : check.reason;
+    }
+  }
+  byId("upgrades-tag").textContent = `${owned} of ${Object.keys(UPGRADES).length} owned`;
 }
 
 
@@ -1003,6 +1099,12 @@ function buildSkillCards() {
       });
       unlocks.push({ level: WORKSHOP.openAtRefiningLevel, name: "Workshop (Industry tab)", kind: "Station", key: "workshop:open" });
     }
+    // Upgrades this skill's levels make available to buy
+    for (const [upgradeId, upgrade] of Object.entries(UPGRADES)) {
+      if (upgrade.skill === skillId) {
+        unlocks.push({ level: upgrade.level, name: upgrade.name, kind: "Upgrade", key: "upgrade:" + upgradeId });
+      }
+    }
     if (skillId === "manufacturing") {
       for (const [recipeId, recipe] of Object.entries(WORKSHOP_RECIPES)) {
         unlocks.push({ level: recipe.unlockLevel, name: recipe.name, kind: "Recipe", key: "wrecipe:" + recipeId });
@@ -1076,6 +1178,7 @@ export function render(state, now) {
   renderSkills(state);
   renderRefinery(state, now);
   renderWorkshop(state, now);
+  renderUpgrades(state);
 }
 
 
@@ -1535,6 +1638,7 @@ function renderSkills(state) {
       else if (kind === "wrecipe") unlocked = isWorkshopRecipeUnlocked(state, id);
       else if (kind === "wslot") unlocked = Number(id) < getWorkshopSlotCount(state);
       else if (kind === "queue") unlocked = getLevel(state, "manufacturing") >= Number(id);
+      else if (kind === "upgrade") unlocked = getLevel(state, UPGRADES[id].skill) >= UPGRADES[id].level;
       else unlocked = Number(id) < getSlotCount(state);   // "slot:1" = the second slot
       line.classList.toggle("unlocked", unlocked);
       part(line, "state").textContent = unlocked ? "Unlocked" : "Locked";
@@ -1554,14 +1658,14 @@ function renderRefinery(state, now) {
   const unlockedSlots = getSlotCount(state);   // 0 while closed
 
   byId("refinery-tag").textContent = open
-    ? `${unlockedSlots} of ${REFINERY.slotLevels.length} slots`
+    ? `${unlockedSlots} of ${getMaxSlots()} slots`
     : "Closed";
   byId("refinery-note").textContent = open
     ? ""
     : `The refinery opens at Mining ${REFINERY.openAtMiningLevel}. Until then, sell your ore on the Command screen.`;
   byId("refinery-note").hidden = open;
 
-  REFINERY.slotLevels.forEach((unlockLevel, slot) => {
+  for (let slot = 0; slot < getMaxSlots(); slot++) {
     const box = byId("refine-slot-" + slot);
     const select = part(box, "recipe");
     const status = part(box, "status");
@@ -1575,12 +1679,17 @@ function renderRefinery(state, now) {
     if (select.disabled !== locked) select.disabled = locked;
     if (locked) {
       tag.textContent = "Locked";
-      status.textContent = open
-        ? `Unlocks at Refining ${getSlotUnlockLevel(slot)}`
-        : (slot === 0 ? `Opens with the refinery at Mining ${REFINERY.openAtMiningLevel}` : `Unlocks at Refining ${getSlotUnlockLevel(slot)}`);
+      if (slot >= REFINERY.slotLevels.length) {
+        // A slot that comes from an upgrade, not a level
+        status.textContent = "Needs the Refinery slot 4 upgrade (Upgrades, below)";
+      } else {
+        status.textContent = open
+          ? `Unlocks at Refining ${getSlotUnlockLevel(slot)}`
+          : (slot === 0 ? `Opens with the refinery at Mining ${REFINERY.openAtMiningLevel}` : `Unlocks at Refining ${getSlotUnlockLevel(slot)}`);
+      }
       specs.textContent = "";
       bar.style.width = "0%";
-      return;   // (inside forEach, "return" skips to the next slot)
+      continue;   // on to the next slot
     }
 
     // --- The recipe dropdown ---
@@ -1607,14 +1716,16 @@ function renderRefinery(state, now) {
       specs.textContent = "";
       bar.style.width = "0%";
       box.classList.remove("busy", "waiting");
-      return;
+      continue;
     }
 
     // --- What one batch takes and makes, e.g.
     //     "60 t iron ore → 30 t iron bars · 1m 0s · 8 XP" ---
     const recipe = RECIPES[job.recipeId];
+    // (Improved yield can make part-tonnes, e.g. 49.5 t of steel)
+    const output = Math.round(getBatchOutput(state, job.recipeId) * 10) / 10;
     specs.textContent =
-      `${describeInputs(job.recipeId, formatTonnes)} → ${formatTonnes(recipe.outputAmount)} ` +
+      `${describeInputs(job.recipeId, formatTonnes)} → ${output} t ` +
       `${ITEMS[recipe.output].name.toLowerCase()} · ${formatDuration(getBatchMs(state, job.recipeId))} · ${formatXp(recipe.xp)} XP`;
 
     if (job.status === "working") {
@@ -1633,7 +1744,7 @@ function renderRefinery(state, now) {
       box.classList.add("waiting");
       box.classList.remove("busy");
     }
-  });
+  }
 }
 
 
@@ -1705,7 +1816,7 @@ function renderWorkshop(state, now) {
     }
 
     const job = getWorkshopJob(state, slot);
-    setQueueList(queue, job, formatTonnes);
+    setQueueList(queue, job);
 
     // --- Idle: no orders at all ---
     if (!job) {
@@ -1718,9 +1829,16 @@ function renderWorkshop(state, now) {
     }
     box.classList.remove("idle");
 
-    const order = job.orders[0];
+    // The order being worked on. Usually the first; with the smart
+    // queue it can be a later one while the first waits for metal.
+    const order = job.status === "working" ? job.orders[getRunningIndex(job)] : job.orders[0];
     const recipe = WORKSHOP_RECIPES[order.recipeId];
     const batchNumber = order.done + 1;
+
+    // The batch box can't go above the current largest order.
+    const batchBox = part(box, "batches");
+    const maxBatches = String(getMaxOrderBatches(state));
+    if (batchBox.max !== maxBatches) batchBox.max = maxBatches;
 
     if (job.status === "working") {
       const elapsed = Math.min(Math.max(now - job.startedAt, 0), job.durationMs);
@@ -1734,7 +1852,8 @@ function renderWorkshop(state, now) {
       tag.textContent = `Waiting · ${job.orders.length}/${queueLimit}`;
       status.textContent = hasWorkshopInputs(state, order.recipeId)
         ? "Starting the next batch"
-        : `Waiting for ${describeWorkshopInputs(order.recipeId, formatTonnes)}`;
+        : `Waiting for ${describeWorkshopInputs(order.recipeId, formatTonnes)}` +
+          (hasSmartQueue(state) && job.orders.length > 1 ? " (later orders also short of metal)" : "");
       box.classList.add("waiting");
       box.classList.remove("busy");
     }
@@ -1752,7 +1871,9 @@ function renderWorkshop(state, now) {
 // -------------------------------------------------------------
 function setQueueList(list, job) {
   const orders = job ? job.orders : [];
-  const signature = JSON.stringify(orders);
+  // Which line is running (-1 = none), so it can be highlighted.
+  const running = job && job.status === "working" ? getRunningIndex(job) : -1;
+  const signature = JSON.stringify(orders) + running;
   if (list.dataset.signature === signature) {
     return;   // nothing changed since last time
   }
@@ -1762,7 +1883,7 @@ function setQueueList(list, job) {
     const recipe = WORKSHOP_RECIPES[order.recipeId];
     const done = order.done > 0 ? ` <span class="order-done">(${order.done} done)</span>` : "";
     return `
-      <li class="order-line">
+      <li class="order-line${index === running ? " running" : ""}">
         <span class="order-name">${recipe.name} × ${order.batches}${done}</span>
         <button class="btn btn-small order-cancel" data-cancel="${index}"
                 title="Cancel this order" aria-label="Cancel ${recipe.name} order">✕</button>

@@ -1692,10 +1692,9 @@ body {
   padding: 2px 0;
 }
 
-/* The first order is the one being worked on */
-.order-line:first-child .order-name {
-  color: var(--teal);
-}
+/* The order being worked on is highlighted (marked "running"
+   by ui.js: usually the first, but with the smart queue it can
+   be a later one) */
 
 .order-done {
   color: var(--steel-dim);
@@ -1784,4 +1783,87 @@ body {
 /* Keep "Bond t" on one line in the narrow phone layout */
 .hold-table th {
   white-space: nowrap;
+}
+
+
+/* =============================================================
+   UPGRADES (Industry tab)
+   ============================================================= */
+
+/* The panel title doubles as the open/close control */
+.upgrades-panel > summary {
+  cursor: pointer;
+  list-style: none;            /* hide the default triangle */
+}
+.upgrades-panel > summary::-webkit-details-marker {
+  display: none;
+}
+
+/* One upgrade: its words on the left, the Buy button on the right */
+.upgrade-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.upgrade-row:last-child {
+  border-bottom: none;
+}
+
+.upgrade-row .btn {
+  width: auto;
+  flex-shrink: 0;            /* the button never squashes */
+}
+
+.upgrade-name {
+  font-weight: 600;
+  color: var(--amber);
+}
+
+/* "Refining 8": which level unlocks it */
+.upgrade-level {
+  margin-left: 6px;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--steel-dim);
+}
+
+.upgrade-desc {
+  font-size: 12px;
+  color: var(--steel);
+}
+
+.upgrade-cost {
+  font-size: 12px;
+  color: var(--teal);
+}
+
+/* Why it can't be bought yet, e.g. "Need 12 t more hull plating." */
+.upgrade-reason {
+  font-size: 12px;
+  color: var(--amber-dim);
+}
+
+.upgrade-reason:empty {
+  display: none;
+}
+
+/* Bought: quieter, so the next things to buy stand out */
+.upgrade-row.owned {
+  opacity: 0.55;
+}
+
+/* With the smart queue, a later order can be the running one */
+.order-line.running .order-name {
+  color: var(--teal);
+}
+
+/* "Manufacturing 3" stays in one piece: if it doesn't fit beside
+   the name, the whole label moves to the next line */
+.upgrade-level {
+  white-space: nowrap;
+  display: inline-block;
 }

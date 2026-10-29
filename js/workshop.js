@@ -43,10 +43,19 @@
 // The queue is worked in order. If the first order is waiting
 // for metal, the orders behind it wait too. That keeps it
 // predictable: the player always knows what comes next.
+//
+// SMART QUEUE (an upgrade) changes that one rule: if the first
+// order is short of metal, the first order BEHIND it that has
+// metal runs a batch instead. Nothing is reordered - the blocked
+// order keeps its place and picks up again when its metal comes.
+// So the job also remembers WHICH order its batch belongs to:
+//     runningIndex: 0     (0 = the first order; with the smart
+//                          queue it can be 1, 2, ...)
 // =============================================================
 
 import { WORKSHOP_RECIPES, WORKSHOP, ITEMS } from "../data/content.js";
-import { addItem } from "./state.js";
+import { addItem, addItemWithCarry } from "./state.js";
+import { getEffect } from "./upgrades.js";
 import { getLevel, addXp } from "./skills.js";
 
 
@@ -95,6 +104,20 @@ export function getQueueLimit(state) {
   return WORKSHOP.baseQueue + extra;
 }
 
+// -------------------------------------------------------------
+// getMaxOrderBatches(state)
+// The most batches one order can hold: 20 to start, and each
+// Bigger work orders upgrade adds 20 (orderSize effect).
+// -------------------------------------------------------------
+export function getMaxOrderBatches(state) {
+  return WORKSHOP.maxOrderBatches + getEffect(state, "orderSize");
+}
+
+// True if the player owns the Smart queue upgrade.
+export function hasSmartQueue(state) {
+  return getEffect(state, "smartQueue") > 0;
+}
+
 // True if the player's Manufacturing level allows this recipe.
 export function isWorkshopRecipeUnlocked(state, recipeId) {
   return getLevel(state, "manufacturing") >= WORKSHOP_RECIPES[recipeId].unlockLevel;
@@ -130,18 +153,19 @@ export function isQueueUnlockLevel(level) {
 
 // -------------------------------------------------------------
 // getWorkshopBatchMs(state, recipeId)
-// Batch time in milliseconds at the player's Manufacturing
-// level. Each level above 1 makes batches speedPerLevel faster,
-// exactly like the refinery:
-//   level 1:  90s x 1.000 = 90s
-//   level 11: 90s x 0.950 = 85.5s
+// Batch time in milliseconds, exactly like the refinery: the
+// Manufacturing level and Precision tooling MULTIPLY.
+//   level 1, no tooling:   90s x 1.000        = 90s
+//   level 11, no tooling:  90s x 0.950        = 85.5s
+//   level 11, 1 tooling:   90s x 0.950 x 0.90 = 76.95s
 // -------------------------------------------------------------
 export function getWorkshopBatchMs(state, recipeId) {
   const level = getLevel(state, "manufacturing");
-  const speedUp = WORKSHOP.speedPerLevel * (level - 1);
+  const levelFactor = 1 - WORKSHOP.speedPerLevel * (level - 1);
+  const upgradeFactor = 1 - getEffect(state, "workshopSpeed");
   // Never shorter than a tenth of the normal time, whatever the
   // balance sheet says (a safety net against a typo).
-  const factor = Math.max(0.1, 1 - speedUp);
+  const factor = Math.max(0.1, levelFactor * upgradeFactor);
   return Math.round(WORKSHOP_RECIPES[recipeId].seconds * 1000 * factor);
 }
 
@@ -177,8 +201,9 @@ export function addOrder(state, slot, recipeId, batches, now) {
     return { ok: false, reason: `${recipe.name} needs Manufacturing ${recipe.unlockLevel}.` };
   }
   // Number.isInteger rules out 2.5 batches, text, and so on.
-  if (!Number.isInteger(batches) || batches < 1 || batches > WORKSHOP.maxOrderBatches) {
-    return { ok: false, reason: `An order can be 1 to ${WORKSHOP.maxOrderBatches} batches.` };
+  const maxBatches = getMaxOrderBatches(state);
+  if (!Number.isInteger(batches) || batches < 1 || batches > maxBatches) {
+    return { ok: false, reason: `An order can be 1 to ${maxBatches} batches.` };
   }
 
   let job = getWorkshopJob(state, slot);
@@ -192,6 +217,9 @@ export function addOrder(state, slot, recipeId, batches, now) {
 
   if (job) {
     job.orders.push(order);   // to the back of the queue
+    // With the smart queue, a new order that has its metal can
+    // start now even if the first order is still waiting.
+    startWaitingOrders(state, now);
   } else {
     // An idle slot: make its job, waiting for metal to start.
     job = {
@@ -225,18 +253,27 @@ export function cancelOrder(state, slot, index, now) {
     return false;
   }
 
-  // Cancelling the CURRENT order while a batch is running:
-  // give the metal back and stop the batch.
-  if (index === 0 && job.status === "working") {
+  const running = getRunningIndex(job);
+
+  // Cancelling the order whose batch is RUNNING: give the metal
+  // back and stop the batch.
+  if (job.status === "working" && index === running) {
     for (const [itemId, amount] of Object.entries(job.inputs)) {
       addItem(state, itemId, amount);
     }
     job.status = "waiting";
     job.inputs = null;
+    job.runningIndex = 0;
   }
 
   // .splice(index, 1) removes one item from the list at "index".
   job.orders.splice(index, 1);
+
+  // Cancelling an order IN FRONT of the running one moves the
+  // running one up a place (from 2nd to 1st, say).
+  if (job.status === "working" && index < running) {
+    job.runningIndex = running - 1;
+  }
 
   if (job.orders.length === 0) {
     removeJob(state, job);              // nothing left: the slot is idle
@@ -244,6 +281,12 @@ export function cancelOrder(state, slot, index, now) {
     startWaitingOrders(state, now);     // the next order may start now
   }
   return true;
+}
+
+// Which order the job's current batch belongs to (0 = the first).
+// Saves from before the smart queue have no runningIndex: 0.
+export function getRunningIndex(job) {
+  return job.runningIndex ?? 0;
 }
 
 // Takes a job out of the list of running jobs.
@@ -280,10 +323,13 @@ export function startWaitingOrders(state, time) {
     .sort((a, b) => a.slot - b.slot);
 
   for (const job of waiting) {
-    const recipeId = job.orders[0].recipeId;
-    if (!hasWorkshopInputs(state, recipeId)) {
-      continue;   // not enough metal yet: keep waiting
+    // Normally only the first order can run. With the smart
+    // queue, the first order that HAS its metal runs instead.
+    const index = pickOrderToRun(state, job);
+    if (index === -1) {
+      continue;   // nothing can run yet: keep waiting
     }
+    const recipeId = job.orders[index].recipeId;
 
     // Take the metal out of the hold for this batch.
     const inputs = { ...WORKSHOP_RECIPES[recipeId].inputs };   // a copy
@@ -292,10 +338,30 @@ export function startWaitingOrders(state, time) {
     }
 
     job.status = "working";
+    job.runningIndex = index;
     job.startedAt = time;
     job.durationMs = getWorkshopBatchMs(state, recipeId);
     job.inputs = inputs;
   }
+}
+
+// -------------------------------------------------------------
+// pickOrderToRun(state, job)
+// Which order should run the next batch, as a position in the
+// queue (0 = first), or -1 if none can run yet.
+//   Without the smart queue: the first order, or nothing.
+//   With it: the first order that has its metal in the hold.
+// -------------------------------------------------------------
+function pickOrderToRun(state, job) {
+  if (hasWorkshopInputs(state, job.orders[0].recipeId)) {
+    return 0;
+  }
+  if (!hasSmartQueue(state)) {
+    return -1;
+  }
+  // .findIndex gives the position of the first order that passes
+  // the check, or -1 if none do.
+  return job.orders.findIndex((order) => hasWorkshopInputs(state, order.recipeId));
 }
 
 // -------------------------------------------------------------
@@ -309,20 +375,31 @@ export function startWaitingOrders(state, time) {
 // Returns a result for the log, like the ships' results.
 // -------------------------------------------------------------
 export function finishWorkshopBatch(state, job) {
-  const order = job.orders[0];
+  const index = getRunningIndex(job);
+  const order = job.orders[index];
   const recipe = WORKSHOP_RECIPES[order.recipeId];
 
   addItem(state, recipe.output, recipe.outputAmount);
   const newLevels = addXp(state, "manufacturing", recipe.xp);
 
+  // Scrap recovery: a share of the metal comes back (5% of 30 t
+  // = 1.5 t; the half tonne is carried to the next batch).
+  const scrap = getEffect(state, "workshopScrap");
+  if (scrap > 0) {
+    for (const [itemId, amount] of Object.entries(job.inputs)) {
+      addItemWithCarry(state, itemId, amount * scrap);
+    }
+  }
+
   order.done += 1;
   const orderFinished = order.done >= order.batches;
   if (orderFinished) {
-    job.orders.shift();   // .shift() removes the first item: on to the next order
+    job.orders.splice(index, 1);   // this order is done: out of the queue
   }
 
   job.status = "waiting";
   job.inputs = null;
+  job.runningIndex = 0;
 
   // Queue empty: the slot is idle.
   const idle = job.orders.length === 0;

@@ -24,7 +24,8 @@
 //   Version 8: one simulation clock (simulatedUpTo, simulatedMs)
 //   Version 9: added the Manufacturing skill (and workshop jobs)
 //   Version 10: bonded stock (goods set aside, never sold)
-export const SAVE_VERSION = 10;
+//   Version 11: refinery and workshop upgrades, and part-tonnes
+export const SAVE_VERSION = 11;
 
 
 // -------------------------------------------------------------
@@ -69,6 +70,17 @@ export function createNewGame() {
     // and the Sell buttons never take them, e.g.
     // { hull_plating: 100 }. Empty = nothing bonded. (bonded.js)
     bonded: {},
+
+    // Refinery and workshop upgrades bought, e.g.
+    // { furnace_lining_1: true }. (upgrades.js)
+    upgrades: {},
+
+    // Part-tonnes waiting to become whole ones, e.g.
+    // { iron_bar: 0.5 }. Scrap recovery and Improved yield make
+    // fractions (5% of 30 t = 1.5 t); the hold only shows whole
+    // tonnes, so the half waits here until the next one tops it
+    // up. See addItemWithCarry below.
+    carry: {},
 
     // How many Fleet command upgrades have been bought.
     // The total command points are worked out from this (command.js).
@@ -125,4 +137,32 @@ export function addItem(state, itemId, amount) {
 // -------------------------------------------------------------
 export function findShip(state, shipId) {
   return state.ships.find((ship) => ship.id === shipId);
+}
+
+
+// -------------------------------------------------------------
+// addItemWithCarry(state, itemId, amount)
+// Adds an amount that may not be whole (like 1.5 t), keeping the
+// hold in whole tonnes. The whole part goes in the hold now; the
+// fraction is saved in state.carry and added to the next amount.
+//   1.5 t  ->  1 t into the hold, 0.5 carried
+//   1.5 t  ->  0.5 + 1.5 = 2 t into the hold, 0 carried
+// Over many batches the player gets exactly the right total.
+// Returns the whole tonnes that went into the hold.
+// -------------------------------------------------------------
+export function addItemWithCarry(state, itemId, amount) {
+  const total = (state.carry[itemId] || 0) + amount;
+  // Rounding to 6 decimals first stops tiny computer rounding
+  // errors (0.1 + 0.2 = 0.30000000000000004) from losing a tonne.
+  const whole = Math.floor(Math.round(total * 1e6) / 1e6);
+  const left = total - whole;
+  if (left > 1e-9) {
+    state.carry[itemId] = left;
+  } else {
+    delete state.carry[itemId];
+  }
+  if (whole > 0) {
+    addItem(state, itemId, whole);
+  }
+  return whole;
 }

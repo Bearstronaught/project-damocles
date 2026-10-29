@@ -13,7 +13,7 @@
 //   5. Start autosaving.
 // =============================================================
 
-import { RULES, ITEMS, FIELDS, SHIP_TYPES, SKILLS, HUB, HOME, HAUL_MODES, RECIPES, REFINERY, WORKSHOP_RECIPES, WORKSHOP } from "../data/content.js";
+import { RULES, ITEMS, FIELDS, SHIP_TYPES, SKILLS, HUB, HOME, HAUL_MODES, RECIPES, REFINERY, WORKSHOP_RECIPES, WORKSHOP, UPGRADES } from "../data/content.js";
 import { createNewGame, findShip } from "./state.js";
 import { startMiningJob, startHaulJob, recallJob, resumeJob, getJobForShip } from "./jobs.js";
 import { advanceTo } from "./simulation.js";
@@ -24,6 +24,7 @@ import { buyUpgrade, getCommandCapacity } from "./command.js";
 import { getUnlocksAtLevel, getFieldUnlocksAtLevel, isFieldUnlocked } from "./skills.js";
 import { setRecipe, getRefineJob, getRecipeUnlocksAtLevel, getSlotUnlocksAtLevel } from "./refinery.js";
 import { addOrder, cancelOrder, getWorkshopJob, getWorkshopRecipeUnlocksAtLevel, getWorkshopSlotUnlocksAtLevel, isQueueUnlockLevel, getQueueLimit } from "./workshop.js";
+import { buyIndustryUpgrade, getUpgradeUnlocksAtLevel } from "./upgrades.js";
 import { saveGame, loadGame, deleteSave, applyOfflineProgress, exportSave, importSave } from "./save.js";
 import { showLevelBanner } from "./banner.js";
 import { setupUI, buildFleetViews, render, addLog, formatNumber, formatXp, formatTonnes, formatDuration } from "./ui.js";
@@ -177,6 +178,18 @@ const actions = {
       }
     }
     refresh();
+  },
+
+  // Buys a refinery or workshop upgrade. Returns { ok, reason }
+  // so the screen can say why it was refused.
+  buyIndustryUpgrade(upgradeId) {
+    const result = buyIndustryUpgrade(state, upgradeId);
+    if (result.ok) {
+      const upgrade = UPGRADES[upgradeId];
+      addLog(`Upgrade installed: ${upgrade.name}. ${upgrade.description}`, upgrade.building === "refinery" ? "refine" : "make");
+    }
+    refresh();
+    return result;
   },
 
   // Sets how much of an item is bonded (0 = release it).
@@ -448,6 +461,9 @@ function getUnlockLines(skillId, level) {
       lines.push("New: the workshop (Industry tab)");
     }
   }
+  for (const upgradeId of getUpgradeUnlocksAtLevel(skillId, level)) {
+    lines.push("New upgrade to buy: " + UPGRADES[upgradeId].name);
+  }
   if (skillId === "manufacturing") {
     for (const recipeId of getWorkshopRecipeUnlocksAtLevel(level)) {
       lines.push("New recipe: " + WORKSHOP_RECIPES[recipeId].name);
@@ -495,6 +511,9 @@ function logLevelUps(skillId, levels, showBanners = true) {
       if (level === WORKSHOP.openAtRefiningLevel) {
         addLog(`The ${HOME.name} workshop is open. Queue work orders on the Industry tab.`, "level");
       }
+    }
+    for (const upgradeId of getUpgradeUnlocksAtLevel(skillId, level)) {
+      addLog(`New upgrade available: ${UPGRADES[upgradeId].name}. Find it under Upgrades on the Industry tab.`, "level");
     }
     if (skillId === "manufacturing") {
       for (const recipeId of getWorkshopRecipeUnlocksAtLevel(level)) {
