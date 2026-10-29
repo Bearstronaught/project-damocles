@@ -20,7 +20,8 @@
 // =============================================================
 
 import assert from "node:assert/strict";
-import { SHIP_TYPES, ITEMS, COMMAND } from "../data/content.js";
+import { SHIP_TYPES, ITEMS, COMMAND, FIELDS, HULL_SIZES } from "../data/content.js";
+import { BALANCE } from "../data/balance.js";
 import { createNewGame } from "../js/state.js";
 import { startMiningJob, startHaulJob, processJobs, cancelJob, recallJob, resumeJob, getJobProgress, getJobPhase, getTripPlan, getHaulPlan, loadCargo } from "../js/jobs.js";
 import { sellAll, sellEverything, getCargoValue, sellAtHub, getTradeXp, getPrice } from "../js/trade.js";
@@ -1367,6 +1368,41 @@ test("Selling the only freighter removes the Freight group", () => {
   const state = gameWithMixedFleet();
   sellShip(state, "ship-2");
   assert.deepEqual(getRoleGroups(state, START).map((g) => g.roleId), ["mining"]);
+});
+
+// =============================================================
+// THE BALANCE FILE (data/balance.js, written by the sheet)
+// Numbers come from the balance sheet; words from content.js.
+// These check the two files still fit together, so a ship added
+// to one but not the other is caught here, not mid-game.
+// =============================================================
+
+// The IDs in an object, sorted so the order doesn't matter.
+const idsOf = (object) => Object.keys(object).sort();
+
+test("content.js and balance.js list the same items, ships, fields and hull sizes", () => {
+  assert.deepEqual(idsOf(ITEMS), idsOf(BALANCE.items));
+  assert.deepEqual(idsOf(SHIP_TYPES), idsOf(BALANCE.ships));
+  assert.deepEqual(idsOf(FIELDS), idsOf(BALANCE.fields));
+  assert.deepEqual(idsOf(HULL_SIZES), idsOf(BALANCE.hullSizes));
+});
+
+test("Every ship has the numbers it needs (and barges have a drill)", () => {
+  for (const [typeId, ship] of Object.entries(SHIP_TYPES)) {
+    for (const key of ["size", "skill", "unlockLevel", "cargoCapacity", "speed"]) {
+      assert.ok(ship[key] !== undefined, `${typeId} is missing ${key}`);
+    }
+    assert.ok(HULL_SIZES[ship.size], `${typeId} has an unknown hull size "${ship.size}"`);
+    if (ship.role === "mining") {
+      assert.ok(ship.miningRate > 0, `${typeId} is a barge with no mining rate`);
+    }
+  }
+});
+
+test("Every field mines an item that exists", () => {
+  for (const [fieldId, field] of Object.entries(FIELDS)) {
+    assert.ok(ITEMS[field.yields], `${fieldId} yields unknown item "${field.yields}"`);
+  }
 });
 
 // -------------------------------------------------------------
