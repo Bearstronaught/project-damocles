@@ -141,11 +141,27 @@ export function isShipTypeUnlocked(state, shipTypeId) {
 
 // -------------------------------------------------------------
 // isFieldUnlocked(state, fieldId)
-// True if the player's Mining level is high enough to send
-// ships to this field.
+// True if ships can be sent to this field: the player's Mining
+// level is high enough, and, for a field that's opened by a
+// survey (the Ice moon), a scout has surveyed it.
 // -------------------------------------------------------------
 export function isFieldUnlocked(state, fieldId) {
-  return getLevel(state, "mining") >= FIELDS[fieldId].unlockLevel;
+  const field = FIELDS[fieldId];
+  if (getLevel(state, "mining") < field.unlockLevel) return false;
+  if (field.survey && !state.exploration.surveyed[field.survey]) return false;
+  return true;
+}
+
+// -------------------------------------------------------------
+// getFieldRequirement(fieldId)
+// What opens a field, in words, for the screens:
+//   "Mining 5"          (outer_belt)
+//   "once surveyed"     (ice_moon: a scout has to survey it first)
+// -------------------------------------------------------------
+export function getFieldRequirement(fieldId) {
+  const field = FIELDS[fieldId];
+  if (field.survey) return "once surveyed";
+  return `Mining ${field.unlockLevel}`;
 }
 
 
@@ -166,10 +182,11 @@ export function getUnlocksAtLevel(skillId, level) {
 // -------------------------------------------------------------
 // getFieldUnlocksAtLevel(level)
 // Which mining fields open up at exactly this Mining level.
-// Returns a list of field IDs, e.g. ["outer_belt"].
+// Returns a list of field IDs, e.g. ["outer_belt"]. Fields opened
+// by a survey aren't listed (a level doesn't open them).
 // -------------------------------------------------------------
 export function getFieldUnlocksAtLevel(level) {
-  return Object.keys(FIELDS).filter((fieldId) => FIELDS[fieldId].unlockLevel === level);
+  return Object.keys(FIELDS).filter((fieldId) => FIELDS[fieldId].unlockLevel === level && !FIELDS[fieldId].survey);
 }
 
 

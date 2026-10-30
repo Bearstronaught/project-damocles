@@ -75,7 +75,7 @@ import { startWaitingOrders, finishWorkshopBatch } from "./workshop.js";
 import { getSellable } from "./bonded.js";
 import { getShipStats, getHullGrades } from "./ship-upgrades.js";
 import { finishScoutTrip } from "./exploration.js";
-import { checkContracts, nextBoardEvent, boardEvent } from "./contracts.js";
+import { checkContracts, nextBoardEvent, boardEvent, getCharter, takeCharterHaul } from "./contracts.js";
 
 
 // =============================================================
@@ -298,6 +298,18 @@ export function startHaulJob(state, shipId, now) {
 // -------------------------------------------------------------
 function planNextTrip(state, job) {
   const ship = findShip(state, job.shipId);
+
+  // On a charter (contracts.js)? Then this trip goes to the
+  // charter's field, and its haul is the client's. A charter
+  // starts from the ship's next departure, never mid-trip.
+  const charter = getCharter(state, ship.id);
+  if (charter) {
+    job.fieldId = charter.fieldId;
+    job.charter = charter.number;
+  } else {
+    delete job.charter;
+  }
+
   const plan = getTripPlan(state, ship.type, job.fieldId);
   job.outboundMs = plan.outboundMs;
   job.miningMs = plan.miningMs;
@@ -903,10 +915,17 @@ function runEvent(state, job, time) {
     delete job.amountOverride;
 
     let newLevels = [];
+    let chartered = 0;   // tonnes handed to a charter's client
     if (amount > 0) {
-      addItem(state, field.yields, amount);
+      // A chartered trip: the client takes what's still owed, and
+      // anything over goes into your hold like any other haul.
+      if (job.charter !== undefined) {
+        chartered = takeCharterHaul(state, job.charter, amount);
+      }
+      if (amount > chartered) addItem(state, field.yields, amount - chartered);
+      // Mining XP either way: the ship did the work.
       newLevels = addXp(state, "mining", xp);
-      // The running total mining contracts count from (contracts.js)
+      // The running total of ore mined at each field
       state.stats.mined[job.fieldId] = (state.stats.mined[job.fieldId] || 0) + amount;
     }
 
@@ -934,6 +953,7 @@ function runEvent(state, job, time) {
       shipId: job.shipId,
       itemId: field.yields,
       amount: amount,
+      chartered: chartered,        // of which went to a charter's client
       trips: 1,
       skillId: "mining",
       xpGained: xp,
@@ -1035,6 +1055,7 @@ function mergeResultsByShip(results) {
 
     if (result.kind === "mining" || result.kind === "refine") {
       total.amount += result.amount;
+      if (result.kind === "mining") total.chartered = (total.chartered || 0) + result.chartered;
     } else if (result.kind === "scout") {
       // Several trips: every survey and find, one after another.
       total.surveys.push(...result.surveys);

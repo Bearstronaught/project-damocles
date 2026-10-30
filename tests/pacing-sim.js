@@ -29,7 +29,8 @@ import { FIELDS, SHIP_UPGRADES, REFINERY, RECIPES } from "../data/content.js";
 import { createNewGame } from "../js/state.js";
 import { advanceTo } from "../js/simulation.js";
 import { startMiningJob, getJobForShip, getTripPlan } from "../js/jobs.js";
-import { sellEverything } from "../js/trade.js";
+import { sellAll } from "../js/trade.js";
+import { ITEMS } from "../data/content.js";
 import { getLevel, isFieldUnlocked } from "../js/skills.js";
 import { buyShip, getShipPrice, canBuyShip } from "../js/shipyard.js";
 import { buyUpgrade, getNextUpgradeCost, canBuyUpgrade } from "../js/command.js";
@@ -37,7 +38,9 @@ import { canBuyShipUpgrade, buyShipUpgrade } from "../js/ship-upgrades.js";
 import { setRecipe, getRefineJob, getSlotCount, isRecipeUnlocked } from "../js/refinery.js";
 import { getCommandFree } from "../js/command.js";
 import { startScoutJob, chooseNextTarget, getTarget } from "../js/exploration.js";
-import { canDeliver, deliverContract } from "../js/contracts.js";
+import { canDeliver, deliverContract, canCharter, charterShip, getCharter } from "../js/contracts.js";
+const getCharterField = (state, shipId) => getCharter(state, shipId)?.fieldId;
+import { CONTRACT_KINDS } from "../data/content.js";
 
 const MINUTE = 60 * 1000;
 const START = 1_000_000_000_000;
@@ -60,6 +63,7 @@ export function simulate(hours, untilMiningLevel, hourly = null, explore = true)
   state.simulatedUpTo = START;
   const events = [];
   let lastLevel = 1;
+  let lastDiplomacy = 1;
   let lastExploreLevel = 1;
   let scansAtLastLevel = 0;   // deep scans done when the last level came
   let earnedThisHour = 0;   // credits from selling, for the hourly report
@@ -93,6 +97,13 @@ export function simulate(hours, untilMiningLevel, hourly = null, explore = true)
     lastLevel = level;
     if (level >= untilMiningLevel) break;
 
+    // Diplomacy levels (from finishing contracts)
+    const diplomacy = getLevel(state, "diplomacy");
+    for (let l = lastDiplomacy + 1; l <= diplomacy; l++) {
+      events.push({ minute, text: `Diplomacy ${l}` });
+    }
+    lastDiplomacy = diplomacy;
+
     // 0. Hand over any delivery contract it has the goods for
     //    (before selling them), and note contracts that finished
     for (let slot = 0; slot < state.contracts.slots.length; slot++) {
@@ -102,14 +113,40 @@ export function simulate(hours, untilMiningLevel, hourly = null, explore = true)
         events.push({ minute, text: `contract: delivered ${done.contract.kindId} (${done.credits.toLocaleString("en-GB")} cr)`, goal: true });
       }
     }
+    // 0b. Lend a mining ship to any charter waiting for one. A
+    //     sensible player does: it pays 1.4x the ore's home price.
+    for (let slot = 0; slot < state.contracts.slots.length; slot++) {
+      const contract = state.contracts.slots[slot].contract;
+      if (!contract || CONTRACT_KINDS[contract.kindId].kind !== "charter" || contract.shipId) continue;
+      const free = state.ships.find((ship) => canCharter(state, slot, ship.id).ok);
+      if (free) {
+        charterShip(state, slot, free.id);
+        events.push({ minute, text: `chartered ${free.name} to the ${FIELDS[contract.fieldId].name} (${contract.amount} t)` });
+      }
+    }
     for (const result of report.results) {
+      // Newly posted contracts (not goals, just so you can see the board)
+      if (result.kind === "posted") {
+        const c = result.contract;
+        events.push({ minute, text: `  posted: ${c.kindId} ${c.itemId || c.targetId || ""} ${c.amount}` });
+      }
       if (result.kind === "contract") {
         events.push({ minute, text: `contract: finished ${result.contract.kindId} (${result.credits.toLocaleString("en-GB")} cr)`, goal: true });
       }
     }
 
     // 1. Sell everything at home
-    earnedThisHour += sellEverything(state).credits;
+    //    ...except goods an open delivery contract asks for: a
+    //    sensible player holds those back until there's enough
+    //    (they pay 1.5x selling at home).
+    const wanted = new Set();
+    for (const slot of state.contracts.slots) {
+      const c = slot.contract;
+      if (c && CONTRACT_KINDS[c.kindId].kind === "deliver") wanted.add(c.itemId);
+    }
+    for (const itemId of Object.keys(ITEMS)) {
+      if (!wanted.has(itemId)) earnedThisHour += sellAll(state, itemId).credits;
+    }
 
     // 1b. Keep every refinery slot smelting (once it's open)
     for (let slot = 0; slot < getSlotCount(state); slot++) {
@@ -187,7 +224,8 @@ export function simulate(hours, untilMiningLevel, hourly = null, explore = true)
         const xpPerHour = plan.xpPerTrip / plan.durationMs;
         if (!best || xpPerHour > best.xpPerHour) best = { fieldId, xpPerHour };
       }
-      startMiningJob(state, ship.id, best.fieldId, now);
+      // (A chartered ship goes where its charter says: jobs.js picks the field.)
+      startMiningJob(state, ship.id, ship.destination && getCharterField(state, ship.id) ? ship.destination : best.fieldId, now);
     }
   }
   return events;

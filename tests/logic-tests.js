@@ -42,7 +42,7 @@ import { UPGRADES } from "../data/content.js";
 import { getMaxSlots, getBatchOutput } from "../js/refinery.js";
 import { startScoutJob, getScoutPlan, getTargetStatus, chooseNextTarget, rollFor, isExplorationOpen, DEEP_SCAN_ID } from "../js/exploration.js";
 import { SURVEY_TARGETS, DEEP_SCAN, CONTRACT_KINDS, CONTRACTS, CONTRACT_FACTIONS, REPUTATION_TIERS } from "../data/content.js";
-import { isBoardOpen, getTier, getReputation, getSubjects, getProgress, canDeliver, deliverContract, discardContract, checkContracts } from "../js/contracts.js";
+import { isBoardOpen, getTier, getReputation, getSubjects, getProgress, canDeliver, deliverContract, discardContract, checkContracts, charterShip, canCharter, getCharter, getContractXp, getSlotCount as getBoardSlotCount } from "../js/contracts.js";
 import { getMaxOrderBatches, addStandingOrder, removeStandingOrder, getStandingOrders } from "../js/workshop.js";
 import { XP_TABLE, getLevelForXp, getLevel, getLevelProgress, addXp, isShipTypeUnlocked, MAX_LEVEL } from "../js/skills.js";
 import { canBuyShip, buyShip, canSellShip, sellShip, getSellValue, renameShip, getShipPrice } from "../js/shipyard.js";
@@ -552,7 +552,7 @@ test("A version 1 save (first commit) upgrades all the way to the latest version
   assert.equal(state.version, SAVE_VERSION);
   assert.equal(state.credits, 500);                // x10 for tonnes, nothing lost
   assert.equal(state.inventory.iron_ore, 100);
-  assert.deepEqual(state.skills, { mining: { xp: 0 }, trade: { xp: 0 }, refining: { xp: 0 }, manufacturing: { xp: 0 }, exploration: { xp: 0 } });
+  assert.deepEqual(state.skills, { mining: { xp: 0 }, trade: { xp: 0 }, refining: { xp: 0 }, manufacturing: { xp: 0 }, exploration: { xp: 0 }, diplomacy: { xp: 0 } });
   assert.equal(state.nextShipNumber, 2);
 });
 
@@ -824,6 +824,36 @@ test("The Outer Belt is locked until Mining level 5", () => {
   assert.equal(isFieldUnlocked(state, "outer_belt"), true);
 });
 
+// =============================================================
+// THE ICE MOON (opened by a survey, 30 Oct)
+// =============================================================
+
+test("The Ice moon field stays shut until its survey is done, at any Mining level", () => {
+  // Why: it's the first field opened by exploring, not by a Mining
+  // level, so a high Mining level alone mustn't open it.
+  const state = newGame();
+  state.skills.mining.xp = XP_TABLE[30];
+  assert.equal(isFieldUnlocked(state, "ice_moon"), false);
+  assert.equal(startMiningJob(state, "ship-1", "ice_moon", START), null);   // can't send a barge yet
+});
+
+test("Surveying the Ice moon opens it for mining, even at Mining 1", () => {
+  const state = newGame();
+  state.exploration.surveyed.ice_moon = true;
+  assert.equal(isFieldUnlocked(state, "ice_moon"), true);
+  assert.ok(startMiningJob(state, "ship-1", "ice_moon", START), "a barge can be sent");
+});
+
+test("A trip to the Ice moon brings home ice, which sells between nickel ore and hull plating", () => {
+  const state = newGame();
+  state.exploration.surveyed.ice_moon = true;
+  startMiningJob(state, "ship-1", "ice_moon", START);
+  const plan = getTripPlan(state, "prospector", "ice_moon");
+  processJobs(state, START + plan.durationMs);
+  assert.ok(state.inventory.ice > 0, "ice in the hold");
+  assert.ok(ITEMS.ice.sellPrice > ITEMS.nickel_ore.sellPrice && ITEMS.ice.sellPrice < ITEMS.hull_plating.sellPrice);
+});
+
 test("Prospector to the Outer Belt: 1m 30s each way, 1m mining, 6s unloading = 4m 6s trip", () => {
   const plan = getTripPlan(FRESH, "prospector", "outer_belt");
   assert.equal(plan.outboundMs, 90 * SECOND);
@@ -907,7 +937,7 @@ test("A version 4 save gains the Trade skill at 0 XP, keeping its Mining XP", ()
   };
   const state = parseSave(JSON.stringify(oldSave));
   assert.equal(state.version, SAVE_VERSION);
-  assert.deepEqual(state.skills, { mining: { xp: 900 }, trade: { xp: 0 }, refining: { xp: 0 }, manufacturing: { xp: 0 }, exploration: { xp: 0 } });
+  assert.deepEqual(state.skills, { mining: { xp: 900 }, trade: { xp: 0 }, refining: { xp: 0 }, manufacturing: { xp: 0 }, exploration: { xp: 0 }, diplomacy: { xp: 0 } });
   assert.equal(state.credits, 12000);              // x10 at version 6
 });
 
@@ -1215,9 +1245,9 @@ test("A version 5 save moves to tonnes: credits and ore x10, XP unchanged", () =
   const state = parseSave(JSON.stringify(oldSave));
   assert.equal(state.version, SAVE_VERSION);
   assert.equal(state.credits, 26000);
-  assert.deepEqual(state.inventory, { iron_ore: 300, nickel_ore: 40 });
+  assert.deepEqual(state.inventory, { iron_ore: 300, nickel_ore: 40, ice: 0 });
   assert.deepEqual(state.jobs[0].cargo, { nickel_ore: 200, iron_ore: 400 });
-  assert.deepEqual(state.skills, { mining: { xp: 900 }, trade: { xp: 180 }, refining: { xp: 0 }, manufacturing: { xp: 0 }, exploration: { xp: 0 } });
+  assert.deepEqual(state.skills, { mining: { xp: 900 }, trade: { xp: 180 }, refining: { xp: 0 }, manufacturing: { xp: 0 }, exploration: { xp: 0 }, diplomacy: { xp: 0 } });
 });
 
 test("A bogus 'version 5' save with no inventory is refused, not a crash", () => {
@@ -3533,10 +3563,10 @@ test("Contracts: only kinds the player can do are posted (no metal before the re
   assert.equal(getSubjects(state, "survey_request").length, 0);     // Exploration not open
   assert.equal(getSubjects(state, "deep_scan_contract").length, 0); // no scout
   for (const slot of state.contracts.slots) {
-    assert.ok(["ore_requisition", "mining_quota"].includes(slot.contract.kindId), slot.contract.kindId);
+    assert.ok(["ore_requisition", "mining_charter"].includes(slot.contract.kindId), slot.contract.kindId);
   }
   // Only two different contracts exist this early (iron ore, Inner
-  // Belt quota), so the third is a repeat of one: board still full.
+  // Belt charter), so the third is a repeat of one: board still full.
   const keys = state.contracts.slots.map((s) => s.contract.kindId + s.contract.itemId + s.contract.fieldId);
   assert.equal(new Set(keys).size, 2);
 });
@@ -3584,19 +3614,131 @@ test("Contracts: deliveries leave bonded stock alone", () => {
   assert.equal(getProgress(state, state.contracts.slots[0].contract).have, 100);
 });
 
-test("Contracts: a mining quota counts ore brought home from its field after posting, then pays itself", () => {
+// --- Charters (30 Oct: replaced the "you keep the ore" quotas) ---
+
+// A charter in slot 0 for "amount" tonnes from a field.
+function forceCharter(state, fieldId, amount) {
+  return forceContract(state, "mining_charter", {
+    itemId: FIELDS[fieldId].yields, fieldId, amount, credits: 900, shipId: null, delivered: 0,
+  });
+}
+
+test("Charter: a docked ship lent to a charter hands its hauls to the client, then the contract pays", () => {
+  // Why: the core rule. 200 t owed, a Prospector holds 120 t:
+  // trip 1 gives 120 t, trip 2 gives the last 80 t and the other
+  // 40 t go into your hold. Then it pays and the ship is free.
   const state = gameWithBoard();
-  state.stats.mined.inner_belt = 500;                 // mined before: doesn't count
-  forceContract(state, "mining_quota", { itemId: "iron_ore", fieldId: "inner_belt", amount: 240, baseline: 500, credits: 480 });
+  const contract = forceCharter(state, "inner_belt", 200);
   const credits = state.credits;
+  assert.equal(charterShip(state, 0, "ship-1").ok, true);
+  startMiningJob(state, "ship-1", state.ships[0].destination, START);
+  const trip = state.jobs[0].durationMs;
+
+  processJobs(state, START + trip);
+  assert.equal(contract.delivered, 120);
+  assert.equal(state.inventory.iron_ore, 0);            // none of it was yours
+
+  const results = processJobs(state, START + trip * 2);
+  assert.ok(results.some((r) => r.kind === "contract"), "the charter finished");
+  assert.equal(state.credits, credits + 900);
+  assert.equal(state.inventory.iron_ore, 40);           // the extra 40 t is yours
+  assert.equal(getCharter(state, "ship-1"), null);      // free again
+  assert.ok(state.skills.mining.xp > XP_TABLE[3], "Mining XP still earned");
+});
+
+test("Charter: a ship already working starts its charter from its next departure", () => {
+  // Why: a charter never changes a trip that's under way. The trip
+  // in progress (Inner Belt) is yours; the next goes to the charter's
+  // field (the Outer Belt).
+  const state = newGame();
+  state.skills.mining.xp = XP_TABLE[5];
+  processJobs(state, START);
+  startMiningJob(state, "ship-1", "inner_belt", START);
+  const contract = forceCharter(state, "outer_belt", 300);
+  charterShip(state, 0, "ship-1");
+  const firstTrip = state.jobs[0].durationMs;
+  processJobs(state, START + firstTrip);
+  assert.equal(state.inventory.iron_ore, 120);          // the first trip was yours
+  assert.equal(contract.delivered, 0);
+  assert.equal(state.jobs[0].fieldId, "outer_belt");    // now heading to the charter's field
+});
+
+test("Charter: a chartered ship can't be sold, re-chartered or lent twice", () => {
+  const state = gameWithBoard();
+  state.credits = 100000;
+  buyShip(state, "prospector");
+  forceCharter(state, "inner_belt", 200);
+  charterShip(state, 0, "ship-1");
+  assert.equal(canSellShip(state, "ship-1").ok, false);
+  assert.equal(canCharter(state, 0, "ship-2").ok, false);   // this charter has its ship
+});
+
+test("Charter: discarding it frees the ship, and its next haul is yours", () => {
+  const state = gameWithBoard();
+  const contract = forceCharter(state, "inner_belt", 500);
+  charterShip(state, 0, "ship-1");
   startMiningJob(state, "ship-1", "inner_belt", START);
   const trip = state.jobs[0].durationMs;
-  processJobs(state, START + trip);                   // 120 t
-  assert.equal(getProgress(state, state.contracts.slots[0].contract).have, 120);
-  const results = processJobs(state, START + trip * 2);   // 240 t: done
-  assert.ok(results.some((r) => r.kind === "contract"));
-  assert.equal(state.credits, credits + 480);
-  assert.equal(state.inventory.iron_ore, 240);       // the ore is still yours
+  discardContract(state, 0, START + 1000);              // mid-trip
+  processJobs(state, START + trip);
+  assert.equal(state.inventory.iron_ore, 120);
+  assert.equal(getCharter(state, "ship-1"), null);
+});
+
+test("Charter: one jump gives the same result as playing it minute by minute", () => {
+  // Why: everything must come out the same offline (the engine rule).
+  const make = () => {
+    const state = gameWithBoard();
+    forceCharter(state, "inner_belt", 300);
+    charterShip(state, 0, "ship-1");
+    startMiningJob(state, "ship-1", "inner_belt", START);
+    return state;
+  };
+  const jumped = make();
+  processJobs(jumped, START + 60 * MINUTE);
+  const stepped = make();
+  for (let t = MINUTE; t <= 60 * MINUTE; t += MINUTE) processJobs(stepped, START + t);
+  assert.deepEqual(jumped.contracts, stepped.contracts);
+  assert.deepEqual(jumped.inventory, stepped.inventory);
+  assert.equal(jumped.credits, stepped.credits);
+});
+
+// --- Diplomacy (30 Oct) ---
+
+test("Diplomacy: a finished contract earns Diplomacy XP, more at a higher tier", () => {
+  const state = gameWithBoard();
+  const contract = forceContract(state, "ore_requisition", { itemId: "iron_ore", amount: 10 });
+  state.inventory.iron_ore = 10;
+  const result = deliverContract(state, 0, START);
+  assert.equal(result.xpGained, CONTRACT_KINDS.ore_requisition.xp);
+  assert.equal(state.skills.diplomacy.xp, CONTRACT_KINDS.ore_requisition.xp);
+  state.contracts.reputation.independents = REPUTATION_TIERS[2].from;   // Trusted: x2 size
+  assert.equal(getContractXp(state, contract), CONTRACT_KINDS.ore_requisition.xp * REPUTATION_TIERS[2].size);
+});
+
+test("Diplomacy: each slot level adds a contract to the board, posted straight away", () => {
+  const state = gameWithBoard();
+  assert.equal(state.contracts.slots.length, CONTRACTS.slots);
+  state.skills.diplomacy.xp = XP_TABLE[CONTRACTS.slotLevels[0]];
+  assert.equal(getBoardSlotCount(state), CONTRACTS.slots + 1);
+  checkContracts(state, START);
+  assert.equal(state.contracts.slots.length, CONTRACTS.slots + 1);
+  assert.ok(state.contracts.slots[CONTRACTS.slots].contract, "the new slot has a contract");
+  state.skills.diplomacy.xp = XP_TABLE[CONTRACTS.slotLevels[1]];
+  assert.equal(getBoardSlotCount(state), CONTRACTS.slots + 2);
+});
+
+test("Save: a version 17 save gets Diplomacy and room for ice, and loses its old quotas", () => {
+  const old = gameWithBoard();
+  old.version = 17;
+  delete old.skills.diplomacy;
+  delete old.inventory.ice;
+  old.contracts.slots[0].contract = { ...old.contracts.slots[0].contract, kindId: "mining_quota" };
+  const state = parseSave(JSON.stringify(old));
+  assert.equal(state.version, SAVE_VERSION);
+  assert.deepEqual(state.skills.diplomacy, { xp: 0 });
+  assert.equal(state.inventory.ice, 0);
+  assert.notEqual(state.contracts.slots[0].contract?.kindId, "mining_quota");   // cleared (and reposted)
 });
 
 test("Contracts: a survey request pays when the target is surveyed", () => {

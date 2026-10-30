@@ -9,6 +9,7 @@ import { isShipTypeUnlocked } from "./skills.js";
 import { getShipPoints, getCommandFree } from "./command.js";
 import { findShip } from "./state.js";
 import { getJobForShip } from "./jobs.js";
+import { getCharter } from "./contracts.js";
 
 
 // -------------------------------------------------------------
@@ -149,6 +150,10 @@ export function canSellShip(state, shipId) {
   }
   if (getJobForShip(state, shipId)) {
     return { ok: false, reason: "Ship is busy" };
+  }
+  // Lent out on a charter: finish or discard the contract first.
+  if (getCharter(state, shipId)) {
+    return { ok: false, reason: "On a charter" };
   }
   return { ok: true };
 }

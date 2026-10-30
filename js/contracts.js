@@ -11,10 +11,13 @@
 //
 // Kinds of contract (CONTRACT_KINDS in content.js):
 //   deliver   hand goods over from the hold (a button press)
-//   mine      bring home ore from one field  \
-//   refine    make metal at the refinery      |  these finish by
-//   survey    survey one target               |  themselves, as the
-//   deepScan  run some deep scans            /   work gets done
+//   charter   lend a mining ship: its hauls from \
+//             one field go to the client        |  these finish by
+//   survey    survey one target                 |  themselves, as the
+//   deepScan  run some deep scans              /   work gets done
+// (Mining and smelting quotas, where you kept the goods, were
+// replaced by charters on 30 Oct: Dan felt "you keep the ore"
+// didn't work as a story.)
 //
 // Every contract is posted by a FACTION (CONTRACT_FACTIONS), and
 // finishing it pays credits and REPUTATION with that faction.
@@ -42,11 +45,14 @@
 //     credits: 1340,                  what it pays
 //     reputation: 10,                 and the reputation it earns
 //     client: "A belt co-op",
+//     shipId: "ship-2",               charters only: the ship lent
+//                                     (null until the player picks one)
+//     delivered: 120,                 charters only: tonnes handed over
 //   }
 // =============================================================
 
 import { CONTRACT_KINDS, CONTRACT_CLIENTS, CONTRACT_FACTIONS, REPUTATION_TIERS, CONTRACTS, FIELDS, RECIPES, WORKSHOP_RECIPES, ITEMS, SURVEY_TARGETS, SHIP_TYPES } from "../data/content.js";
-import { getLevel, isFieldUnlocked } from "./skills.js";
+import { getLevel, isFieldUnlocked, addXp } from "./skills.js";
 import { getSellable } from "./bonded.js";
 import { isRefineryOpen, isRecipeUnlocked } from "./refinery.js";
 import { isWorkshopOpen, isWorkshopRecipeUnlocked } from "./workshop.js";
@@ -128,14 +134,14 @@ export function getSubjects(state, kindId, allowRepeats = false) {
   const kind = CONTRACT_KINDS[kindId];
   let subjects = [];
 
-  if (kind.kind === "deliver" || kind.kind === "mine" || kind.kind === "refine") {
+  if (kind.kind === "deliver" || kind.kind === "charter") {
     // Goods the player can get: ore from fields they can mine,
     // metal from recipes they have, products likewise.
     if (kind.goods === "ore") {
       for (const [fieldId, field] of Object.entries(FIELDS)) {
         if (isFieldUnlocked(state, fieldId)) {
-          // A mining quota is about one field; a delivery just the ore.
-          subjects.push({ itemId: field.yields, fieldId: kind.kind === "mine" ? fieldId : null, targetId: null });
+          // A charter is about one field; a delivery just the ore.
+          subjects.push({ itemId: field.yields, fieldId: kind.kind === "charter" ? fieldId : null, targetId: null });
         }
       }
     }
@@ -165,6 +171,10 @@ export function getSubjects(state, kindId, allowRepeats = false) {
         subjects.push({ itemId: null, fieldId: null, targetId });
       }
     }
+  }
+
+  if (kind.kind === "charter" && !state.ships.some((ship) => SHIP_TYPES[ship.type].role === "mining")) {
+    subjects = [];   // nothing to lend (every barge sold)
   }
 
   if (kind.kind === "deepScan") {
@@ -272,6 +282,10 @@ export function postContract(state, slotIndex) {
     reputation: kind.reputation,
     client: CONTRACT_CLIENTS[Math.floor(roll(3) * CONTRACT_CLIENTS.length)],
   };
+  if (kind.kind === "charter") {
+    contract.shipId = null;      // the player picks a ship on the card
+    contract.delivered = 0;
+  }
   slot.contract = contract;
   slot.readyAt = null;
   return { kind: "posted", slot: slotIndex, contract, trips: 1, xpGained: 0, newLevels: [] };
@@ -293,12 +307,10 @@ function getOptions(state, allowRepeats) {
 // The running total a work contract counts from, e.g. all the
 // nickel ore ever brought home from the Outer Belt. Progress is
 // this number now minus what it was when the contract was posted.
-// (Deliveries and surveys don't count anything: 0.)
+// (Deliveries, charters and surveys don't count anything: 0.)
 // -------------------------------------------------------------
 function getCounter(state, kindId, subject) {
   const kind = CONTRACT_KINDS[kindId].kind;
-  if (kind === "mine") return state.stats.mined[subject.fieldId] || 0;
-  if (kind === "refine") return state.stats.refined[subject.itemId] || 0;
   if (kind === "deepScan") return state.exploration.deepScans;
   return 0;
 }
@@ -319,6 +331,7 @@ export function getProgress(state, contract) {
   let have;
   if (kind === "deliver") have = getSellable(state, contract.itemId);
   else if (kind === "survey") have = isSurveyed(state, contract.targetId) ? 1 : 0;
+  else if (kind === "charter") have = contract.delivered;
   else have = getCounter(state, contract.kindId, contract) - contract.baseline;
   return { have: Math.min(have, contract.amount), need: contract.amount };
 }
@@ -361,6 +374,8 @@ export function deliverContract(state, slotIndex, now) {
 export function discardContract(state, slotIndex, now) {
   const slot = state.contracts.slots[slotIndex];
   if (!slot || !slot.contract) return false;
+  // A chartered ship is simply free again: hauls already handed
+  // over stay handed over (and unpaid), the rest are yours.
   slot.contract = null;
   slot.readyAt = now + CONTRACTS.refillMinutes * 60 * 1000;
   return true;
@@ -383,6 +398,11 @@ function completeContract(state, slotIndex, time) {
   state.credits += contract.credits;
   board.reputation[factionId] = getReputation(state, factionId) + contract.reputation;
   board.completed += 1;
+  // Diplomacy XP: the kind's XP, times the size for your tier with
+  // that faction (bigger contracts, more XP). A Diplomacy level
+  // can add a slot to the board (see getSlotCount).
+  const xp = getContractXp(state, contract);
+  const newLevels = addXp(state, "diplomacy", xp);
 
   slot.contract = null;
   slot.readyAt = time + CONTRACTS.refillMinutes * 60 * 1000;
@@ -396,9 +416,105 @@ function completeContract(state, slotIndex, time) {
     tierBefore,
     tierAfter: getTier(state, factionId).name,
     trips: 1,
-    xpGained: 0,
-    newLevels: [],
+    skillId: "diplomacy",
+    xpGained: xp,
+    newLevels,
   };
+}
+
+// The Diplomacy XP a contract earns when it's finished (see above).
+export function getContractXp(state, contract) {
+  return CONTRACT_KINDS[contract.kindId].xp * getTier(state, contract.faction).size;
+}
+
+
+// =============================================================
+// CHARTERS: lending a mining ship (30 Oct)
+// -------------------------------------------------------------
+// The player picks one of their mining ships on the contract's
+// card. From its NEXT departure the ship works the contract's
+// field, and every haul it brings home goes to the client until
+// the contract's tonnes are handed over (any extra on the last
+// trip goes into your hold). Then the contract pays and the ship
+// carries on mining that field as normal. While it's chartered it
+// can't be sent elsewhere or sold. Which ship is chartered lives
+// only on the contract (contract.shipId), so there's one place
+// that says so.
+// =============================================================
+
+// -------------------------------------------------------------
+// getCharter(state, shipId)
+// The charter this ship is lent to, or null.
+// -------------------------------------------------------------
+export function getCharter(state, shipId) {
+  for (const slot of state.contracts.slots) {
+    if (slot.contract && slot.contract.shipId === shipId) return slot.contract;
+  }
+  return null;
+}
+
+// -------------------------------------------------------------
+// canCharter(state, slotIndex, shipId)
+// Can this ship be lent to this charter? { ok, reason }
+// -------------------------------------------------------------
+export function canCharter(state, slotIndex, shipId) {
+  const contract = state.contracts.slots[slotIndex]?.contract;
+  if (!contract || CONTRACT_KINDS[contract.kindId].kind !== "charter") {
+    return { ok: false, reason: "This isn't a charter." };
+  }
+  if (contract.shipId) return { ok: false, reason: "A ship is already on this charter." };
+  const ship = state.ships.find((s) => s.id === shipId);
+  if (!ship) return { ok: false, reason: "Pick a ship." };
+  if (SHIP_TYPES[ship.type].role !== "mining") return { ok: false, reason: "Only mining ships can be chartered." };
+  if (getCharter(state, shipId)) return { ok: false, reason: `${ship.name} is already on a charter.` };
+  return { ok: true };
+}
+
+// -------------------------------------------------------------
+// charterShip(state, slotIndex, shipId)
+// Lends the ship. Its destination becomes the charter's field, so
+// a docked ship is ready to go and a working one heads there from
+// its next trip (jobs.js, planNextTrip). Returns { ok, reason }.
+// -------------------------------------------------------------
+export function charterShip(state, slotIndex, shipId) {
+  const check = canCharter(state, slotIndex, shipId);
+  if (!check.ok) return check;
+  const contract = state.contracts.slots[slotIndex].contract;
+  contract.shipId = shipId;
+  state.ships.find((s) => s.id === shipId).destination = contract.fieldId;
+  return { ok: true };
+}
+
+// -------------------------------------------------------------
+// takeCharterHaul(state, contractNumber, tonnes)
+// A chartered ship has docked with "tonnes" of ore. The client
+// takes what's still owed; returns how many tonnes they took (the
+// rest goes into your hold, in jobs.js). 0 if the charter has gone
+// (discarded mid-trip): then it's all yours.
+// -------------------------------------------------------------
+export function takeCharterHaul(state, contractNumber, tonnes) {
+  for (const slot of state.contracts.slots) {
+    const contract = slot.contract;
+    if (contract && contract.number === contractNumber && contract.shipId) {
+      const taken = Math.min(tonnes, contract.amount - contract.delivered);
+      contract.delivered += taken;
+      return taken;
+    }
+  }
+  return 0;
+}
+
+
+// =============================================================
+// HOW MANY SLOTS: the Diplomacy skill (30 Oct)
+// -------------------------------------------------------------
+// The board starts with CONTRACTS.slots (3), shared by every
+// faction. Each Diplomacy level in CONTRACTS.slotLevels adds one.
+// =============================================================
+
+export function getSlotCount(state) {
+  const level = getLevel(state, "diplomacy");
+  return CONTRACTS.slots + CONTRACTS.slotLevels.filter((needed) => level >= needed).length;
 }
 
 
@@ -416,6 +532,12 @@ function completeContract(state, slotIndex, time) {
 export function checkContracts(state, time) {
   const results = [];
   if (!isBoardOpen(state)) return results;
+
+  // A Diplomacy level may have added a slot: a new, empty one is
+  // posted to straight away (below).
+  while (state.contracts.slots.length < getSlotCount(state)) {
+    state.contracts.slots.push({ contract: null, readyAt: null });
+  }
 
   state.contracts.slots.forEach((slot, index) => {
     const contract = slot.contract;

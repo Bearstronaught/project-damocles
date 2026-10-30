@@ -34,7 +34,8 @@ import { createContracts } from "./contracts.js";
 //   Version 15: the Exploration skill, survey records, milestones
 //   Version 16: the contracts board, and running totals (stats)
 //   Version 17: reputation kept per faction, contracts name theirs
-export const SAVE_VERSION = 17;
+//   Version 18: Diplomacy skill, ice, charters replace quotas
+export const SAVE_VERSION = 18;
 
 
 // -------------------------------------------------------------
@@ -66,6 +67,7 @@ export function createNewGame() {
       cargo_pod: 0,
       thruster_assembly: 0,
       wreck_alloy: 0,
+      ice: 0,
     },
 
     // The player's fleet. Each ship has its own unique ID
@@ -118,6 +120,7 @@ export function createNewGame() {
       refining: { xp: 0 },
       manufacturing: { xp: 0 },
       exploration: { xp: 0 },
+      diplomacy: { xp: 0 },
     },
 
     // EXPLORATION (exploration.js): which survey targets are done,

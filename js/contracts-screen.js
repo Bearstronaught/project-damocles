@@ -15,16 +15,15 @@
 // passes button presses on to main.js (the "actions").
 // =============================================================
 
-import { CONTRACT_KINDS, CONTRACTS, CONTRACT_FACTIONS, ITEMS, REPUTATION_TIERS } from "../data/content.js";
-import { isBoardOpen, getTier, getReputation, getProgress, canDeliver, describeContract } from "./contracts.js";
+import { CONTRACT_KINDS, CONTRACTS, CONTRACT_FACTIONS, ITEMS, REPUTATION_TIERS, SHIP_TYPES, FIELDS } from "../data/content.js";
+import { isBoardOpen, getTier, getReputation, getProgress, canDeliver, describeContract, getCharter } from "./contracts.js";
 import { formatNumber, formatTonnes, formatDuration } from "./ui.js";
 import { gameNow } from "./clock.js";
 
 // What sort of job each kind is, for the small tag on its card.
 const KIND_TAGS = {
   deliver: "Delivery",
-  mine: "Work",
-  refine: "Work",
+  charter: "Charter",
   survey: "Exploration",
   deepScan: "Exploration",
 };
@@ -157,7 +156,24 @@ export function buildContractsScreen(actions, makeTwoClick) {
   // renderContracts moves each into the box of the faction whose
   // contract it holds.
   const firstGrid = part(boardArea.querySelector(".faction-group"), "cards");
-  for (let slot = 0; slot < CONTRACTS.slots; slot++) {
+  builtSlots = 0;
+  buildActions = { actions, makeTwoClick, firstGrid };
+  addSlotCards(CONTRACTS.slots);
+}
+
+// The pieces addSlotCards needs, kept from buildContractsScreen.
+let buildActions = null;
+let builtSlots = 0;   // how many slot cards exist
+
+// -------------------------------------------------------------
+// addSlotCards(count)
+// Makes slot cards until there are "count" of them. A Diplomacy
+// level can add a slot to the board, so renderContracts calls
+// this whenever the board has more slots than cards.
+// -------------------------------------------------------------
+function addSlotCards(count) {
+  const { actions, makeTwoClick, firstGrid } = buildActions;
+  for (let slot = builtSlots; slot < count; slot++) {
     const card = document.createElement("div");
     card.className = "contract-card";
     card.id = "contract-slot-" + slot;
@@ -173,6 +189,11 @@ export function buildContractsScreen(actions, makeTwoClick) {
         <dt>Pays</dt>        <dd data-part="pay"></dd>
         <dt>Reputation</dt>  <dd data-part="rep"></dd>
       </dl>
+      <!-- Charters only: pick a mining ship to lend -->
+      <div class="charter-pick" data-part="charter">
+        <select class="dest-select" data-part="ships" aria-label="Ship to charter"></select>
+        <button class="btn btn-primary" data-part="charter-go">Charter</button>
+      </div>
       <div class="contract-buttons">
         <button class="btn btn-primary" data-part="deliver">Deliver</button>
         <button class="btn btn-small" data-part="discard">Discard</button>
@@ -186,6 +207,11 @@ export function buildContractsScreen(actions, makeTwoClick) {
       const result = actions.deliverContract(slot);
       part(card, "message").textContent = result.ok ? "" : result.reason;
     });
+    // Charter: lend the ship picked in the dropdown
+    part(card, "charter-go").addEventListener("click", () => {
+      const result = actions.charterShip(slot, part(card, "ships").value);
+      part(card, "message").textContent = result.ok ? "" : result.reason;
+    });
     // Two clicks to discard: the first arms it, the second does it.
     makeTwoClick(part(card, "discard"), "Click again to discard", () => {
       actions.discardContract(slot);
@@ -194,6 +220,7 @@ export function buildContractsScreen(actions, makeTwoClick) {
 
     firstGrid.appendChild(card);
   }
+  builtSlots = Math.max(builtSlots, count);
 }
 
 
@@ -212,6 +239,13 @@ export function renderContracts(state) {
   const ready = {};
   if (!isBoardOpen(state)) return ready;
   const now = gameNow(state);
+
+  // A Diplomacy level added a slot? Make its card. (And after a
+  // reset to a smaller board, hide the cards it no longer has.)
+  if (state.contracts.slots.length > builtSlots) addSlotCards(state.contracts.slots.length);
+  for (let index = 0; index < builtSlots; index++) {
+    byId("contract-slot-" + index).hidden = index >= state.contracts.slots.length;
+  }
 
   // Per faction, for the box headings: { independents: { contracts: 2, ready: 1 } }
   const counts = {};
@@ -252,15 +286,19 @@ export function renderContracts(state) {
     // Progress bar and words
     const progress = getProgress(state, contract);
     part(card, "bar").style.width = (progress.have / progress.need * 100) + "%";
-    setText(part(card, "progress"), progressText(kind.kind, contract, progress));
+    setText(part(card, "progress"), progressText(state, kind.kind, contract, progress));
+
+    // Charters: the ship picker, until a ship is lent
+    const picking = kind.kind === "charter" && !contract.shipId;
+    part(card, "charter").hidden = !picking;
+    if (picking) fillShipPicker(state, part(card, "ships"), part(card, "charter-go"));
 
     // What it pays. A delivery compares with selling it at home;
     // a work contract is a bonus on goods you keep anyway.
     let pay = formatNumber(contract.credits) + " cr";
-    if (kind.kind === "deliver") {
+    if (kind.kind === "deliver" || kind.kind === "charter") {
+      // Compared with selling the same goods at home
       pay += ` (selling it at home: ${formatNumber(contract.amount * ITEMS[contract.itemId].sellPrice)} cr)`;
-    } else if (kind.kind === "mine" || kind.kind === "refine") {
-      pay += ` bonus; you keep the ${kind.kind === "mine" ? "ore" : "metal"}`;
     }
     setText(part(card, "pay"), pay);
     setText(part(card, "rep"), "+" + contract.reputation);
@@ -316,15 +354,38 @@ export function renderContracts(state) {
 }
 
 // -------------------------------------------------------------
-// progressText(kind, contract, progress)
+// fillShipPicker(state, select, button)
+// The charter's dropdown: your mining ships that aren't already on
+// a charter. Rebuilt only when that list changes (rewriting it 4
+// times a second would close it while you're choosing).
+// -------------------------------------------------------------
+function fillShipPicker(state, select, button) {
+  const ships = state.ships.filter((ship) => SHIP_TYPES[ship.type].role === "mining" && !getCharter(state, ship.id));
+  const key = ships.map((ship) => ship.id + ":" + ship.name).join(",");
+  if (select.dataset.key !== key) {
+    select.dataset.key = key;
+    const chosen = select.value;
+    select.innerHTML = ships.length === 0
+      ? `<option value="">No mining ship free</option>`
+      : ships.map((ship) => `<option value="${ship.id}">${ship.name} (${SHIP_TYPES[ship.type].name})</option>`).join("");
+    if (ships.some((ship) => ship.id === chosen)) select.value = chosen;   // keep the choice
+  }
+  button.disabled = ships.length === 0;
+}
+
+// -------------------------------------------------------------
+// progressText(state, kind, contract, progress)
 // How far along a contract is, in words, e.g.
 //   "In your hold: 120 t of 150 t"
-//   "Brought home from the Outer Belt: 60 t of 280 t"
+//   "Rockhopper is working the Outer Belt: 120 t of 300 t handed over"
 // -------------------------------------------------------------
-function progressText(kind, contract, { have, need }) {
+function progressText(state, kind, contract, { have, need }) {
   if (kind === "deliver") return `In your hold: ${formatTonnes(have)} of ${formatTonnes(need)}`;
-  if (kind === "mine") return `Brought home since it was posted: ${formatTonnes(have)} of ${formatTonnes(need)}`;
-  if (kind === "refine") return `Made since it was posted: ${formatTonnes(have)} of ${formatTonnes(need)}`;
+  if (kind === "charter") {
+    if (!contract.shipId) return "Pick a mining ship to lend. It starts from its next departure.";
+    const ship = state.ships.find((s) => s.id === contract.shipId);
+    return `${ship.name} is working the ${FIELDS[contract.fieldId].name}: ${formatTonnes(have)} of ${formatTonnes(need)} handed over`;
+  }
   if (kind === "survey") return have >= need ? "Surveyed" : "Not surveyed yet";
   return `Deep scans run since it was posted: ${have} of ${need}`;
 }

@@ -2972,3 +2972,20 @@ body.nav-collapsed .nav-version {
 }
 
 .log-contract .log-tag { color: var(--amber); }
+
+/* ----- Charters: the ship picker on a contract card (30 Oct) -----
+   A dropdown of your free mining ships, then the Charter button */
+.charter-pick {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.charter-pick[hidden] {
+  display: none;
+}
+
+.charter-pick .dest-select {
+  flex: 1;
+  min-width: 0;               /* lets it shrink on a phone */
+}

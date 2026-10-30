@@ -17,6 +17,7 @@ export const BALANCE = {
     cargo_pod: { sellPrice: 31, hubPrice: 50 },
     thruster_assembly: { sellPrice: 51, hubPrice: 82 },
     wreck_alloy: { sellPrice: 300, hubPrice: 480 },
+    ice: { sellPrice: 15, hubPrice: 24 },
   },
   ships: {
     prospector: { role: 'mining', size: 'small', skill: 'mining', unlockLevel: 1, cost: 5000, cargoCapacity: 120, miningRate: 120, speed: 1 },
@@ -25,8 +26,9 @@ export const BALANCE = {
     pathfinder: { role: 'scout', size: 'small', skill: 'exploration', unlockLevel: 1, cost: 2000, cargoCapacity: 0, speed: 1.25 },
   },
   fields: {
-    inner_belt: { yields: 'iron_ore', travelSeconds: 45, tonnesPerXp: 6, unlockLevel: 1 },
-    outer_belt: { yields: 'nickel_ore', travelSeconds: 90, tonnesPerXp: 3, unlockLevel: 5 },
+    inner_belt: { yields: 'iron_ore', travelSeconds: 45, tonnesPerXp: 6, unlockLevel: 1, survey: null },
+    outer_belt: { yields: 'nickel_ore', travelSeconds: 90, tonnesPerXp: 3, unlockLevel: 5, survey: null },
+    ice_moon: { yields: 'ice', travelSeconds: 120, tonnesPerXp: 4, unlockLevel: 1, survey: 'ice_moon' },
   },
   recipes: {
     iron_bar: { unlockLevel: 1, inputs: { iron_ore: 60 }, output: 'iron_bar', outputAmount: 30, seconds: 60, xp: 8 },
@@ -101,13 +103,12 @@ export const BALANCE = {
     wreck_4: { unlockLevel: 15, requires: 'wreck_3', travelSeconds: 90, scanSeconds: 1500, xp: 40, credits: 0, item: 'wreck_alloy', tonnes: 8 },
   },
   contractKinds: {
-    ore_requisition: { kind: 'deliver', goods: 'ore', weight: 4, amount: 150, pay: 1.5, reputation: 10 },
-    metal_requisition: { kind: 'deliver', goods: 'metal', weight: 3, amount: 60, pay: 1.5, reputation: 15 },
-    parts_order: { kind: 'deliver', goods: 'product', weight: 3, amount: 60, pay: 1.5, reputation: 20 },
-    mining_quota: { kind: 'mine', goods: 'ore', weight: 2, amount: 300, pay: 0.4, reputation: 10 },
-    smelting_quota: { kind: 'refine', goods: 'metal', weight: 2, amount: 90, pay: 0.5, reputation: 15 },
-    survey_request: { kind: 'survey', goods: 'none', weight: 2, amount: 1, pay: 120, reputation: 15 },
-    deep_scan_contract: { kind: 'deepScan', goods: 'none', weight: 1, amount: 3, pay: 150, reputation: 10 },
+    ore_requisition: { kind: 'deliver', goods: 'ore', weight: 4, amount: 150, pay: 1.5, reputation: 10, xp: 30 },
+    metal_requisition: { kind: 'deliver', goods: 'metal', weight: 3, amount: 60, pay: 1.5, reputation: 15, xp: 40 },
+    parts_order: { kind: 'deliver', goods: 'product', weight: 3, amount: 60, pay: 1.5, reputation: 20, xp: 50 },
+    mining_charter: { kind: 'charter', goods: 'ore', weight: 3, amount: 300, pay: 1.4, reputation: 15, xp: 40 },
+    survey_request: { kind: 'survey', goods: 'none', weight: 2, amount: 1, pay: 120, reputation: 15, xp: 35 },
+    deep_scan_contract: { kind: 'deepScan', goods: 'none', weight: 1, amount: 3, pay: 150, reputation: 10, xp: 30 },
   },
   reputationTiers: [
     { from: 0, size: 1 },
@@ -132,6 +133,6 @@ export const BALANCE = {
   refinery: { slotLevels: [1, 10, 25], speedPerLevel: 0.005, openAtMiningLevel: 8 },
   workshop: { openAtRefiningLevel: 8, slotLevels: [1, 12, 35], queueLevels: [8, 25], baseQueue: 3, maxOrderBatches: 20, speedPerLevel: 0.005, standingPerSlot: 2 },
   exploration: { scanSpeedPerLevel: 0.005, deepScan: { unlockLevel: 1, travelSeconds: 60, scanSeconds: 240, xp: 30, findChance: 0.2, alloyShare: 0.33, alloyTonnes: 1, creditsMin: 300, creditsMax: 900 } },
-  contracts: { openAtMiningLevel: 3, slots: 3, refillMinutes: 10, surveyLevelsAhead: 2 },
+  contracts: { openAtMiningLevel: 3, slots: 3, refillMinutes: 10, surveyLevelsAhead: 2, slotLevels: [10, 25] },
   rules: { offlineCapHours: 24 },
 };

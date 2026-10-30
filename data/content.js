@@ -83,6 +83,13 @@ export const ITEMS = {
   // Found, not made: your Pathfinder brings it back from the
   // alien wreck and deep scans (see SURVEY_TARGETS below). Worth
   // a lot per tonne; later it will feed Research.
+  // Ice from the Ice moon (opens when a scout surveys it). With
+  // no habitable planet in the system, water is valued: it sells
+  // for more than nickel ore, less than hull plating (Dan, 30 Oct).
+  ice: {
+    name: "Ice",
+    ...BALANCE.items.ice,
+  },
   wreck_alloy: {
     name: "Wreck alloy",
     ...BALANCE.items.wreck_alloy,
@@ -99,6 +106,18 @@ export const ITEMS = {
 // "perk" names what EVERY level gives (the numbers are in the
 // balance sheet; skills.js getLevelPerk adds them up), e.g.
 // "drill speed" -> "Every level: +0.5% drill speed".
+// -------------------------------------------------------------
+// SHIP SPEED ON SCREEN (Dan, 30 Oct)
+// -------------------------------------------------------------
+// The game works with a speed multiplier (balance sheet: 1 = a
+// Prospector, 1.25 = a quarter faster; a trip takes its time ÷
+// speed). Screens show it in km/s instead, so ships compare at a
+// glance: speed 1 = 120 km/s, so a Prospector flies at 120 km/s,
+// an Excavator (0.75) at 90 and a Pathfinder (1.25) at 150. Only
+// the words on screen use this; it doesn't change any trip.
+export const KM_PER_SECOND_AT_SPEED_1 = 120;
+
+
 export const SKILLS = {
   mining: {
     name: "Mining",
@@ -124,6 +143,11 @@ export const SKILLS = {
     name: "Exploration",
     description: "Send scouts to survey the home system. Each survey target is a one-off trip that brings back a find: credits, goods, or another piece of the alien wreck's story. When the targets run out, scouts run deep scans for XP and the odd find. Your first scout, the Pathfinder, goes on sale once you've sold your first ore. Levels unlock new targets, and every level makes scans a little faster.",
     perk: "scan speed",
+  },
+  diplomacy: {
+    name: "Diplomacy",
+    description: "Deal with the factions that post on the contracts board. Diplomacy XP comes from finishing contracts (bigger contracts, more XP). Levels add slots to the board, so more contracts are on offer at once. How well a faction thinks of you is your reputation with them, kept separately on the Contracts tab.",
+    perk: null,
   },
 };
 
@@ -288,6 +312,13 @@ export const FIELDS = {
     name: "Outer Belt",
     description: "Sparse nickel rock on the edge of the system. Twice the flight, much better pay.",
     ...BALANCE.fields.outer_belt,
+  },
+  // Opened by a survey, not a Mining level: "survey" names the
+  // survey target (SURVEY_TARGETS) that has to be done first.
+  ice_moon: {
+    name: "Ice moon",
+    description: "Thick ice under a thin crust, a long flight out. Water is scarce in a system with nowhere to live, so it sells well.",
+    ...BALANCE.fields.ice_moon,
   },
 };
 
@@ -537,7 +568,7 @@ const TARGET_WORDS = {
     name: "Ice moon",
     description: "A frozen moon circling the gas giant. Worth a look for anything a mining outfit can use.",
     find: "an old fuel depot's unclaimed balance",
-    lore: "Thick ice under a thin crust. One day it could be fuel; for now it's a very cold view.",
+    lore: "Thick ice under a thin crust, and nobody's claim on it. With no habitable world in the system, every tonne of water is worth hauling. Your barges can mine it now.",
   },
   wreck_2: {
     name: "The wreck: hull breach",
@@ -633,12 +664,12 @@ export const EXPLORATION = {
 //   amount     a typical size at the first reputation tier: tonnes,
 //              surveys or deep scans. Each contract is between 75%
 //              and 125% of it, times the tier's size.
-//   pay        deliver/mine/refine: times the goods' home price per
-//              tonne (1.5 = half as much again as selling it;
-//              0.4 = a bonus of 40% on ore you keep anyway).
+//   pay        deliver/charter: times the goods' home price per
+//              tonne (1.5 = half as much again as selling it).
 //              survey: credits per Exploration level of the target,
 //              plus 4 levels' worth. deepScan: credits per scan.
-//   reputation what it earns with the belt independents
+//   reputation what it earns with the faction that posted it
+//   xp         the Diplomacy XP it earns, times the tier's size
 const CONTRACT_WORDS = {
   ore_requisition: {
     title: "Ore requisition",
@@ -652,13 +683,9 @@ const CONTRACT_WORDS = {
     title: "Parts order",
     text: "{client} is building something and needs {amount} of {item}.",
   },
-  mining_quota: {
-    title: "Mining quota",
-    text: "{client} wants to know the {field} is worth working. Bring home {amount} of {item} from there; you keep the ore.",
-  },
-  smelting_quota: {
-    title: "Smelting quota",
-    text: "{client} is short of furnace time. Make {amount} of {item} at your refinery; you keep the metal.",
+  mining_charter: {
+    title: "Mining charter",
+    text: "{client} has a buyer but no barge. Lend them one of your mining ships to work the {field}: its hauls are theirs until {amount} of {item} is handed over.",
   },
   survey_request: {
     title: "Survey request",
@@ -711,7 +738,9 @@ export const REPUTATION_TIERS = BALANCE.reputationTiers.map((tier, index) => ({
 // THE BOARD (balance sheet, Contracts tab):
 //   openAtMiningLevel   the belt independents start posting at
 //                       this Mining level
-//   slots               how many contracts are on the board at once
+//   slots               how many contracts are on the board at the
+//                       start, shared by every faction
+//   slotLevels          each of these Diplomacy levels adds a slot
 //   refillMinutes       a finished or discarded contract is replaced
 //                       this long after
 //   surveyLevelsAhead   a survey request can be for a target up to

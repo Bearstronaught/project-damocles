@@ -37,7 +37,7 @@ import { getLevelPerk } from "./skills.js";
 import { startScoutJob, canScoutGo, chooseNextTarget, getTarget, getTargetUnlocksAtLevel, isExplorationOpen, DEEP_SCAN_ID } from "./exploration.js";
 import { describeFind } from "./exploration-screen.js";
 import { showSurveyReport } from "./report.js";
-import { deliverContract, discardContract, canDeliver, describeContract } from "./contracts.js";
+import { deliverContract, discardContract, canDeliver, describeContract, charterShip, getCharter } from "./contracts.js";
 import { saveGame, loadGame, deleteSave, applyOfflineProgress, exportSave, importSave } from "./save.js";
 import { showLevelBanner } from "./banner.js";
 import { setupUI, buildFleetViews, render, addLog, formatNumber, formatXp, formatTonnes, formatDuration, formatPercent, showDevPanel } from "./ui.js";
@@ -122,6 +122,10 @@ const actions = {
     // that are unlocked. (The buttons are disabled otherwise,
     // but checking here too means the rule can't be skipped.)
     if (!ship || getJobForShip(state, shipId) || !isFieldUnlocked(state, fieldId)) {
+      return;
+    }
+    // A chartered ship goes where the charter says (contracts.js).
+    if (getCharter(state, shipId)) {
       return;
     }
     ship.destination = fieldId;
@@ -306,8 +310,30 @@ const actions = {
     if (!check.ok) return check;
     const result = deliverContract(state, slot, gameNow(state));
     logContract(result);
+    logLevelUps(result.skillId, result.newLevels);   // Diplomacy
     refresh();
     return { ok: true };
+  },
+
+  // Lends a mining ship to a charter (contracts.js). Returns
+  // { ok } or { ok: false, reason } for the card.
+  charterShip(slot, shipId) {
+    const result = charterShip(state, slot, shipId);
+    if (result.ok) {
+      const ship = findShip(state, shipId);
+      const contract = state.contracts.slots[slot].contract;
+      const field = FIELDS[contract.fieldId].name;
+      if (getJobForShip(state, shipId)) {
+        // Out working: the charter starts from its next departure.
+        addLog(`${ship.name} is chartered to ${contract.client.toLowerCase()}. It heads for the ${field} after this trip.`, "contract");
+      } else {
+        // Docked: off it goes now (dispatchShip logs the departure).
+        addLog(`${ship.name} is chartered to ${contract.client.toLowerCase()}.`, "contract");
+        actions.dispatchShip(shipId);
+      }
+    }
+    refresh();
+    return result;
   },
 
   // Throws a contract away; a new one comes after the usual wait.
@@ -577,6 +603,7 @@ function tick() {
     // The contracts board: finished and newly posted contracts.
     if (result.kind === "contract") {
       logContract(result);
+      logLevelUps(result.skillId, result.newLevels);   // Diplomacy
       continue;
     }
     if (result.kind === "posted") {
@@ -587,7 +614,9 @@ function tick() {
     const ship = findShip(state, result.shipId);
     if (result.kind === "mining") {
       const itemName = ITEMS[result.itemId].name.toLowerCase();
-      addLog(`${ship.name} docked with ${formatTonnes(result.amount)} of ${itemName} (+${formatXp(result.xpGained)} Mining XP).`, "trip");
+      // On a charter, say how much went to the client.
+      const toClient = result.chartered > 0 ? `, ${formatTonnes(result.chartered)} of it for its charter` : "";
+      addLog(`${ship.name} docked with ${formatTonnes(result.amount)} of ${itemName}${toClient} (+${formatXp(result.xpGained)} Mining XP).`, "trip");
     } else if (result.kind === "haul") {
       addLog(`${ship.name} sold ${describeCargo(result.cargo)} at the ${HUB.name.toLowerCase()} for ${formatNumber(result.credits)} cr (+${formatXp(result.xpGained)} Trade XP).`, "trade");
     } else if (result.kind === "docked" && result.skillId === "exploration") {
@@ -649,6 +678,16 @@ function logScoutResult(result) {
   for (const targetId of result.surveys) {
     addLog(getTarget(targetId).lore, "lore");
   }
+  // A survey that opens a mining field (the Ice moon) says so,
+  // with a banner, because it's a new place to send the barges.
+  for (const targetId of result.surveys) {
+    for (const field of Object.values(FIELDS)) {
+      if (field.survey !== targetId) continue;
+      const ore = ITEMS[field.yields];
+      addLog(`The ${field.name} is open for mining: ${ore.name.toLowerCase()}, ${ore.sellPrice} cr/t at home. Pick it as a barge's destination.`, "level");
+      showLevelBanner(`${field.name} open for mining`, [`${ore.name}: ${ore.sellPrice} cr/t (Command tab)`], "Unlocked");
+    }
+  }
   showSurveyReport(surveyEntries(result.surveys));
   logLevelUps(result.skillId, result.newLevels);
 }
@@ -666,7 +705,7 @@ function logContract(result) {
   const title = CONTRACT_KINDS[contract.kindId].title.toLowerCase();
   const faction = CONTRACT_FACTIONS[contract.faction];   // who posted it
   addLog(`Contract complete: ${title} for ${contract.client.toLowerCase()}. +${formatNumber(result.credits)} cr, ` +
-    `+${result.reputation} reputation with the ${faction.name.toLowerCase()}.`, "contract");
+    `+${result.reputation} reputation with the ${faction.name.toLowerCase()} (+${formatXp(result.xpGained)} Diplomacy XP).`, "contract");
   if (result.tierAfter !== result.tierBefore) {
     addLog(`The ${faction.name.toLowerCase()} now count you as ${result.tierAfter}. Their contracts get bigger, and pay more.`, "level");
     showLevelBanner(`${faction.name}: ${result.tierAfter}`, ["Bigger contracts, better pay (Contracts tab)"], "Reputation");
@@ -778,6 +817,9 @@ function getUnlockLines(skillId, level, withPerk = true) {
       lines.push("New survey target: " + getTarget(targetId).name);
     }
   }
+  if (skillId === "diplomacy" && CONTRACTS.slotLevels.includes(level)) {
+    lines.push("A new slot on the contracts board");
+  }
   if (skillId === "manufacturing") {
     for (const recipeId of getWorkshopRecipeUnlocksAtLevel(level)) {
       lines.push("New recipe: " + WORKSHOP_RECIPES[recipeId].name);
@@ -802,6 +844,11 @@ function getUnlockLines(skillId, level, withPerk = true) {
 // The level perk as one line, e.g. "+0.5% drill speed (now +4.5%)".
 // -------------------------------------------------------------
 function perkLine(skillId, level) {
+  // Diplomacy has no every-level perk: say how big the board is.
+  if (!SKILLS[skillId].perk) {
+    const slots = CONTRACTS.slots + CONTRACTS.slotLevels.filter((needed) => level >= needed).length;
+    return `the contracts board holds ${slots} contracts`;
+  }
   const perk = getLevelPerk(state, skillId, level);
   return `+${formatPercent(perk.perLevel)} ${SKILLS[skillId].perk} (now +${formatPercent(perk.total)})`;
 }
@@ -854,6 +901,9 @@ function logLevelUps(skillId, levels, showBanners = true) {
       for (const targetId of getTargetUnlocksAtLevel(level)) {
         addLog(`New survey target: ${getTarget(targetId).name}. Your scouts will head there after their current trip.`, "level");
       }
+    }
+    if (skillId === "diplomacy" && CONTRACTS.slotLevels.includes(level)) {
+      addLog("The contracts board has room for one more contract. A new one will be posted straight away.", "level");
     }
     if (skillId === "manufacturing") {
       for (const recipeId of getWorkshopRecipeUnlocksAtLevel(level)) {

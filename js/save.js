@@ -448,7 +448,25 @@ function upgradeSave(state) {
     state.version = 17;
   }
 
-  // (Future: if (state.version === 17) { ...; state.version = 18; })
+  // --- Version 17 -> 18: Diplomacy, ice, charters ---
+  // The Diplomacy skill starts at 0 XP, and the hold gets room for
+  // ice. Mining and smelting quotas no longer exist (charters
+  // replaced them), so any on the board are cleared: those slots
+  // post a new contract straight away. (Nothing is lost: you kept
+  // the ore and metal those quotas counted.)
+  if (state.version === 17) {
+    state.skills.diplomacy = { xp: 0 };
+    state.inventory.ice = state.inventory.ice || 0;
+    for (const slot of state.contracts.slots) {
+      if (slot.contract && (slot.contract.kindId === "mining_quota" || slot.contract.kindId === "smelting_quota")) {
+        slot.contract = null;
+        slot.readyAt = null;
+      }
+    }
+    state.version = 18;
+  }
+
+  // (Future: if (state.version === 18) { ...; state.version = 19; })
 
   if (state.version > SAVE_VERSION) {
     // A save from a NEWER version of the game than this one.

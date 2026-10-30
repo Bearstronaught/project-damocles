@@ -17,12 +17,12 @@
 // flicker and sometimes swallow clicks.)
 // =============================================================
 
-import { ITEMS, SHIP_TYPES, FIELDS, SKILLS, HULL_SIZES, COMMAND, HUB, HOME, HAUL_MODES, RECIPES, REFINERY, WORKSHOP_RECIPES, WORKSHOP, UPGRADES, SHIP_UPGRADES, SHIP_PARTS, SURVEY_TARGETS, CONTRACTS } from "../data/content.js";
+import { ITEMS, SHIP_TYPES, FIELDS, SKILLS, HULL_SIZES, COMMAND, HUB, HOME, HAUL_MODES, RECIPES, REFINERY, WORKSHOP_RECIPES, WORKSHOP, UPGRADES, SHIP_UPGRADES, SHIP_PARTS, SURVEY_TARGETS, CONTRACTS, KM_PER_SECOND_AT_SPEED_1 } from "../data/content.js";
 import { isOwned, canBuyIndustryUpgrade, getUpgradeLines } from "./upgrades.js";
 import { gameNow, SPEEDS } from "./clock.js";
 import { getShipStats, getHullParts, getPartGrade, getPartBonus, getNextUpgrade, canBuyShipUpgrade, getUpgradeName, getHullShortName, findUpgrade, getBonusUpTo, getShipGrades, getPendingRefits } from "./ship-upgrades.js";
 import { getJobForShip, getJobPhase, getTripPlan, getHaulPlan, getOreInHold, getMiningXpShare } from "./jobs.js";
-import { getLevel, getLevelProgress, isShipTypeUnlocked, isFieldUnlocked, getMiningDrillPerk, getTradeHubPerk, getLevelPerk } from "./skills.js";
+import { getLevel, getLevelProgress, isShipTypeUnlocked, isFieldUnlocked, getFieldRequirement, getMiningDrillPerk, getTradeHubPerk, getLevelPerk } from "./skills.js";
 import { canBuyShip, canSellShip, getSellValue, getShipPrice, MAX_NAME_LENGTH } from "./shipyard.js";
 import { getShipPoints, getCommandCapacity, getCommandUsed, getNextUpgradeCost, canBuyUpgrade } from "./command.js";
 import { getCargoValue, getTradeXp } from "./trade.js";
@@ -33,7 +33,7 @@ import { VERSION } from "./version.js";
 import { getTarget, getAllTargetIds, getTargetStatus, canScoutGo, getScoutPlan, getScanFactor, isExplorationOpen, DEEP_SCAN_ID } from "./exploration.js";
 import { buildExplorationScreen, renderExploration } from "./exploration-screen.js";
 import { buildContractsScreen, renderContracts } from "./contracts-screen.js";
-import { isBoardOpen } from "./contracts.js";
+import { isBoardOpen, getSlotCount as getBoardSlotCount, getCharter } from "./contracts.js";   // ("as": the refinery has a getSlotCount too)
 import { getRoleGroups, describeGroup } from "./fleet-groups.js";
 import { isRefineryOpen, getRefineJob, getSlotCount, getSlotUnlockLevel, isRecipeUnlocked, getBatchMs, getBatchOutput, hasInputs, describeInputs, getMaxSlots } from "./refinery.js";
 import { isWorkshopOpen, getWorkshopSlotCount, getWorkshopSlotUnlockLevel, getQueueLimit, isWorkshopRecipeUnlocked, getWorkshopBatchMs, getWorkshopJob, hasWorkshopInputs, describeWorkshopInputs, getMaxOrderBatches, getRunningIndex, hasSmartQueue, hasControlCentre, getStandingOrders, standingNeedsWork } from "./workshop.js";
@@ -491,6 +491,14 @@ function setupTips(actions) {
 
 
 // -------------------------------------------------------------
+// fieldNeeds(fieldId)
+// What opens a field, for labels: "Mining 5" or "once surveyed".
+// -------------------------------------------------------------
+function fieldNeeds(fieldId) {
+  return getFieldRequirement(fieldId);
+}
+
+// -------------------------------------------------------------
 // itemTip(state, itemId)
 // What hovering an item's name says, as [title, detail]:
 //   Iron ore       Mined at the Inner Belt (Mining 1)
@@ -507,7 +515,7 @@ function itemTip(state, itemId) {
   const fieldId = Object.keys(FIELDS).find((id) => FIELDS[id].yields === itemId);
   if (fieldId) {
     const field = FIELDS[fieldId];
-    return [name, `Mined at the ${field.name} (Mining ${field.unlockLevel})`];
+    return [name, `Mined at the ${field.name} (${fieldNeeds(fieldId)})`];
   }
 
   // Metal: a refinery recipe
@@ -627,7 +635,7 @@ function statsList(state, typeId, grades) {
         <dt>Hull</dt>         <dd>${sizeName} · ${getShipPoints(typeId)} cmd pt${getShipPoints(typeId) === 1 ? "" : "s"}</dd>
         <dt>Cargo hold</dt>   <dd>${formatTonnes(stats.cargoCapacity)}${bonusTag(bonusOf("hold"))}</dd>
         <dt>Mining rate</dt>  <dd>${formatTonnes(Math.round(stats.miningRate))}/min${bonusTag(drillBonus)}</dd>
-        <dt>Drive speed</dt>  <dd>${stats.speed.toFixed(2)}×${bonusTag(bonusOf("drive"))}</dd>
+        <dt>Drive speed</dt>  <dd>${formatSpeed(stats.speed)}${bonusTag(bonusOf("drive"))}</dd>
         <dt>Unloading</dt>    <dd>${HULL_SIZES[shipType.size].loadingRate} t/s</dd>
       </dl>
       <table class="trip-table">
@@ -675,7 +683,7 @@ function freighterStats(state, typeId, grades) {
       <dl class="stats">
         <dt>Hull</dt>         <dd>${sizeName} · ${getShipPoints(typeId)} cmd pt${getShipPoints(typeId) === 1 ? "" : "s"}</dd>
         <dt>Cargo hold</dt>   <dd>${formatTonnes(stats.cargoCapacity)}${bonusTag(bonusOf("hold"))}</dd>
-        <dt>Drive speed</dt>  <dd>${stats.speed.toFixed(2)}×${bonusTag(bonusOf("drive"))}</dd>
+        <dt>Drive speed</dt>  <dd>${formatSpeed(stats.speed)}${bonusTag(bonusOf("drive"))}</dd>
         <dt>Loading</dt>      <dd>${HULL_SIZES[shipType.size].loadingRate} t/s</dd>
         <dt>Hub run</dt>      <dd>${formatDuration(plan.durationMs)} round trip</dd>
         <dt>Hub prices</dt>   <dd>${perk > 0 ? bonusTag(perk).trim() + " (Trade level)" : "Base"}</dd>
@@ -712,7 +720,7 @@ function scoutStats(state, typeId, grades) {
       <dl class="stats">
         <dt>Hull</dt>         <dd>${HULL_SIZES[shipType.size].name} · ${getShipPoints(typeId)} cmd pt${getShipPoints(typeId) === 1 ? "" : "s"}</dd>
         <dt>Cargo hold</dt>   <dd>None (finds come home with it)</dd>
-        <dt>Drive speed</dt>  <dd>${stats.speed.toFixed(2)}×${bonusTag(bonusOf("drive"))}</dd>
+        <dt>Drive speed</dt>  <dd>${formatSpeed(stats.speed)}${bonusTag(bonusOf("drive"))}</dd>
         <dt>Sensor array</dt> <dd>${bonusOf("sensors") > 0 ? bonusTag(bonusOf("sensors")).trim() + " scan speed" : "Stock"}</dd>
         <dt>Level perk</dt>   <dd>${levelBonus > 0 ? "Scans " + formatPercent(levelBonus) + " shorter" : "None yet"}</dd>
         <dt>Survey trips</dt> <dd>${formatDuration(Math.min(...trips))} to ${formatDuration(Math.max(...trips))}</dd>
@@ -1573,6 +1581,7 @@ function buildSkillCards() {
     }
     if (skillId === "mining") {
       for (const [fieldId, field] of Object.entries(FIELDS)) {
+        if (field.survey) continue;   // opened by a survey: listed under Exploration
         unlocks.push({ level: field.unlockLevel, name: field.name, kind: "Field", key: "field:" + fieldId });
       }
       unlocks.push({ level: REFINERY.openAtMiningLevel, name: "Refinery (Industry tab)", kind: "Station", key: "refinery:open" });
@@ -1611,9 +1620,22 @@ function buildSkillCards() {
         unlocks.push({ level: queueLevel, name: `Queue of ${size} orders per slot`, kind: "Queue", key: "queue:" + queueLevel });
       });
     }
+    if (skillId === "diplomacy") {
+      // Each slot level adds a contract to the board
+      CONTRACTS.slotLevels.forEach((level, index) => {
+        unlocks.push({ level, name: `Contracts board slot ${CONTRACTS.slots + index + 1}`, kind: "Board", key: "board:" + level });
+      });
+    }
     if (skillId === "exploration") {
       for (const [targetId, target] of Object.entries(SURVEY_TARGETS)) {
         unlocks.push({ level: target.unlockLevel, name: target.name, kind: "Target", key: "target:" + targetId });
+      }
+      // A mining field opened by surveying a target (the Ice moon)
+      // shows at that target's level, ticked once it's surveyed.
+      for (const [fieldId, field] of Object.entries(FIELDS)) {
+        if (!field.survey) continue;
+        unlocks.push({ level: SURVEY_TARGETS[field.survey].unlockLevel, name: `${field.name} mining (once surveyed)`,
+          kind: "Field", key: "field:" + fieldId });
       }
     }
     unlocks.sort((a, b) => a.level - b.level);   // lowest level first
@@ -1903,7 +1925,9 @@ function renderFleet(state, now) {
     // shows where it WILL go.
     const fieldId = job ? job.fieldId : ship.destination;
     const fieldName = FIELDS[fieldId].name;
-    part(card, "route-field").textContent = fieldName;
+    // On a charter (contracts.js), the route says so.
+    const charter = getCharter(state, ship.id);
+    setText(part(card, "route-field"), charter ? `${fieldName} (on charter)` : fieldName);
 
     // The destination dropdown: show the chosen field, grey out
     // locked fields (with the level they need), and freeze the
@@ -1915,12 +1939,15 @@ function renderFleet(state, now) {
     for (const option of select.options) {
       const field = FIELDS[option.value];
       const unlocked = isFieldUnlocked(state, option.value);
-      const label = unlocked ? field.name : `${field.name} (Mining ${field.unlockLevel})`;
+      const label = unlocked ? field.name : `${field.name} (${fieldNeeds(option.value)})`;
       if (option.textContent !== label) option.textContent = label;
       if (option.disabled === unlocked) option.disabled = !unlocked;
     }
     if (select.value !== fieldId) select.value = fieldId;
-    if (select.disabled !== Boolean(job)) select.disabled = Boolean(job);
+    // Frozen mid-trip, and while chartered (it goes where the charter says).
+    const frozen = Boolean(job) || Boolean(charter);
+    if (select.disabled !== frozen) select.disabled = frozen;
+    select.title = charter ? `On charter to ${charter.client.toLowerCase()} until it's done` : "";
 
     // Segment widths: from the running job, or (when docked)
     // from the trip this ship WOULD make, as a preview.
@@ -2028,7 +2055,7 @@ function renderSpecs(state, ship, card) {
   if (SHIP_TYPES[ship.type].role === "scout") {
     // Scan speed: the level perk plus the sensor array, as one number
     const scan = stats.scanRate / getScanFactor(state) - 1;
-    const scoutHtml = `Drive <b>${stats.speed.toFixed(2)}×</b> · Scan speed <b>${scan > 0.0005 ? "+" + formatPercent(scan) : "base"}</b>`;
+    const scoutHtml = `Drive <b>${formatSpeed(stats.speed)}</b> · Scan speed <b>${scan > 0.0005 ? "+" + formatPercent(scan) : "base"}</b>`;
     const specs = part(card, "specs");
     if (specs.innerHTML !== scoutHtml) specs.innerHTML = scoutHtml;
     return;
@@ -2037,7 +2064,7 @@ function renderSpecs(state, ship, card) {
   const drill = stats.miningRate === undefined
     ? ""
     : ` · Drill <b>${formatTonnes(Math.round(stats.miningRate))}/min</b>`;
-  let html = `Hold <b>${formatTonnes(stats.cargoCapacity)}</b>${drill} · Drive <b>${stats.speed.toFixed(2)}×</b>`;
+  let html = `Hold <b>${formatTonnes(stats.cargoCapacity)}</b>${drill} · Drive <b>${formatSpeed(stats.speed)}</b>`;
   // Components bought but not fitted yet: say they're waiting.
   const pending = Object.entries(getPendingRefits(state, ship))
     .map(([partId, grade]) => `${SHIP_PARTS[partId].name.toLowerCase()} ${findUpgrade(ship.type, partId, grade).gradeName}`);
@@ -2388,8 +2415,15 @@ function renderSkills(state) {
     part(card, "level").textContent = progress.level;
 
     // The level perk: what every level adds, and the total so far.
-    const perk = getLevelPerk(state, skillId);
-    const perkHtml = `Every level: +${formatPercent(perk.perLevel)} ${skill.perk} · now <b>+${formatPercent(perk.total)}</b>`;
+    // (Diplomacy has no every-level perk: its line is the board's slots.)
+    let perkHtml;
+    if (skill.perk) {
+      const perk = getLevelPerk(state, skillId);
+      perkHtml = `Every level: +${formatPercent(perk.perLevel)} ${skill.perk} · now <b>+${formatPercent(perk.total)}</b>`;
+    } else {
+      const next = CONTRACTS.slotLevels.find((level) => progress.level < level);
+      perkHtml = `Contracts board: <b>${getBoardSlotCount(state)} slots</b>` + (next ? ` · another at level ${next}` : "");
+    }
     if (part(card, "perk").innerHTML !== perkHtml) part(card, "perk").innerHTML = perkHtml;
     part(card, "bar").style.width = (progress.fraction * 100) + "%";
     part(card, "total").textContent = formatNumber(progress.xp) + " XP total";
@@ -2423,6 +2457,7 @@ function renderSkills(state) {
       else if (kind === "recipe") unlocked = isRecipeUnlocked(state, id);
       else if (kind === "refinery") unlocked = isRefineryOpen(state);
       else if (kind === "contracts") unlocked = isBoardOpen(state);
+      else if (kind === "board") unlocked = getLevel(state, "diplomacy") >= Number(id);
       else if (kind === "workshop") unlocked = isWorkshopOpen(state);
       else if (kind === "wrecipe") unlocked = isWorkshopRecipeUnlocked(state, id);
       else if (kind === "wslot") unlocked = Number(id) < getWorkshopSlotCount(state);
@@ -2870,6 +2905,16 @@ function threeFigures(number) {
 
 // A fraction as a percentage, to one decimal place at most:
 //   0.005 -> "0.5%"    0.045 -> "4.5%"    0.15 -> "15%"
+// -------------------------------------------------------------
+// formatSpeed(speed)
+// A ship's speed multiplier in km/s, e.g. 1.25 -> "150 km/s"
+// (see KM_PER_SECOND_AT_SPEED_1 in content.js). Rounded to whole
+// km/s: a +10% drive on a Prospector shows 132 km/s.
+// -------------------------------------------------------------
+export function formatSpeed(speed) {
+  return formatNumber(Math.round(speed * KM_PER_SECOND_AT_SPEED_1)) + " km/s";
+}
+
 export function formatPercent(fraction) {
   return (Math.round(fraction * 1000) / 10).toLocaleString("en-GB") + "%";
 }
