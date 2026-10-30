@@ -87,7 +87,7 @@ export const BALANCE = {
     large: { commandPoints: 4, loadingRate: 60 },
     capital: { commandPoints: 8, loadingRate: 80 },
   },
-  command: { startPoints: 4, pointsPerUpgrade: 2, firstUpgradeCost: 80000, costMultiplier: 2, maxUpgrades: 10 },
+  command: { startPoints: 6, pointsPerUpgrade: 2, firstUpgradeCost: 80000, costMultiplier: 2, maxUpgrades: 10 },
   sellRate: 0.5,
   shipPriceGrowth: 1.6,
   fleetXpExponent: 0.6,

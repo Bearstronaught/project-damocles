@@ -482,16 +482,17 @@ test("A second Prospector can be bought from the start, for 8,000 cr", () => {
   assert.equal(state.ships.length, 2);
 });
 
-test("Four Prospectors fill the 4 starting command points", () => {
+test("Six Prospectors fill the 6 starting command points", () => {
+  // (Dan, 30 Oct: 6 starting points, was 4.)
   const state = createNewGame();
   state.credits = 1_000_000;                         // plenty, so only points can stop us
-  buyShip(state, "prospector");
-  buyShip(state, "prospector");
-  buyShip(state, "prospector");
+  for (let i = 0; i < 5; i++) {
+    assert.ok(buyShip(state, "prospector"), "Prospector " + (i + 2));
+  }
   const before = state.credits;
   assert.deepEqual(canBuyShip(state, "prospector"), { ok: false, reason: "Not enough command points" });
   assert.equal(buyShip(state, "prospector"), null);
-  assert.equal(state.credits, before);               // the 5th wasn't charged
+  assert.equal(state.credits, before);               // the 7th wasn't charged
 });
 
 test("A second Prospector takes about half an hour of mining to afford", () => {
@@ -570,10 +571,10 @@ test("A version 2 save's old 20s trip is re-timed to the new three-phase trip", 
 // COMMAND CAPACITY
 // =============================================================
 
-test("A new game has 4 command points, 1 used by the Prospector", () => {
+test("A new game has 6 command points, 1 used by the Prospector", () => {
   const state = createNewGame();
   assert.equal(getCommandCapacity(state), COMMAND.startPoints);
-  assert.equal(getCommandCapacity(state), 4);
+  assert.equal(getCommandCapacity(state), 6);
   assert.equal(getCommandUsed(state), 1);
 });
 
@@ -583,12 +584,15 @@ test("An Excavator uses 2 points: Prospector + 1 Excavator = 3 of 4", () => {
   assert.equal(getCommandUsed(state), 3);
 });
 
-test("A second Excavator is blocked by command, even with the money", () => {
-  const state = gameAtLevel10(SHIP_TYPES.excavator.cost * 2);
-  buyShip(state, "excavator");
+test("A third Excavator is blocked by command, even with the money", () => {
+  // Prospector 1 + Excavator 2 + Excavator 2 = 5 of 6 points: a third
+  // (2 more) doesn't fit. Excavators cost 60,000 then 96,000.
+  const state = gameAtLevel10(60000 + 96000 + 500000);
+  assert.ok(buyShip(state, "excavator"));
+  assert.ok(buyShip(state, "excavator"));
   assert.deepEqual(canBuyShip(state, "excavator"), { ok: false, reason: "Not enough command points" });
   assert.equal(buyShip(state, "excavator"), null);
-  assert.equal(state.credits, SHIP_TYPES.excavator.cost);   // no money taken
+  assert.equal(state.credits, 500000);               // no money taken for the third
 });
 
 test("Command upgrades: +2 points each, priced 80,000 then 160,000 then 320,000", () => {
@@ -601,7 +605,7 @@ test("Command upgrades: +2 points each, priced 80,000 then 160,000 then 320,000"
   buyUpgrade(state);
   assert.equal(getNextUpgradeCost(state), 320000);
   buyUpgrade(state);
-  assert.equal(getCommandCapacity(state), 4 + 3 * 2);
+  assert.equal(getCommandCapacity(state), 6 + 3 * 2);
   assert.equal(state.credits, 0);
 });
 
@@ -621,14 +625,17 @@ test("After the last upgrade there are no more to buy", () => {
   assert.equal(buyUpgrade(state), 0);
 });
 
-test("Expanding command makes room for the second Excavator", () => {
-  // First Excavator 60,000 + upgrade 80,000 + second Excavator 96,000
-  const state = gameAtLevel10(60000 + 80000 + 96000);
+test("Expanding command makes room for the third Excavator", () => {
+  // Excavators 60,000 + 96,000, upgrade 80,000, third Excavator
+  // 153,600 (60,000 x 1.6 x 1.6)
+  const state = gameAtLevel10(60000 + 96000 + 80000 + 153600);
+  buyShip(state, "excavator");
   buyShip(state, "excavator");
   buyUpgrade(state);
   assert.ok(buyShip(state, "excavator"));
-  assert.equal(getCommandUsed(state), 5);
-  assert.equal(getCommandCapacity(state), 6);
+  assert.equal(getCommandUsed(state), 7);
+  assert.equal(getCommandCapacity(state), 8);
+  assert.equal(state.credits, 0);
 });
 
 
