@@ -31,7 +31,7 @@ import { getUnlocksAtLevel, getFieldUnlocksAtLevel, isFieldUnlocked } from "./sk
 import { setRecipe, getRefineJob, getRecipeUnlocksAtLevel, getSlotUnlocksAtLevel } from "./refinery.js";
 import { addOrder, cancelOrder, getWorkshopJob, getWorkshopRecipeUnlocksAtLevel, getWorkshopSlotUnlocksAtLevel, isQueueUnlockLevel, getQueueLimit, addStandingOrder, removeStandingOrder, getStandingOrders } from "./workshop.js";
 import { buyIndustryUpgrade, getUpgradeUnlocksAtLevel } from "./upgrades.js";
-import { buyShipUpgrade, getShipUpgradeUnlocksAtLevel, getUpgradeName } from "./ship-upgrades.js";
+import { buyShipUpgrade, getShipUpgradeUnlocksAtLevel, getUpgradeName, getPendingRefits } from "./ship-upgrades.js";
 import { getLevelPerk } from "./skills.js";
 import { saveGame, loadGame, deleteSave, applyOfflineProgress, exportSave, importSave } from "./save.js";
 import { showLevelBanner } from "./banner.js";
@@ -297,8 +297,13 @@ const actions = {
     const result = buyShipUpgrade(state, upgradeId);
     if (result.ok) {
       const upgrade = SHIP_UPGRADES[upgradeId];
-      addLog(`Component fitted: ${getUpgradeName(upgrade)} (+${formatPercent(upgrade.bonus)} ${SHIP_PARTS[upgrade.part].says}). ` +
-        `Every ${SHIP_TYPES[upgrade.hull].name} gets it from its next trip.`, "fleet");
+      // Ships of this type that are out working get it when they dock.
+      const out = state.ships.filter((ship) => ship.type === upgrade.hull &&
+        Object.keys(getPendingRefits(state, ship)).length > 0).length;
+      const when = out === 0
+        ? "Fitted to every ship of the type."
+        : `Fitted to docked ships now; ${out === 1 ? "1 ship out working gets it" : out + " ships out working get it"} when back at ${HOME.name}.`;
+      addLog(`Component bought: ${getUpgradeName(upgrade)} (+${formatPercent(upgrade.bonus)} ${SHIP_PARTS[upgrade.part].says}). ${when}`, "fleet");
       refresh();
     }
     return result;

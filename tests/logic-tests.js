@@ -29,7 +29,7 @@ import { parseSave, applyOfflineProgress, exportSave, importSave } from "../js/s
 import { advanceTo } from "../js/simulation.js";
 import { createClock, gameNow, setSpeed, jumpAhead, SPEEDS } from "../js/clock.js";
 import { devSetLevel, devAddCredits, devAddGoods, devSetSpeed, devJumpHour, HOUR_MS } from "../js/playtest.js";
-import { getShipStats, getPartGrade, getNextUpgrade, canBuyShipUpgrade, buyShipUpgrade, getHullParts, getUpgradeName, getShipUpgradeUnlocksAtLevel } from "../js/ship-upgrades.js";
+import { getShipStats, getPartGrade, getNextUpgrade, canBuyShipUpgrade, buyShipUpgrade, getHullParts, getUpgradeName, getShipUpgradeUnlocksAtLevel, getShipGrades, getPendingRefits } from "../js/ship-upgrades.js";
 import { getMiningDrillPerk, getTradeHubPerk, getLevelPerk } from "../js/skills.js";
 import { SHIP_UPGRADES } from "../data/content.js";
 import { getShipArt } from "../js/art.js";
@@ -3128,6 +3128,55 @@ test("Hardpoints: a marker per component, numbered by Mk; no drill marker on a f
     { hold: ["Cargo hold", "Mk I fitted · +15% cargo"], drive: ["Drive", "Stock part"] });
   assert.ok(labelled.includes('data-tip-title="Cargo hold" data-tip="Mk I fitted · +15% cargo"'));
   assert.ok(labelled.includes('data-tip-title="Drive" data-tip="Stock part"'));
+});
+
+// =============================================================
+// RETROFIT WHEN DOCKED (Dan, 30 Oct): a component bought while a
+// ship is out is only fitted once it's back at the station.
+// =============================================================
+
+test("Retrofit: a docked ship gets a new component straight away", () => {
+  const state = createNewGame();
+  state.skills.mining.xp = XP_TABLE[3];
+  state.credits = 10_000;
+  buyShipUpgrade(state, "prospector_hold_1");
+  const ship = state.ships[0];
+  assert.deepEqual(getShipGrades(state, ship), { drill: 0, hold: 1, drive: 0 });
+  assert.deepEqual(getPendingRefits(state, ship), {});
+});
+
+test("Retrofit: a ship out working keeps its old parts until it's home, then it's fitted", () => {
+  const state = createNewGame();
+  state.skills.mining.xp = XP_TABLE[3];
+  state.credits = 10_000;
+  startMiningJob(state, "ship-1", "inner_belt", START);
+  buyShipUpgrade(state, "prospector_hold_1");        // bought while it's out
+  const ship = state.ships[0];
+  assert.deepEqual(getShipGrades(state, ship), { drill: 0, hold: 0, drive: 0 });
+  assert.deepEqual(getPendingRefits(state, ship), { hold: 1 });
+  // Its stats on screen are its OLD ones (120 t), not the hull's (138 t)
+  assert.equal(getShipStats(state, "prospector", getShipGrades(state, ship)).cargoCapacity, 120);
+
+  // Back home, unloaded: the next trip leaves refitted.
+  processJobs(state, START + TRIP);
+  assert.deepEqual(getShipGrades(state, ship), { drill: 0, hold: 1, drive: 0 });
+  assert.deepEqual(getPendingRefits(state, ship), {});
+  assert.equal(state.jobs[0].orePerTrip, 138);
+});
+
+test("Retrofit: a freighter waiting at the dock is refitted at once; one flying waits", () => {
+  const state = gameWithCourier();
+  state.skills.trade.xp = XP_TABLE[4];
+  state.credits = 1_000_000;
+  state.inventory.iron_ore = 600;
+  const job = startHaulJob(state, "ship-2", START);     // loads and leaves
+  const courier = state.ships[1];
+  buyShipUpgrade(state, "courier_drive_1");
+  assert.deepEqual(getPendingRefits(state, courier), { drive: 1 });
+  processJobs(state, START + HAUL.durationMs);          // back home, waiting
+  assert.equal(job.status, "waiting");
+  assert.deepEqual(getPendingRefits(state, courier), {});
+  assert.equal(getShipGrades(state, courier).drive, 1);
 });
 
 // -------------------------------------------------------------

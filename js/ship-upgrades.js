@@ -83,11 +83,79 @@ export function getNextUpgrade(state, hullId, part) {
 // = 0.15 + 0.15 = 0.30 (+30%).
 // -------------------------------------------------------------
 export function getPartBonus(state, hullId, part) {
+  return getBonusUpTo(hullId, part, getPartGrade(state, hullId, part));
+}
+
+// -------------------------------------------------------------
+// getBonusUpTo(hullId, part, grade)
+// The total bonus of every grade from Mk I up to "grade", e.g.
+// drill grade 2 = 0.15 + 0.15 = 0.30. Grade 0 (stock) = 0.
+// -------------------------------------------------------------
+export function getBonusUpTo(hullId, part, grade) {
   let total = 0;
-  for (let grade = 1; grade <= getPartGrade(state, hullId, part); grade++) {
-    total += findUpgrade(hullId, part, grade).bonus;
+  for (let g = 1; g <= grade; g++) {
+    total += findUpgrade(hullId, part, g).bonus;
   }
   return total;
+}
+
+
+// =============================================================
+// WHAT EACH SHIP HAS FITTED (retrofit when it docks)
+// -------------------------------------------------------------
+// Buying a component makes it the hull TYPE's standard (above).
+// Each ship is only refitted to that standard when it's at
+// Anvil Station: straight away if it's docked, otherwise at the
+// start of its next trip, once it's back home and unloaded.
+//
+// So a ship out working is still flying with the parts it left
+// with. Those are remembered on its job as "fitted" when each
+// trip is planned (jobs.js):
+//   job.fitted = { drill: 1, hold: 0, drive: 0 }
+// A ship with no job, or a freighter waiting at the dock, is
+// home, so it always has the hull's current parts.
+// =============================================================
+
+// -------------------------------------------------------------
+// getHullGrades(state, hullId)
+// The grade bought for each of a hull type's components, e.g.
+//   { drill: 2, hold: 0, drive: 1 }
+// -------------------------------------------------------------
+export function getHullGrades(state, hullId) {
+  const grades = {};
+  for (const part of getHullParts(hullId)) {
+    grades[part] = getPartGrade(state, hullId, part);
+  }
+  return grades;
+}
+
+// -------------------------------------------------------------
+// getShipGrades(state, ship)
+// What this one ship has fitted right now (see above).
+// -------------------------------------------------------------
+export function getShipGrades(state, ship) {
+  const job = state.jobs.find((j) => j.shipId === ship.id);
+  const atHome = !job || (job.type === "haul" && job.status === "waiting");
+  if (atHome || !job.fitted) {
+    // Home, or a trip saved before ships remembered their parts.
+    return getHullGrades(state, ship.type);
+  }
+  return job.fitted;
+}
+
+// -------------------------------------------------------------
+// getPendingRefits(state, ship)
+// Components bought for this ship's type that it hasn't had
+// fitted yet (it's out working), e.g. { drill: 2 }. Empty {}
+// when it's up to date.
+// -------------------------------------------------------------
+export function getPendingRefits(state, ship) {
+  const fitted = getShipGrades(state, ship);
+  const pending = {};
+  for (const [part, grade] of Object.entries(getHullGrades(state, ship.type))) {
+    if (grade > (fitted[part] || 0)) pending[part] = grade;
+  }
+  return pending;
 }
 
 // -------------------------------------------------------------
@@ -149,9 +217,9 @@ export function canBuyShipUpgrade(state, upgradeId) {
 
 // -------------------------------------------------------------
 // buyShipUpgrade(state, upgradeId)
-// Pays and fits the upgrade to the whole hull type.
-// Ships already on a trip finish it as they are; their NEXT trip
-// uses the new stats (jobs.js plans every trip fresh).
+// Pays for the upgrade and makes it the hull type's standard.
+// Docked ships have it straight away; ships out working are
+// refitted when they're back at the station (see below).
 // -------------------------------------------------------------
 export function buyShipUpgrade(state, upgradeId) {
   const check = canBuyShipUpgrade(state, upgradeId);
@@ -203,11 +271,14 @@ export function getShipUpgradeUnlocksAtLevel(skillId, level) {
 // Adding (rather than multiplying one bonus by the next) keeps
 // every bonus worth exactly what it says on screen.
 // -------------------------------------------------------------
-export function getShipStats(state, hullId) {
+// "grades" (optional) works the stats out for a particular set
+// of parts, e.g. one ship's fitted parts (getShipGrades); left
+// out, it uses the hull type's current parts.
+export function getShipStats(state, hullId, grades = getHullGrades(state, hullId)) {
   const base = SHIP_TYPES[hullId];
 
-  const holdBonus = getPartBonus(state, hullId, "hold");
-  const driveBonus = getPartBonus(state, hullId, "drive");
+  const holdBonus = getBonusUpTo(hullId, "hold", grades.hold || 0);
+  const driveBonus = getBonusUpTo(hullId, "drive", grades.drive || 0);
 
   const stats = {
     // Math.round keeps the hold in whole tonnes (480 x 1.15 = 552).
@@ -217,7 +288,7 @@ export function getShipStats(state, hullId) {
 
   // Only mining ships have a drill (and get the Mining perk).
   if (base.miningRate) {
-    const drillBonus = getPartBonus(state, hullId, "drill") + getMiningDrillPerk(state);
+    const drillBonus = getBonusUpTo(hullId, "drill", grades.drill || 0) + getMiningDrillPerk(state);
     stats.miningRate = base.miningRate * (1 + drillBonus);
   }
   return stats;

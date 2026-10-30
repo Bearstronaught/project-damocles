@@ -72,7 +72,7 @@ import { sellAtHub } from "./trade.js";
 import { startWaitingBatches, finishBatch } from "./refinery.js";
 import { startWaitingOrders, finishWorkshopBatch } from "./workshop.js";
 import { getSellable } from "./bonded.js";
-import { getShipStats } from "./ship-upgrades.js";
+import { getShipStats, getHullGrades } from "./ship-upgrades.js";
 
 
 // =============================================================
@@ -99,8 +99,9 @@ export function getLoadMs(shipTypeId, tonnes) {
 // stats RIGHT NOW (upgrades and the Mining level perk included -
 // see getShipStats in ship-upgrades.js).
 // -------------------------------------------------------------
-export function getTripPlan(state, shipTypeId, fieldId) {
-  const stats = getShipStats(state, shipTypeId);
+// ("grades" is optional: one ship's fitted parts, for the screen.)
+export function getTripPlan(state, shipTypeId, fieldId, grades) {
+  const stats = getShipStats(state, shipTypeId, grades);
   const field = FIELDS[fieldId];
 
   // Travel: a speed of 0.75 makes the trip take 1 ÷ 0.75 = 1.33x as long.
@@ -175,8 +176,8 @@ function getFleetXpShare(shipsWorking) {
 //   loadMs   loading at home      (by tonnes)
 //   tradeMs  unloading at the hub (by tonnes; it's paid at the end)
 // -------------------------------------------------------------
-export function getHaulPlan(state, shipTypeId, tonnes) {
-  const stats = getShipStats(state, shipTypeId);
+export function getHaulPlan(state, shipTypeId, tonnes, grades) {
+  const stats = getShipStats(state, shipTypeId, grades);
   // "??" means: use tonnes, unless it was left out.
   const load = tonnes ?? stats.cargoCapacity;
   const travelMs = Math.round((HUB.travelSeconds / stats.speed) * 1000);
@@ -301,6 +302,9 @@ function planNextTrip(state, job) {
   job.unloadMs = plan.unloadMs;
   job.durationMs = plan.durationMs;
   job.orePerTrip = plan.orePerTrip;
+  // The ship is at the station now, so it's refitted to the hull's
+  // current parts; remember them for this trip (ship-upgrades.js).
+  job.fitted = getHullGrades(state, ship.type);
 }
 
 
@@ -588,6 +592,8 @@ function departWaitingFreighters(state, time) {
       job.tradeMs = plan.tradeMs;
       job.returnMs = plan.returnMs;
       job.durationMs = plan.durationMs;
+      // Refitted at the dock before leaving (ship-upgrades.js).
+      job.fitted = getHullGrades(state, ship.type);
     }
   }
 }

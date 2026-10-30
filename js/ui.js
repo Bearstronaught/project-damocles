@@ -20,7 +20,7 @@
 import { ITEMS, SHIP_TYPES, FIELDS, SKILLS, HULL_SIZES, COMMAND, HUB, HOME, HAUL_MODES, RECIPES, REFINERY, WORKSHOP_RECIPES, WORKSHOP, UPGRADES, SHIP_UPGRADES, SHIP_PARTS } from "../data/content.js";
 import { isOwned, isShown, canBuyIndustryUpgrade } from "./upgrades.js";
 import { gameNow, SPEEDS } from "./clock.js";
-import { getShipStats, getHullParts, getPartGrade, getPartBonus, getNextUpgrade, canBuyShipUpgrade, getUpgradeName, getHullShortName, findUpgrade } from "./ship-upgrades.js";
+import { getShipStats, getHullParts, getPartGrade, getPartBonus, getNextUpgrade, canBuyShipUpgrade, getUpgradeName, getHullShortName, findUpgrade, getBonusUpTo, getShipGrades, getPendingRefits } from "./ship-upgrades.js";
 import { getJobForShip, getJobPhase, getTripPlan, getHaulPlan, getOreInHold, getMiningXpShare } from "./jobs.js";
 import { getLevel, getLevelProgress, isShipTypeUnlocked, isFieldUnlocked, getMiningDrillPerk, getTradeHubPerk, getLevelPerk } from "./skills.js";
 import { canBuyShip, canSellShip, getSellValue, getShipPrice, MAX_NAME_LENGTH } from "./shipyard.js";
@@ -344,12 +344,33 @@ function renderStatsBoxes(state) {
       box.innerHTML = getShipArt(SHIP_TYPES[typeId].art, grades, getPartLabels(state, typeId));
     }
   }
-  for (const box of document.querySelectorAll("[data-parts]")) {
-    const typeId = box.dataset.parts;
-    const key = JSON.stringify(getGrades(state, typeId));
-    if (box.dataset.key !== key) {
-      box.dataset.key = key;
-      box.innerHTML = partsList(state, typeId);
+  // One ship's drawing, parts list and stats: what IT has fitted
+  // now, plus anything bought but waiting for it to dock.
+  for (const ship of state.ships) {
+    const fitted = getShipGrades(state, ship);
+    const pending = getPendingRefits(state, ship);
+    const key = JSON.stringify([fitted, pending]);
+    const statsKey = key + JSON.stringify(getShipStats(state, ship.type, fitted)) +
+      getLevel(state, "trade") + "/" + getLevel(state, "mining");
+
+    for (const box of document.querySelectorAll(`[data-ship-art="${ship.id}"]`)) {
+      if (box.dataset.key !== key) {
+        box.dataset.key = key;
+        box.innerHTML = getShipArt(SHIP_TYPES[ship.type].art, fitted,
+          getPartLabels(state, ship.type, fitted, pending), pending);
+      }
+    }
+    for (const box of document.querySelectorAll(`[data-ship-parts="${ship.id}"]`)) {
+      if (box.dataset.key !== key) {
+        box.dataset.key = key;
+        box.innerHTML = partsList(state, ship.type, fitted, pending);
+      }
+    }
+    for (const box of document.querySelectorAll(`[data-ship-stats="${ship.id}"]`)) {
+      if (box.dataset.key !== statsKey) {
+        box.dataset.key = statsKey;
+        box.innerHTML = statsList(state, ship.type, fitted);
+      }
     }
   }
 }
@@ -373,18 +394,28 @@ function getGrades(state, typeId) {
 //   drill: ["Drill", "Mk II fitted · +30% mining rate"]
 //   hold:  ["Cargo hold", "Stock part · nothing fitted yet"]
 // -------------------------------------------------------------
-function getPartLabels(state, typeId) {
+// "grades" (optional): one ship's fitted parts; "pending": parts
+// bought but waiting for it to dock, e.g. { drill: 2 }, which add
+//   "Mk II waiting: fitted when it docks"
+function getPartLabels(state, typeId, grades = getGrades(state, typeId), pending = {}) {
   const labels = {};
   for (const partId of getHullParts(typeId)) {
-    const grade = getPartGrade(state, typeId, partId);
+    const grade = grades[partId] || 0;
     const name = SHIP_PARTS[partId].name;
+    let detail;
     if (grade === 0) {
-      labels[partId] = [name, "Stock part · nothing fitted yet"];
+      detail = "Stock part";
     } else {
-      const bonus = getPartBonus(state, typeId, partId);
+      const bonus = getBonusUpTo(typeId, partId, grade);
       const gradeName = findUpgrade(typeId, partId, grade).gradeName;
-      labels[partId] = [name, `${gradeName} fitted · +${formatPercent(bonus)} ${SHIP_PARTS[partId].says}`];
+      detail = `${gradeName} fitted · +${formatPercent(bonus)} ${SHIP_PARTS[partId].says}`;
     }
+    if (partId in pending) {
+      detail += ` · ${findUpgrade(typeId, partId, pending[partId]).gradeName} waiting: fitted when it docks`;
+    } else if (grade === 0) {
+      detail += " · nothing fitted yet";
+    }
+    labels[partId] = [name, detail];
   }
   return labels;
 }
@@ -463,16 +494,22 @@ function setupHardpointTips() {
 //   Drill        Mk I    +15% mining rate
 //   Cargo hold   Stock
 // -------------------------------------------------------------
-function partsList(state, typeId) {
+// "grades": one ship's fitted parts; "pending": bought but not
+// fitted yet, shown as "Mk II waiting (fitted when it docks)".
+function partsList(state, typeId, grades, pending = {}) {
   const rows = getHullParts(typeId).map((partId) => {
-    const grade = getPartGrade(state, typeId, partId);
+    const grade = grades[partId] || 0;
     const gradeName = grade === 0 ? "Stock" : findUpgrade(typeId, partId, grade).gradeName;
-    const bonus = getPartBonus(state, typeId, partId);
+    const bonus = getBonusUpTo(typeId, partId, grade);
+    const waiting = partId in pending
+      ? `<span class="part-pending">${findUpgrade(typeId, partId, pending[partId]).gradeName} waiting (fitted when it docks)</span>`
+      : "";
     return `
       <li class="${grade > 0 ? "fitted" : ""}">
         <span class="part-name">${SHIP_PARTS[partId].name}</span>
         <span class="part-grade">${gradeName}</span>
         <span class="part-bonus">${bonus > 0 ? "+" + formatPercent(bonus) + " " + SHIP_PARTS[partId].says : ""}</span>
+        ${waiting}
       </li>`;
   }).join("");
   return `<ul class="parts-list">${rows}</ul>`;
@@ -494,20 +531,26 @@ function bonusTag(bonus) {
 // (with any bonus shown), then a small table of what a round
 // trip to each field gives right now.
 // -------------------------------------------------------------
-function statsList(state, typeId) {
+// "grades" (optional): one ship's fitted parts; left out, the
+// hull type's current parts (the Shipyard).
+function statsList(state, typeId, grades) {
   const shipType = SHIP_TYPES[typeId];
   if (shipType.role === "freight") {
-    return freighterStats(state, typeId);
+    return freighterStats(state, typeId, grades);
   }
   const sizeName = HULL_SIZES[shipType.size].name;
-  const stats = getShipStats(state, typeId);
+  const stats = getShipStats(state, typeId, grades);
+  // Each part's bonus for these grades (stock = 0).
+  const bonusOf = (partId) => grades
+    ? getBonusUpTo(typeId, partId, grades[partId] || 0)
+    : getPartBonus(state, typeId, partId);
   // The drill's bonus includes the Mining level perk.
-  const drillBonus = getPartBonus(state, typeId, "drill") + getMiningDrillPerk(state);
+  const drillBonus = bonusOf("drill") + getMiningDrillPerk(state);
 
   // One row per field: trip length, income and XP per hour.
   // data-field lets render() dim the fields that are locked.
   const fieldRows = Object.entries(FIELDS).map(([fieldId, field]) => {
-    const plan = getTripPlan(state, typeId, fieldId);
+    const plan = getTripPlan(state, typeId, fieldId, grades);
     const price = ITEMS[field.yields].sellPrice;
     const tripsPerHour = (60 * 60 * 1000) / plan.durationMs;
 
@@ -526,9 +569,9 @@ function statsList(state, typeId) {
     <div class="stat-block">
       <dl class="stats">
         <dt>Hull</dt>         <dd>${sizeName} · ${getShipPoints(typeId)} cmd pt${getShipPoints(typeId) === 1 ? "" : "s"}</dd>
-        <dt>Cargo hold</dt>   <dd>${formatTonnes(stats.cargoCapacity)}${bonusTag(getPartBonus(state, typeId, "hold"))}</dd>
+        <dt>Cargo hold</dt>   <dd>${formatTonnes(stats.cargoCapacity)}${bonusTag(bonusOf("hold"))}</dd>
         <dt>Mining rate</dt>  <dd>${formatTonnes(Math.round(stats.miningRate))}/min${bonusTag(drillBonus)}</dd>
-        <dt>Drive speed</dt>  <dd>${stats.speed.toFixed(2)}×${bonusTag(getPartBonus(state, typeId, "drive"))}</dd>
+        <dt>Drive speed</dt>  <dd>${stats.speed.toFixed(2)}×${bonusTag(bonusOf("drive"))}</dd>
         <dt>Unloading</dt>    <dd>${HULL_SIZES[shipType.size].loadingRate} t/s</dd>
       </dl>
       <table class="trip-table">
@@ -548,11 +591,14 @@ function statsList(state, typeId) {
 // the hub earns for each kind of goods (Trade perk included),
 // compared with selling the same load at home.
 // -------------------------------------------------------------
-function freighterStats(state, typeId) {
+function freighterStats(state, typeId, grades) {
   const shipType = SHIP_TYPES[typeId];
   const sizeName = HULL_SIZES[shipType.size].name;
-  const stats = getShipStats(state, typeId);
-  const plan = getHaulPlan(state, typeId);
+  const stats = getShipStats(state, typeId, grades);
+  const plan = getHaulPlan(state, typeId, undefined, grades);
+  const bonusOf = (partId) => grades
+    ? getBonusUpTo(typeId, partId, grades[partId] || 0)
+    : getPartBonus(state, typeId, partId);
   const perk = getTradeHubPerk(state);
 
   const oreRows = Object.entries(ITEMS).map(([itemId, item]) => {
@@ -572,8 +618,8 @@ function freighterStats(state, typeId) {
     <div class="stat-block">
       <dl class="stats">
         <dt>Hull</dt>         <dd>${sizeName} · ${getShipPoints(typeId)} cmd pt${getShipPoints(typeId) === 1 ? "" : "s"}</dd>
-        <dt>Cargo hold</dt>   <dd>${formatTonnes(stats.cargoCapacity)}${bonusTag(getPartBonus(state, typeId, "hold"))}</dd>
-        <dt>Drive speed</dt>  <dd>${stats.speed.toFixed(2)}×${bonusTag(getPartBonus(state, typeId, "drive"))}</dd>
+        <dt>Cargo hold</dt>   <dd>${formatTonnes(stats.cargoCapacity)}${bonusTag(bonusOf("hold"))}</dd>
+        <dt>Drive speed</dt>  <dd>${stats.speed.toFixed(2)}×${bonusTag(bonusOf("drive"))}</dd>
         <dt>Loading</dt>      <dd>${HULL_SIZES[shipType.size].loadingRate} t/s</dd>
         <dt>Hub run</dt>      <dd>${formatDuration(plan.durationMs)} round trip</dd>
         <dt>Hub prices</dt>   <dd>${perk > 0 ? bonusTag(perk).trim() + " (Trade level)" : "Base"}</dd>
@@ -851,7 +897,7 @@ function buildShipCard(ship, actions) {
   // The card's layout. Parts we update later get a
   // "data-part" label so we can find them again.
   card.innerHTML = `
-    <div class="ship-art" data-art="${ship.type}"></div>
+    <div class="ship-art" data-ship-art="${ship.id}"></div>
     <div class="ship-body">
       <div class="card-header">
         <span class="card-name">${escapeHtml(ship.name)}</span>
@@ -916,7 +962,7 @@ function buildOwnedList(state, actions) {
     row.id = "owned-" + ship.id;
     row.innerHTML = `
       <summary class="owned-summary">
-        <div class="ship-art" data-art="${ship.type}"></div>
+        <div class="ship-art" data-ship-art="${ship.id}"></div>
         <div class="owned-main">
           <div class="card-header">
             <span class="card-name">${escapeHtml(ship.name)}</span>
@@ -941,9 +987,10 @@ function buildOwnedList(state, actions) {
           <div class="sell-note" data-part="sell-note"></div>
           <!-- The components fitted to this ship (filled in by render) -->
           <h3 class="sub-title">Components</h3>
-          <div data-parts="${ship.type}"></div>
+          <div data-ship-parts="${ship.id}"></div>
         </div>
-        ${statsBox(ship.type)}
+        <!-- This ship's stats, with the parts it has fitted now -->
+        <div class="stats-box" data-ship-stats="${ship.id}"></div>
       </div>
     `;
     rememberOpenState(row);
@@ -1464,12 +1511,76 @@ export function render(state, now) {
   const upgradesReady = renderUpgrades(state);
   const componentsReady = renderComponents(state);
 
-  // Nav dots, so a ready upgrade isn't forgotten: Industry when a
-  // station upgrade can be bought; Shipyard (which already lights
-  // for a ship to buy) also for a ship component.
+  // Nav dots. Industry: whenever a station upgrade can be bought,
+  // so it isn't forgotten. Shipyard: a ship or component you can
+  // buy that you haven't seen yet (see shipyardAlert).
   navAlert("industry", upgradesReady > 0);
-  if (componentsReady > 0) navAlert("shipyard", true);
+  shipyardAlert(lastAffordableShips, componentsReady);
 }
+
+// -------------------------------------------------------------
+// shipyardAlert(ships, componentIds)
+// The Shipyard dot, which you can dismiss by looking (Dan,
+// 30 Oct: it nagged while saving up for a bigger ship).
+// Visiting the Shipyard marks everything you can afford as seen,
+// so the dot clears and stays clear. It comes back only for
+// something NEW: another ship type, the same ship at a new price
+// (after buying one), or a component you haven't seen ready.
+//   ships         { prospector: 12800 }  affordable ships, by price
+//   componentIds  ["prospector_drive_1"] components ready to buy
+// -------------------------------------------------------------
+function shipyardAlert(ships, componentIds) {
+  // Everything the dot could be about, as "what: version" pairs.
+  const ready = {};
+  for (const [typeId, price] of Object.entries(ships)) ready["ship:" + typeId] = price;
+  for (const id of componentIds) ready["component:" + id] = 1;
+
+  const onShipyard = !document.querySelector('section[data-screen="shipyard"]').hidden;
+  const seen = loadSeenShips();
+  let somethingNew = false;
+  for (const [key, version] of Object.entries(ready)) {
+    if (onShipyard) {
+      seen[key] = version;          // looking at it = seen
+    } else if (seen[key] !== version) {
+      somethingNew = true;
+    }
+  }
+  if (onShipyard) saveSeenShips(seen);
+  navAlert("shipyard", somethingNew);
+}
+
+// -------------------------------------------------------------
+// loadSeenShips() and saveSeenShips(seen)
+// The ships and components you've already seen you can afford,
+// as { "ship:prospector": 12800, "component:prospector_drive_1": 1 }.
+// Kept in the browser (not the save): it's only about
+// what this screen has shown you. Storage can be blocked, so
+// failures just mean the dot shows again.
+// -------------------------------------------------------------
+const SEEN_SHIPS_KEY = "project-damocles-seen-ships";
+let seenShipsCache = null;   // read the browser once, then remember
+
+function loadSeenShips() {
+  if (seenShipsCache === null) {
+    try {
+      seenShipsCache = JSON.parse(localStorage.getItem(SEEN_SHIPS_KEY)) || {};
+    } catch (error) {
+      seenShipsCache = {};
+    }
+  }
+  return seenShipsCache;
+}
+
+function saveSeenShips(seen) {
+  const text = JSON.stringify(seen);
+  try {
+    // Only write when something changed (this runs 4 times a second).
+    if (localStorage.getItem(SEEN_SHIPS_KEY) !== text) localStorage.setItem(SEEN_SHIPS_KEY, text);
+  } catch (error) {
+    // Blocked storage: nothing to do.
+  }
+}
+
 
 // -------------------------------------------------------------
 // navAlert(screen, on)
@@ -1710,12 +1821,20 @@ function recallStatus(state, job, now) {
 // Only rewritten when it changes.
 // -------------------------------------------------------------
 function renderSpecs(state, ship, card) {
-  const stats = getShipStats(state, ship.type);
+  // What THIS ship has fitted now (it may still be flying with
+  // older parts until it docks).
+  const stats = getShipStats(state, ship.type, getShipGrades(state, ship));
   // Freighters have no drill, so their specs skip it.
   const drill = stats.miningRate === undefined
     ? ""
     : ` · Drill <b>${formatTonnes(Math.round(stats.miningRate))}/min</b>`;
-  const html = `Hold <b>${formatTonnes(stats.cargoCapacity)}</b>${drill} · Drive <b>${stats.speed.toFixed(2)}×</b>`;
+  let html = `Hold <b>${formatTonnes(stats.cargoCapacity)}</b>${drill} · Drive <b>${stats.speed.toFixed(2)}×</b>`;
+  // Components bought but not fitted yet: say they're waiting.
+  const pending = Object.entries(getPendingRefits(state, ship))
+    .map(([partId, grade]) => `${SHIP_PARTS[partId].name.toLowerCase()} ${findUpgrade(ship.type, partId, grade).gradeName}`);
+  if (pending.length > 0) {
+    html += `<span class="refit-waiting">Refit waiting: ${pending.join(", ")}, fitted when it docks</span>`;
+  }
   const specs = part(card, "specs");
   if (specs.innerHTML !== html) specs.innerHTML = html;
 }
@@ -1883,9 +2002,15 @@ function renderCommand(state) {
 }
 
 
-// Each ship type on the Ships screen, plus the nav alert dot
+// What renderShipyard found you can afford, for shipyardAlert.
+let lastAffordableShips = {};
+
+// Each ship type on the Ships screen
 function renderShipyard(state) {
-  let anythingToBuy = false;
+  // Ships you could buy right now, as { prospector: 12800 } (the
+  // price matters: buying one raises the next one's price, which
+  // counts as something new to tell you about).
+  const affordable = {};
 
   for (const [typeId, shipType] of Object.entries(SHIP_TYPES)) {
     const card = byId("yard-" + typeId);
@@ -1938,7 +2063,7 @@ function renderShipyard(state) {
     } else {
       tag.textContent = "Available";
       note.textContent = `Ready to buy. New ships dock at ${HOME.name}, awaiting orders.`;
-      anythingToBuy = true;
+      affordable[typeId] = price;
     }
   }
 
@@ -1946,7 +2071,9 @@ function renderShipyard(state) {
   // (a ship or a command upgrade), so the player notices.
   // Teal dots on the nav: a ship you can afford (Shipyard), or a
   // command upgrade you can afford (Fleet).
-  document.querySelector('.nav-btn[data-screen="shipyard"]').classList.toggle("has-alert", anythingToBuy);
+  // (The Shipyard's nav dot is set in render(), together with
+  // ship components: see shipyardAlert.)
+  lastAffordableShips = affordable;
   document.querySelector('.nav-btn[data-screen="fleet"]').classList.toggle("has-alert", canBuyUpgrade(state).ok);
 
   // Tell the player how many ships are still locked, and where
@@ -2559,14 +2686,15 @@ function buildComponents(actions) {
 // -------------------------------------------------------------
 // renderComponents(state)
 // Shows the sections for hull types you own, and sets every
-// row: Fitted, ready to buy, or why not yet. Returns how many
-// components could be bought right now (for the nav dot).
+// row: Fitted, ready to buy, or why not yet. Returns the IDs of
+// the components that could be bought right now (for the nav dot).
 // -------------------------------------------------------------
 function renderComponents(state) {
   let fittedAll = 0;
   let totalAll = 0;
   let readyAll = 0;
   let anyShown = false;
+  const readyIds = [];   // components you can buy now, for the nav dot
 
   for (const hullId of Object.keys(SHIP_TYPES)) {
     const section = byId("components-" + hullId);
@@ -2613,7 +2741,10 @@ function renderComponents(state) {
         row.classList.toggle("blocked", !check.ok);
         row.classList.toggle("ready", check.ok);
         setText(reason, check.ok ? "" : check.reason);
-        if (check.ok && owned) ready++;
+        if (check.ok && owned) {
+          ready++;
+          readyIds.push(upgrade.id);
+        }
       }
     }
 
@@ -2629,7 +2760,7 @@ function renderComponents(state) {
   byId("components-empty").hidden = anyShown;
   setText(byId("components-tag"),
     `${fittedAll} of ${totalAll} fitted` + (readyAll > 0 ? ` · ${readyAll} ready to buy` : ""));
-  return readyAll;
+  return readyIds;
 }
 
 // -------------------------------------------------------------

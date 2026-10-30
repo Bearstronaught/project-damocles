@@ -579,7 +579,8 @@ body {
 /* The short version you always see: drawing | name and status | +/- */
 .owned-summary {
   display: grid;
-  grid-template-columns: 90px minmax(0, 1fr) auto;
+  /* The ship drawing gets a good size (Dan, 30 Oct: was 90px) */
+  grid-template-columns: 170px minmax(0, 1fr) auto;
   gap: 14px;
   align-items: center;
 }
@@ -608,7 +609,7 @@ body {
 
 @media (max-width: 640px) {
   .owned-summary {
-    grid-template-columns: 70px minmax(0, 1fr) auto;
+    grid-template-columns: 110px minmax(0, 1fr) auto;
   }
   .owned-detail {
     grid-template-columns: minmax(0, 1fr);   /* stats drop below */
@@ -2277,4 +2278,28 @@ body {
 
 .hardpoint-tip span {
   color: var(--steel);
+}
+
+
+/* ----- Refits waiting for a ship to dock ----- */
+
+/* A hardpoint with a component bought but not fitted yet: amber */
+.schematic .hardpoint.pending circle:not(.hit) {
+  stroke: var(--amber);
+  stroke-dasharray: none;
+}
+
+/* "Refit waiting: drill Mk II, fitted when it docks" on a ship card */
+.refit-waiting {
+  display: block;
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--amber);
+}
+
+/* The same, in a ship's parts list */
+.parts-list .part-pending {
+  flex-basis: 100%;
+  font-size: 11px;
+  color: var(--amber);
 }
