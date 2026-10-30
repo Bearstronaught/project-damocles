@@ -2303,3 +2303,11 @@ body {
   font-size: 11px;
   color: var(--amber);
 }
+
+
+/* An item name with a tooltip (how it's made): a dotted underline
+   hints that there's more to see */
+.tip-item {
+  cursor: help;
+  border-bottom: 1px dotted var(--steel-dim);
+}

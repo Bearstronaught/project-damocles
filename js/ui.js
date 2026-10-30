@@ -105,7 +105,7 @@ export function setupUI(state, actions) {
   buildStationHold(actions);
   buildComponents(actions);
   buildDevPanel(actions);
-  setupHardpointTips();
+  setupTips(actions);
 }
 
 
@@ -422,21 +422,31 @@ function getPartLabels(state, typeId, grades = getGrades(state, typeId), pending
 
 
 // -------------------------------------------------------------
-// setupHardpointTips()
-// One tooltip box for every hardpoint on every drawing. It's
-// "delegated": a single listener on the whole page checks
-// whether the pointer is over a hardpoint, so drawings that are
-// redrawn later (after fitting a component) work without
-// setting anything up again.
-//   Mouse: hover a marker to show the box, move off to hide it.
-//   Touch: tap a marker to show it, tap anywhere else to hide it.
+// setupTips(actions)
+// One tooltip box for the whole game, used by:
+//   - hardpoints on ship drawings (data-tip-title / data-tip:
+//     the text is on the marker itself)
+//   - item names in the cargo tables (data-tip-item: how that
+//     item is made, worked out when you point at it - see itemTip)
+// It's "delegated": a single listener on the whole page checks
+// what the pointer is over, so anything redrawn later (after
+// fitting a component) works without setting anything up again.
+//   Mouse: hover to show the box, move off to hide it.
+//   Touch: tap to show it, tap anywhere else to hide it.
 // -------------------------------------------------------------
-function setupHardpointTips() {
+const TIP_TARGETS = "[data-tip-title], [data-tip-item]";
+
+function setupTips(actions) {
   const tip = byId("hardpoint-tip");
 
   function show(marker) {
-    tip.querySelector("b").textContent = marker.dataset.tipTitle;
-    tip.querySelector("span").textContent = marker.dataset.tip;
+    // An item's tip is worked out now, from the game as it is
+    // (levels and upgrades change batch times and amounts).
+    const [title, detail] = marker.dataset.tipItem
+      ? itemTip(actions.getState(), marker.dataset.tipItem)
+      : [marker.dataset.tipTitle, marker.dataset.tip];
+    tip.querySelector("b").textContent = title;
+    tip.querySelector("span").textContent = detail;
     tip.hidden = false;
     // Place the box just above the marker, kept on screen.
     // getBoundingClientRect gives where the marker is drawn now.
@@ -460,12 +470,12 @@ function setupHardpointTips() {
   // and their "pointer left" would hide the box straight away.
   document.addEventListener("pointerover", (event) => {
     if (event.pointerType !== "mouse") return;
-    const marker = event.target.closest && event.target.closest(".hardpoint");
-    if (marker && marker.dataset.tipTitle) show(marker);
+    const marker = event.target.closest && event.target.closest(TIP_TARGETS);
+    if (marker) show(marker);
   });
   document.addEventListener("pointerout", (event) => {
     if (event.pointerType !== "mouse") return;
-    const marker = event.target.closest && event.target.closest(".hardpoint");
+    const marker = event.target.closest && event.target.closest(TIP_TARGETS);
     if (marker) hide();
   });
 
@@ -473,8 +483,8 @@ function setupHardpointTips() {
   // close the card the drawing sits in, so the click is stopped
   // here ("capture": true runs this before the card hears it).
   document.addEventListener("click", (event) => {
-    const marker = event.target.closest && event.target.closest(".hardpoint");
-    if (marker && marker.dataset.tipTitle) {
+    const marker = event.target.closest && event.target.closest(TIP_TARGETS);
+    if (marker) {
       event.preventDefault();
       event.stopPropagation();
       show(marker);
@@ -485,6 +495,49 @@ function setupHardpointTips() {
 
   // Scrolling moves the drawing out from under the box.
   window.addEventListener("scroll", hide, true);
+}
+
+
+// -------------------------------------------------------------
+// itemTip(state, itemId)
+// What hovering an item's name says, as [title, detail]:
+//   Iron ore       Mined at the Inner Belt (Mining 1)
+//   Iron bars      Refinery: 60 t iron ore -> 30 t, 57s a batch (Refining 1)
+//   Cargo pods     Workshop: 40 t hull plating + 20 t structural
+//                  frames -> 60 t, 4m a batch (Manufacturing 15)
+// Batch time and amount are YOURS right now (levels and upgrades
+// counted). A recipe you can't make yet says so.
+// -------------------------------------------------------------
+function itemTip(state, itemId) {
+  const name = ITEMS[itemId].name;
+
+  // Ore: where it's mined
+  const fieldId = Object.keys(FIELDS).find((id) => FIELDS[id].yields === itemId);
+  if (fieldId) {
+    const field = FIELDS[fieldId];
+    return [name, `Mined at the ${field.name} (Mining ${field.unlockLevel})`];
+  }
+
+  // Metal: a refinery recipe
+  const recipeId = Object.keys(RECIPES).find((id) => RECIPES[id].output === itemId);
+  if (recipeId) {
+    const recipe = RECIPES[recipeId];
+    const locked = getLevel(state, "refining") < recipe.unlockLevel;
+    return [name, `Refinery: ${describeInputs(recipeId, formatTonnes)} → ${formatTonnes(getBatchOutput(state, recipeId))}, ` +
+      `${formatDuration(getBatchMs(state, recipeId))} a batch ` +
+      (locked ? `(needs Refining ${recipe.unlockLevel})` : `(Refining ${recipe.unlockLevel})`)];
+  }
+
+  // Product: a workshop recipe
+  const workshopId = Object.keys(WORKSHOP_RECIPES).find((id) => WORKSHOP_RECIPES[id].output === itemId);
+  if (workshopId) {
+    const recipe = WORKSHOP_RECIPES[workshopId];
+    const locked = getLevel(state, "manufacturing") < recipe.unlockLevel;
+    return [name, `Workshop: ${describeWorkshopInputs(workshopId, formatTonnes)} → ${formatTonnes(recipe.outputAmount)}, ` +
+      `${formatDuration(getWorkshopBatchMs(state, workshopId))} a batch ` +
+      (locked ? `(needs Manufacturing ${recipe.unlockLevel})` : `(Manufacturing ${recipe.unlockLevel})`)];
+  }
+  return [name, ""];
 }
 
 
@@ -606,7 +659,7 @@ function freighterStats(state, typeId, grades) {
     const homeCredits = plan.capacity * item.sellPrice;
     return `
       <tr>
-        <td>${item.name}</td>
+        <td><span class="tip-item" data-tip-item="${itemId}">${item.name}</span></td>
         <td class="stat-hot">${formatNumber(hubCredits)}</td>
         <td>+${formatNumber(hubCredits - homeCredits)}</td>
         <td>${formatXp(getTradeXp(plan.capacity, HUB.travelSeconds))}</td>
@@ -732,7 +785,7 @@ function buildCargoTable(actions) {
     const row = document.createElement("tr");
     row.id = "cargo-" + itemId;
     row.innerHTML = `
-      <td>${item.name}</td>
+      <td><span class="tip-item" data-tip-item="${itemId}">${item.name}</span></td>
       <td>
         <!-- The stock, with the bonded amount on its own small line
              underneath (when there is one), so the column stays narrow -->
@@ -1266,7 +1319,7 @@ function buildUpgrades(actions) {
 // the reason; each line's tally ("1 of 3 owned · 1 ready to
 // buy") shows even while its frame is closed. The workshop's
 // lines appear once the workshop is open. Returns how many
-// upgrades can be bought right now (for the Industry nav dot).
+// upgrades can be bought right now, as their IDs (for the Industry nav dot).
 // -------------------------------------------------------------
 function renderUpgrades(state) {
   // Nothing to upgrade until the refinery is open.
@@ -1276,6 +1329,7 @@ function renderUpgrades(state) {
 
   let owned = 0;
   let ready = 0;   // can be bought right now (and its group is showing)
+  const readyIds = [];   // ...and which ones, for the nav dot
   // Each building's own totals, for its frame's tally
   const perBuilding = { refinery: { owned: 0, total: 0, ready: 0 }, workshop: { owned: 0, total: 0, ready: 0 } };
   for (const line of getUpgradeLines()) {
@@ -1308,7 +1362,10 @@ function renderUpgrades(state) {
       row.classList.toggle("blocked", !check.ok);
       row.classList.toggle("ready", check.ok);
       setText(reason, check.ok ? "" : check.reason);
-      if (check.ok && showing) lineReady++;
+      if (check.ok && showing) {
+        lineReady++;
+        readyIds.push(upgradeId);
+      }
     }
 
     setText(part(frame, "tally"),
@@ -1335,7 +1392,7 @@ function renderUpgrades(state) {
   setText(byId("upgrades-tag"),
     `${owned} of ${Object.keys(UPGRADES).length} owned` + (ready > 0 ? ` · ${ready} ready to buy` : ""));
   panel.classList.toggle("has-ready", ready > 0);
-  return ready;
+  return readyIds;
 }
 
 
@@ -1353,7 +1410,7 @@ function buildStationHold(actions) {
     const row = document.createElement("tr");
     row.id = "hold-" + itemId;
     row.innerHTML = `
-      <td>${item.name}</td>
+      <td><span class="tip-item" data-tip-item="${itemId}">${item.name}</span></td>
       <td>
         <span data-part="stock">0 t</span>
         <span class="bonded-note" data-part="bonded" hidden></span>
@@ -1564,71 +1621,78 @@ export function render(state, now) {
   const upgradesReady = renderUpgrades(state);
   const componentsReady = renderComponents(state);
 
-  // Nav dots. Industry: whenever a station upgrade can be bought,
-  // so it isn't forgotten. Shipyard: a ship or component you can
-  // buy that you haven't seen yet (see shipyardAlert).
-  navAlert("industry", upgradesReady > 0);
-  shipyardAlert(lastAffordableShips, componentsReady);
+  // Nav dots: something you can buy that you haven't seen yet on
+  // that tab (see screenAlert - the same rule for every tab).
+  // Industry: station upgrades you can buy.
+  const industryReady = {};
+  for (const id of upgradesReady) industryReady["upgrade:" + id] = 1;
+  screenAlert("industry", industryReady);
+
+  // Shipyard: ships (by price) and components you can buy.
+  const shipyardReady = {};
+  for (const [typeId, price] of Object.entries(lastAffordableShips)) shipyardReady["ship:" + typeId] = price;
+  for (const id of componentsReady) shipyardReady["component:" + id] = 1;
+  screenAlert("shipyard", shipyardReady);
+
+  // Fleet: a command upgrade you can buy (by its price, so the
+  // next, dearer one counts as new).
+  screenAlert("fleet", canBuyUpgrade(state).ok ? { command: getNextUpgradeCost(state) } : {});
 }
 
 // -------------------------------------------------------------
-// shipyardAlert(ships, componentIds)
-// The Shipyard dot, which you can dismiss by looking (Dan,
-// 30 Oct: it nagged while saving up for a bigger ship).
-// Visiting the Shipyard marks everything you can afford as seen,
-// so the dot clears and stays clear. It comes back only for
-// something NEW: another ship type, the same ship at a new price
-// (after buying one), or a component you haven't seen ready.
-//   ships         { prospector: 12800 }  affordable ships, by price
-//   componentIds  ["prospector_drive_1"] components ready to buy
+// screenAlert(screen, ready)
+// THE RULE FOR EVERY NAV DOT (Dan, 30 Oct): a dot means there's
+// something new you can do on that tab, and visiting the tab
+// counts as seeing it, so the dot clears and stays clear. It comes
+// back only for something NEW.
+//   "ready" lists what the dot is about right now, each with a
+//   "version" that changes when it's worth telling you again, e.g.
+//     { "ship:prospector": 12800 }   (a new price is new)
+//     { "upgrade:furnace_lining_1": 1 }
 // -------------------------------------------------------------
-function shipyardAlert(ships, componentIds) {
-  // Everything the dot could be about, as "what: version" pairs.
-  const ready = {};
-  for (const [typeId, price] of Object.entries(ships)) ready["ship:" + typeId] = price;
-  for (const id of componentIds) ready["component:" + id] = 1;
-
-  const onShipyard = !document.querySelector('section[data-screen="shipyard"]').hidden;
-  const seen = loadSeenShips();
+function screenAlert(screen, ready) {
+  const onScreen = !document.querySelector(`section[data-screen="${screen}"]`).hidden;
+  const seenAll = loadSeen();
+  const seen = seenAll[screen] || (seenAll[screen] = {});
   let somethingNew = false;
   for (const [key, version] of Object.entries(ready)) {
-    if (onShipyard) {
-      seen[key] = version;          // looking at it = seen
+    if (onScreen) {
+      seen[key] = version;            // looking at it = seen
     } else if (seen[key] !== version) {
       somethingNew = true;
     }
   }
-  if (onShipyard) saveSeenShips(seen);
-  navAlert("shipyard", somethingNew);
+  if (onScreen) saveSeen(seenAll);
+  navAlert(screen, somethingNew);
 }
 
 // -------------------------------------------------------------
-// loadSeenShips() and saveSeenShips(seen)
-// The ships and components you've already seen you can afford,
-// as { "ship:prospector": 12800, "component:prospector_drive_1": 1 }.
-// Kept in the browser (not the save): it's only about
-// what this screen has shown you. Storage can be blocked, so
-// failures just mean the dot shows again.
+// loadSeen() and saveSeen(seenAll)
+// What each tab's dot has already shown you, e.g.
+//   { shipyard: { "ship:prospector": 12800 }, industry: { ... } }
+// Kept in the browser (not the save): it's only about what this
+// screen has shown you. Storage can be blocked, so a failure just
+// means a dot shows again.
 // -------------------------------------------------------------
-const SEEN_SHIPS_KEY = "project-damocles-seen-ships";
-let seenShipsCache = null;   // read the browser once, then remember
+const SEEN_KEY = "project-damocles-seen-alerts";
+let seenCache = null;   // read the browser once, then remember
 
-function loadSeenShips() {
-  if (seenShipsCache === null) {
+function loadSeen() {
+  if (seenCache === null) {
     try {
-      seenShipsCache = JSON.parse(localStorage.getItem(SEEN_SHIPS_KEY)) || {};
+      seenCache = JSON.parse(localStorage.getItem(SEEN_KEY)) || {};
     } catch (error) {
-      seenShipsCache = {};
+      seenCache = {};
     }
   }
-  return seenShipsCache;
+  return seenCache;
 }
 
-function saveSeenShips(seen) {
-  const text = JSON.stringify(seen);
+function saveSeen(seenAll) {
+  const text = JSON.stringify(seenAll);
   try {
     // Only write when something changed (this runs 4 times a second).
-    if (localStorage.getItem(SEEN_SHIPS_KEY) !== text) localStorage.setItem(SEEN_SHIPS_KEY, text);
+    if (localStorage.getItem(SEEN_KEY) !== text) localStorage.setItem(SEEN_KEY, text);
   } catch (error) {
     // Blocked storage: nothing to do.
   }
@@ -1648,10 +1712,9 @@ function navAlert(screen, on) {
 // showStock(row, amount, bond)
 // Fills a cargo row's Stock cell: the amount, plus a small line
 // under it with the BOND you set (Dan, 30 Oct: show the bond
-// itself, not just how much of it is in the hold). When the hold
-// has less than the bond, it also says how much is still to come:
+// itself, not just how much of it is in the hold), e.g.
 //   120 t / 100 t bonded
-//    40 t / 100 t bonded · 60 t short
+//    40 t / 100 t bonded
 // Hidden when nothing is bonded. Used by both the Command cargo
 // hold and the Industry hold.
 // -------------------------------------------------------------
@@ -1659,8 +1722,7 @@ function showStock(row, amount, bond) {
   part(row, "stock").textContent = formatTonnes(amount);
   const note = part(row, "bonded");
   note.hidden = bond === 0;
-  const short = bond - amount;
-  setText(note, formatTonnes(bond) + " bonded" + (short > 0 ? ` · ${formatTonnes(short)} short` : ""));
+  setText(note, formatTonnes(bond) + " bonded");
 }
 
 // Credits and the cargo hold
@@ -2061,7 +2123,7 @@ function renderCommand(state) {
 }
 
 
-// What renderShipyard found you can afford, for shipyardAlert.
+// What renderShipyard found you can afford, for the Shipyard dot.
 let lastAffordableShips = {};
 
 // Each ship type on the Ships screen
@@ -2126,14 +2188,9 @@ function renderShipyard(state) {
     }
   }
 
-  // Light up the Ships nav button when something can be bought
-  // (a ship or a command upgrade), so the player notices.
-  // Teal dots on the nav: a ship you can afford (Shipyard), or a
-  // command upgrade you can afford (Fleet).
-  // (The Shipyard's nav dot is set in render(), together with
-  // ship components: see shipyardAlert.)
+  // The nav dots are set in render(), all with the same rule
+  // (see screenAlert); this hands over what you can afford.
   lastAffordableShips = affordable;
-  document.querySelector('.nav-btn[data-screen="fleet"]').classList.toggle("has-alert", canBuyUpgrade(state).ok);
 
   // Tell the player how many ships are still locked, and where
   // to see what's coming.
