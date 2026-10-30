@@ -33,7 +33,7 @@ import { createClock, gameNow, setSpeed, jumpAhead, SPEEDS } from "../js/clock.j
 import { devSetLevel, devAddCredits, devAddGoods, devSetSpeed, devJumpHour, HOUR_MS } from "../js/playtest.js";
 import { getShipStats, getPartGrade, getNextUpgrade, canBuyShipUpgrade, buyShipUpgrade, getHullParts, getUpgradeName, getShipUpgradeUnlocksAtLevel, getShipGrades, getPendingRefits } from "../js/ship-upgrades.js";
 import { getMiningDrillPerk, getTradeHubPerk, getLevelPerk } from "../js/skills.js";
-import { SHIP_UPGRADES } from "../data/content.js";
+import { SHIP_UPGRADES, CONTRACT_CLIENTS, BRIEFING } from "../data/content.js";
 import { getShipArt } from "../js/art.js";
 import { getBond, getSellable, getBondedInHold, setBond } from "../js/bonded.js";
 import { isOwned, getEffect, canBuyIndustryUpgrade, buyIndustryUpgrade, getUpgradeLines } from "../js/upgrades.js";
@@ -3965,6 +3965,33 @@ test("Release: index.html is stamped with the version in js/version.js, on every
     }
   }
   assert.match(VERSION, /^0\.\d+\.\d+$/);   // 0.phase.build, until 1.0
+});
+
+test("Lore: no early-game text names the Aashar", () => {
+  // Why: nobody in the home system could know what the wreck's
+  // builders called themselves (agreed with Dan, 30 Oct). Their name
+  // is revealed much later, so the surveys, contract clients,
+  // factions and opening briefing must never use it.
+  const early = [
+    ...Object.values(SURVEY_TARGETS).flatMap((t) => [t.name, t.description, t.find, t.lore]),
+    ...CONTRACT_CLIENTS,
+    ...Object.values(CONTRACT_FACTIONS).flatMap((f) => [f.name, f.description]),
+    HUB.name, HUB.description, BRIEFING.text,
+  ];
+  for (const line of early) {
+    assert.ok(!/aashar/i.test(line), `names the Aashar too early: "${line}"`);
+  }
+});
+
+test("Lore: every survey target has all its words", () => {
+  // Why: the numbers come from the balance sheet and the words from
+  // content.js. A target added on the sheet without words here would
+  // show "undefined" in its survey report.
+  for (const [id, target] of Object.entries(SURVEY_TARGETS)) {
+    for (const field of ["name", "description", "find", "lore"]) {
+      assert.ok(typeof target[field] === "string" && target[field].length > 0, `${id} is missing its ${field}`);
+    }
+  }
 });
 
 // -------------------------------------------------------------

@@ -257,7 +257,7 @@ export const SHIP_TYPES = {
   },
   courier: {
     name: "Courier-class freighter",
-    description: "Small, quick freighter. Hauls ore to the merchant hub for better prices and bonus Trade XP.",
+    description: "Small, quick freighter. Hauls ore to Last Post for better prices and bonus Trade XP.",
     art: "hull_courier",
     ...BALANCE.ships.courier,
   },
@@ -529,7 +529,11 @@ export const UPGRADES = {
 // flies home, and brings back its find. They show (and scouts
 // work through them) in the order listed here.
 //
-// Written here (names and lore are placeholders for Dan's lore):
+// Written here. The lore lines follow Dan's lore (agreed 30 Oct):
+// the old syndicate, Bellwright Inc, held this contract before you
+// and was cut off by Halvorsen-Sato; the wreck's builders are never
+// named here, because nobody in the home system could know their
+// name yet (it's revealed much later).
 //   name        what the player sees
 //   description what the Exploration screen says before it's surveyed
 //   find        what the log and Exploration screen say was found
@@ -548,9 +552,9 @@ export const UPGRADES = {
 const TARGET_WORDS = {
   inner_belt_survey: {
     name: "Inner Belt survey",
-    description: "Chart the rubble your barges already mine. Someone must have been here before you.",
-    find: "an abandoned prospector's cache",
-    lore: "The cache belonged to the outfit that held this contract before you. Their last log entry just says \"Not worth it.\"",
+    description: "Chart the rubble your barges already mine. Someone has been here before you.",
+    find: "a supply cache Bellwright never came back for",
+    lore: "Survey markers from the last syndicate to hold this contract, still blinking. Their claims stop halfway across the belt, as if they ran out of time.",
   },
   outer_belt_survey: {
     name: "Outer Belt survey",
@@ -562,7 +566,7 @@ const TARGET_WORDS = {
     name: "The wreck: first pass",
     description: "Something big and cold is drifting in the Outer Belt. Get a closer look.",
     find: "fragments of an alloy nobody can identify",
-    lore: "A hull, kilometres long, older than the station. No markings anyone recognises, and no sign it was ever meant to be found.",
+    lore: "A hull kilometres long, far older than the station. Nothing human built it, and Bellwright's ships never had the range to find it.",
   },
   ice_moon: {
     name: "Ice moon",
@@ -574,31 +578,31 @@ const TARGET_WORDS = {
     name: "The wreck: hull breach",
     description: "There's a gap in the wreck's hull. Send the scout in, carefully.",
     find: "more of the alloy, cut from the breach",
-    lore: "The breach wasn't made by a collision. Something cut its way OUT.",
+    lore: "The breach wasn't made by a collision. It was cut from the inside, and whatever cut it isn't here now.",
   },
   silent_relay: {
     name: "Silent relay",
-    description: "An old comms relay that stopped answering years ago.",
+    description: "Bellwright's long-range relay, aimed at Sol. It went quiet years ago.",
     find: "a forgotten maintenance fund, still claimable",
-    lore: "The relay's logs mention belt independents trading a few systems away. Nobody has heard from them since the lanes went quiet.",
+    lore: "The last log is Bellwright asking Sol for resupply. Halvorsen-Sato's reply took nine years to arrive: contract terminated. Nobody sent another message.",
   },
   wreck_3: {
     name: "The wreck: inner chambers",
     description: "Past the breach, the wreck opens up into chambers nobody has seen.",
     find: "a large haul of alloy from the inner chambers",
-    lore: "The chambers hold equipment arranged around empty spaces, as if its crew were never quite solid.",
+    lore: "Every seat, rail and hatch is built for a body with three legs. One chamber is laid out as a laboratory and a shrine at once, and the scout can't tell which parts are which.",
   },
   system_edge: {
     name: "System edge",
     description: "The furthest your drives can take you. The scout looks outward.",
-    find: "survey data the belt independents will pay for",
-    lore: "Other stars, close enough to name, far too far to reach. Something on the wreck says that doesn't have to be true.",
+    find: "survey data Last Post will pay for",
+    lore: "Other stars, close enough to name and decades away by any drive humans have. Something on the wreck suggests that doesn't have to be true.",
   },
   wreck_4: {
     name: "The wreck: the sealed core",
     description: "At the wreck's heart, a sealed chamber is still drawing power.",
     find: "the last of the loose alloy around the core",
-    lore: "The core is sealed and still warm. Whatever is inside moves mass in ways physics says it shouldn't. You can't open it. Yet.",
+    lore: "The core is sealed and still warm. Near it, things are easier to push than their mass allows. You can't open it yet.",
   },
 };
 
@@ -707,13 +711,17 @@ for (const [id, numbers] of Object.entries(BALANCE.contractKinds)) {
   CONTRACT_KINDS[id] = { ...CONTRACT_WORDS[id], ...numbers };
 }
 
-// Who posts them: one picked for each contract. Placeholders for
-// Dan's lore; all belt independents for now.
+// Who posts them: one picked for each contract. All are people
+// living at Last Post, the belt independents' asteroid base. They
+// have no working ships (that's why they hire yours), so nobody on
+// this list hauls or flies. Keep the list at 7 names: the board
+// picks a client by its place in the list, so the same length
+// means old saves keep the same draws.
 export const CONTRACT_CLIENTS = [
   "A belt co-op",
-  "The Kessler hauling crew",
+  "The rock-cutters' guild",
   "A station repair gang",
-  "An ice-miner family",
+  "The base quartermaster",
   "The Drift Market",
   "A prospector's widow",
   "The Lantern Dock collective",
@@ -726,7 +734,9 @@ export const CONTRACT_CLIENTS = [
 export const CONTRACT_FACTIONS = {
   independents: {
     name: "Belt independents",
-    description: "Self-reliant miners and traders scattered through the belt. They don't trust outsiders, but they pay for work done.",
+    // Bellwright Inc held this contract before you; Halvorsen-Sato
+    // cut them off, and Lars Bellamy now runs what's left (Dan, 30 Oct).
+    description: "Once Bellwright Inc, the syndicate that held this contract before you. Stranded when their ship failed and Halvorsen-Sato stopped answering, they built a society inside an asteroid, Last Post, under Lars Bellamy. Wary of newcomers, but they pay for work done.",
   },
 };
 
@@ -777,15 +787,39 @@ export const HOME = {
   name: "Anvil Station",
 };
 
+// THE MEGACORP that owns this system's rights and hands out the
+// contract (Dan, 30 Oct). "short" is what log lines will use, for
+// example "Halvorsen-Sato claims 2.4M cr" at the end of a run.
+export const MEGACORP = {
+  name: "Halvorsen-Sato Holdings",
+  short: "Halvorsen-Sato",
+};
+
+// OPENING BRIEFING: shown once on first launch, by the tutorial
+// (not built yet, so nothing shows this today). One paragraph,
+// then one button. Plain voice, no narrator (tutorial rules in
+// the design doc). The last line quietly sets up the end of a
+// run, when the megacorp claims every credit.
+export const BRIEFING = {
+  text:
+    `Contract accepted. Your syndicate holds the mining rights to this system for one term, ` +
+    `on behalf of ${MEGACORP.name}. The ship that carried you here has finished rebuilding ` +
+    `itself as ${HOME.name}, and one Prospector is fuelled and ready. Every credit you earn ` +
+    `is yours to spend, until the contract ends.`,
+  button: "Begin operations",
+};
+
 // THE MERCHANT HUB: where freighters sell for better prices.
-// The name is a placeholder until the lore names it.
+// It's Last Post, the belt independents' asteroid base (Dan, 30 Oct).
+// The name is used inside sentences as a proper name ("departs for
+// Last Post"), so write it the way it should appear mid-sentence.
 // From the balance sheet (Settings tab):
 //   travelSeconds  one way, for a ship with speed 1.0
 // (Time docked at the hub is unloading time: see each hull
 // size's loadingRate in HULL_SIZES.)
 export const HUB = {
-  name: "Merchant hub",
-  description: "A busy trading post a few minutes' flight from home. Pays well for ore you bring in.",
+  name: "Last Post",
+  description: "The belt independents' home inside a hollowed asteroid, a few minutes' flight away. They have no ships of their own, so they pay well for anything you bring in.",
   ...BALANCE.hub,
 };
 

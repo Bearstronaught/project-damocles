@@ -149,7 +149,7 @@ const actions = {
     } else if (SHIP_TYPES[ship.type].role === "freight") {
       const job = startHaulJob(state, shipId, gameNow(state));
       if (job && job.status === "travelling") {
-        addLog(`${ship.name} loads ${describeCargo(job.cargo)} and departs for the ${HUB.name.toLowerCase()}.`, "fleet");
+        addLog(`${ship.name} loads ${describeCargo(job.cargo)} and departs for ${HUB.name}.`, "fleet");
       } else if (job) {
         addLog(`${ship.name} starts hub runs. Waiting at the dock for ore to load.`, "fleet");
       }
@@ -633,7 +633,7 @@ function tick() {
       const toClient = result.chartered > 0 ? `, ${formatTonnes(result.chartered)} of it for its charter` : "";
       addLog(`${ship.name} docked with ${formatTonnes(result.amount)} of ${itemName}${toClient} (+${formatXp(result.xpGained)} Mining XP).`, "trip");
     } else if (result.kind === "haul") {
-      addLog(`${ship.name} sold ${describeCargo(result.cargo)} at the ${HUB.name.toLowerCase()} for ${formatNumber(result.credits)} cr (+${formatXp(result.xpGained)} Trade XP).`, "trade");
+      addLog(`${ship.name} sold ${describeCargo(result.cargo)} at ${HUB.name} for ${formatNumber(result.credits)} cr (+${formatXp(result.xpGained)} Trade XP).`, "trade");
     } else if (result.kind === "docked" && result.skillId === "exploration") {
       addLog(`${ship.name} docked at ${HOME.name}, its scan unfinished. Standing by.`, "explore");
     } else if (result.kind === "docked") {
@@ -1041,7 +1041,7 @@ function reportOfflineProgress(report, opening = null) {
     message += ` Your barges brought back ${describeCargo(mined)}, earning ${formatXp(miningXp)} Mining XP.`;
   }
   if (Object.keys(hauled).length > 0) {
-    message += ` Your freighters sold ${describeCargo(hauled)} at the ${HUB.name.toLowerCase()} for ${formatNumber(hubCredits)} cr, earning ${formatXp(tradeXp)} Trade XP.`;
+    message += ` Your freighters sold ${describeCargo(hauled)} at ${HUB.name} for ${formatNumber(hubCredits)} cr, earning ${formatXp(tradeXp)} Trade XP.`;
   }
   if (Object.keys(refined).length > 0) {
     message += ` The refinery made ${describeCargo(refined)}, earning ${formatXp(refiningXp)} Refining XP.`;

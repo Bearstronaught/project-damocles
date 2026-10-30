@@ -950,7 +950,7 @@ function buildCargoTable(actions) {
 
   // The note under the table explains the two prices.
   byId("hub-note").textContent =
-    `Selling here is instant at the home price. The ${HUB.name.toLowerCase()} pays the hub price, ` +
+    `Selling here is instant at the home price. ${HUB.name} pays the hub price, ` +
     `but needs a freighter to haul the ore there. Only freighters earn Trade XP.`;
 }
 
@@ -1936,7 +1936,7 @@ function renderCargo(state) {
 
   // The note under the table, with the Trade perk once it's earned.
   const perk = getTradeHubPerk(state);
-  const note = `Selling here is instant at the home price. The ${HUB.name.toLowerCase()} pays the hub price` +
+  const note = `Selling here is instant at the home price. ${HUB.name} pays the hub price` +
     (perk > 0 ? ` (+${formatPercent(perk)} from your Trade level)` : "") +
     `, but needs a freighter to haul the goods there. Only freighters earn Trade XP.`;
   if (byId("hub-note").textContent !== note) byId("hub-note").textContent = note;
@@ -2184,8 +2184,8 @@ function renderFreighterCard(state, ship, card, now) {
   const timing = job || getHaulPlan(state, ship.type);
   setRoute(card, [
     ["dock", timing.loadMs || 0, "Loading at home"],
-    ["out", timing.outboundMs, `Outbound to the ${HUB.name}`],
-    ["mine", timing.tradeMs, `Selling at the ${HUB.name}`],
+    ["out", timing.outboundMs, `Outbound to ${HUB.name}`],
+    ["mine", timing.tradeMs, `Selling at ${HUB.name}`],
     ["back", timing.returnMs, "Flying home"],
   ], job && job.status === "travelling" ? job.startedAt : null);   // (a freighter waiting to load hasn't set off)
 
@@ -2219,8 +2219,8 @@ function renderFreighterCard(state, ship, card, now) {
       : `Waiting for ore to load`;
   }
   if (phase.phase === "loading") text = `Loading ${formatTonnes(tonnes)} at ${HOME.name} — leaves in ${timeLeft}`;
-  if (phase.phase === "outbound") text = `Hauling ${formatTonnes(tonnes)} to the hub — arrives in ${timeLeft}`;
-  if (phase.phase === "trading") text = `Unloading and selling at the hub — done in ${timeLeft}`;
+  if (phase.phase === "outbound") text = `Hauling ${formatTonnes(tonnes)} to ${HUB.name} — arrives in ${timeLeft}`;
+  if (phase.phase === "trading") text = `Unloading and selling at ${HUB.name} — done in ${timeLeft}`;
   if (phase.phase === "returning") text = `Returning home — docks in ${timeLeft}`;
   if (job.recall) text = recallStatus(state, job, now);
 
@@ -2335,7 +2335,7 @@ function renderOwnedList(state) {
         part(row, "status").textContent =
           PHASE_LABELS[phase.phase] + " · " + getTarget(job.targetId).name + " · " + formatDuration(phase.msLeftInPhase);
       } else if (job.type === "haul") {
-        // e.g. "Trading · Merchant hub · 12s", or just "Waiting for cargo"
+        // e.g. "Trading · Last Post · 12s", or just "Waiting for cargo"
         part(row, "status").textContent = phase.phase === "waiting"
           ? PHASE_LABELS.waiting
           : PHASE_LABELS[phase.phase] + " · " + HUB.name + " · " + formatDuration(phase.msLeftInPhase);
