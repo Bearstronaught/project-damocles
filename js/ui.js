@@ -1186,8 +1186,8 @@ function buildWorkshop(actions) {
 
 // -------------------------------------------------------------
 // buildUpgrades(actions)
-// Under a heading for the refinery and one for the workshop, one
-// collapsible frame per upgrade LINE (Furnace lining I to III,
+// One collapsible frame for the refinery and one for the workshop.
+// Inside each, a group per upgrade LINE (Furnace lining I to III,
 // Smart queue...; see getUpgradeLines in upgrades.js), with a row
 // for every tier: name, what it does, cost and a Buy button.
 // -------------------------------------------------------------
@@ -1196,29 +1196,35 @@ function buildUpgrades(actions) {
   list.innerHTML = "";
 
   for (const building of ["refinery", "workshop"]) {
-    // One heading per building, with that building's lines under it
-    const group = document.createElement("div");
-    group.className = "upgrade-building";
+    // One collapsible frame per BUILDING (Dan, 30 Oct), with its
+    // name and tally on top. Inside, the upgrade lines are plain
+    // groups - no extra click once the building is open.
+    const group = document.createElement("details");
+    group.className = "component-group expandable upgrade-building";
     group.id = "upgrades-" + building;
-    group.innerHTML = `<h3 class="sub-title">${building === "refinery" ? "Refinery" : "Workshop"}</h3>`;
+    group.innerHTML = `
+      <summary class="component-summary">
+        <div class="component-head">
+          <span class="card-name">${building === "refinery" ? "Refinery" : "Workshop"}</span>
+          <span class="component-tally" data-part="tally"></span>
+        </div>
+        <span class="expand-hint" aria-hidden="true"></span>
+      </summary>
+      <div class="component-body"></div>
+    `;
+    const groupBody = group.querySelector(".component-body");
 
     for (const line of getUpgradeLines().filter((l) => l.building === building)) {
-      // One collapsible frame per line (Dan, 30 Oct), like the ship
-      // components menu: name and tally on top, every tier inside.
-      const frame = document.createElement("details");
-      frame.className = "component-group expandable upgrade-line";
+      // One group per line (Furnace lining I to III...): a heading
+      // with its tally, then every tier.
+      const frame = document.createElement("div");
+      frame.className = "component-block upgrade-line";
       frame.id = "upline-" + line.id;
       frame.innerHTML = `
-        <summary class="component-summary">
-          <div class="component-head">
-            <span class="card-name">${line.name}</span>
-            <span class="component-tally" data-part="tally"></span>
-          </div>
-          <span class="expand-hint" aria-hidden="true"></span>
-        </summary>
-        <div class="component-body"></div>
+        <h3 class="sub-title">${line.name}
+          <span class="component-total" data-part="tally"></span></h3>
       `;
-      const body = frame.querySelector(".component-body");
+      const body = frame;
 
       for (const upgradeId of line.tiers) {
         const upgrade = UPGRADES[upgradeId];
@@ -1246,9 +1252,9 @@ function buildUpgrades(actions) {
         });
         body.appendChild(row);
       }
-      rememberOpenState(frame);
-      group.appendChild(frame);
+      groupBody.appendChild(frame);
     }
+    rememberOpenState(group);
     list.appendChild(group);
   }
 }
@@ -1270,6 +1276,8 @@ function renderUpgrades(state) {
 
   let owned = 0;
   let ready = 0;   // can be bought right now (and its group is showing)
+  // Each building's own totals, for its frame's tally
+  const perBuilding = { refinery: { owned: 0, total: 0, ready: 0 }, workshop: { owned: 0, total: 0, ready: 0 } };
   for (const line of getUpgradeLines()) {
     const frame = byId("upline-" + line.id);
     const showing = !panel.hidden && !frame.closest(".upgrade-building").hidden;
@@ -1304,10 +1312,22 @@ function renderUpgrades(state) {
     }
 
     setText(part(frame, "tally"),
-      `${lineOwned} of ${line.tiers.length} owned` + (lineReady > 0 ? ` · ${lineReady} ready to buy` : ""));
-    frame.classList.toggle("has-ready", lineReady > 0);
+      `${lineOwned} of ${line.tiers.length}` + (lineReady > 0 ? ` · ${lineReady} ready` : ""));
     owned += lineOwned;
     ready += lineReady;
+    const b = perBuilding[line.building];
+    b.owned += lineOwned;
+    b.total += line.tiers.length;
+    b.ready += lineReady;
+  }
+
+  // Each building frame's tally, e.g. "1 of 6 owned · 1 ready to buy",
+  // shown even while it's closed.
+  for (const [building, b] of Object.entries(perBuilding)) {
+    const group = byId("upgrades-" + building);
+    setText(part(group, "tally"),
+      `${b.owned} of ${b.total} owned` + (b.ready > 0 ? ` · ${b.ready} ready to buy` : ""));
+    group.classList.toggle("has-ready", b.ready > 0);
   }
 
   // e.g. "3 of 15 owned · 2 ready to buy" - on the panel header,
