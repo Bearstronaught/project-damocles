@@ -377,8 +377,26 @@ function getPartLabels(state, typeId, grades = getGrades(state, typeId), pending
 // fitting a component) works without setting anything up again.
 //   Mouse: hover to show the box, move off to hide it.
 //   Touch: tap to show it, tap anywhere else to hide it.
+//
+// THE PAGE CAN CHANGE UNDER A STILL MOUSE (bug fixed 30 Oct): a
+// ship drawing is redrawn when a refit is bought or fitted, and
+// the page can scroll by itself. Neither moves the mouse, so the
+// browser sends no "pointer entered/left" message, and the box
+// was left hidden (or showing for a marker that's gone) until you
+// moved off and back on. Dan hit it hovering a Pathfinder's
+// waiting sensor array mid-scan. So we remember where the mouse
+// is, and after a scroll or a redraw we look again at what's
+// under it (recheckTip).
 // -------------------------------------------------------------
 const TIP_TARGETS = "[data-tip-title], [data-tip-item]";
+
+// Where the mouse was last seen ({x, y}), or null when the last
+// pointer was a finger or the mouse has left the page.
+let mouseAt = null;
+
+// Set by setupTips: look again at what's under the mouse, and show
+// or hide the box to match. render() calls it 4 times a second.
+let recheckTip = () => {};
 
 function setupTips(actions) {
   const tip = byId("hardpoint-tip");
@@ -406,6 +424,28 @@ function setupTips(actions) {
   function hide() {
     tip.hidden = true;
   }
+
+  // What's under the mouse right now? elementFromPoint asks the
+  // browser which element is drawn at that spot on the screen.
+  recheckTip = () => {
+    if (!mouseAt) return;                      // touch: leave the tap's box alone
+    const under = document.elementFromPoint(mouseAt.x, mouseAt.y);
+    const marker = under && under.closest(TIP_TARGETS);
+    if (marker) {
+      show(marker);                            // (also moves the box onto it)
+    } else if (!tip.hidden) {
+      hide();
+    }
+  };
+
+  // Keep track of the mouse. "clientX/Y" is its spot on the screen.
+  document.addEventListener("pointermove", (event) => {
+    mouseAt = event.pointerType === "mouse" ? { x: event.clientX, y: event.clientY } : null;
+  });
+  // The mouse left the window: nothing is under it any more.
+  document.documentElement.addEventListener("pointerleave", () => {
+    mouseAt = null;
+  });
 
   // .closest(".hardpoint") finds the marker the pointer is in,
   // even when it's over the ring or the numeral inside it.
@@ -437,8 +477,16 @@ function setupTips(actions) {
     }
   }, true);
 
-  // Scrolling moves the drawing out from under the box.
-  window.addEventListener("scroll", hide, true);
+  // Scrolling moves the drawing out from under the box. With a
+  // mouse, look again at what's under it now (it may still be the
+  // same marker, or a new one); after a tap, just hide the box.
+  window.addEventListener("scroll", () => {
+    if (mouseAt) {
+      recheckTip();
+    } else {
+      hide();
+    }
+  }, true);
 }
 
 
@@ -1667,6 +1715,10 @@ export function render(state, now) {
   // Fleet: a command upgrade you can buy (by its price, so the
   // next, dearer one counts as new).
   screenAlert("fleet", canBuyUpgrade(state).ok ? { command: getNextUpgradeCost(state) } : {});
+
+  // Drawings may have been redrawn under a still mouse: keep the
+  // tooltip matching what's under it (see setupTips).
+  recheckTip();
 }
 
 // -------------------------------------------------------------
