@@ -20,6 +20,8 @@
 // =============================================================
 
 import assert from "node:assert/strict";
+import { readFileSync, readdirSync } from "node:fs";
+import { VERSION } from "../js/version.js";
 import { SHIP_TYPES, ITEMS, COMMAND, FIELDS, HULL_SIZES, HUB } from "../data/content.js";
 import { BALANCE } from "../data/balance.js";
 import { createNewGame, SAVE_VERSION } from "../js/state.js";
@@ -3286,10 +3288,32 @@ test("Exploration: finishing a survey gives its find and XP once, then moves on"
   assert.deepEqual(results[0].surveys, ["inner_belt_survey"]);
   assert.equal(results[0].finds[0].credits, target.credits);
 
-  // Exploration 2 now: it went straight on to the Outer Belt survey
-  assert.equal(job.targetId, "outer_belt_survey");
-  assert.equal(state.ships[1].destination, "outer_belt_survey");
+  // Still short of Exploration 2 (the next target's level), so it
+  // moved straight on to deep scans to make up the rest (Dan, 30 Oct)
+  assert.equal(job.targetId, DEEP_SCAN_ID);
+  assert.equal(state.ships[1].destination, DEEP_SCAN_ID);
   assert.equal(job.startedAt, START + trip);
+});
+
+test("Exploration: a survey alone never reaches the next target's level (deep scans make up the rest)", () => {
+  // Dan, 30 Oct: if every survey handed out the next level, the
+  // level would mean nothing. Play the targets in order: after each
+  // one's XP, the player must still be short of the NEXT unlock.
+  const ids = Object.keys(SURVEY_TARGETS);
+  let xp = 0;
+  for (let i = 0; i < ids.length - 1; i++) {
+    xp += SURVEY_TARGETS[ids[i]].xp;
+    const nextLevel = SURVEY_TARGETS[ids[i + 1]].unlockLevel;
+    if (nextLevel > getLevelForXp(xp - SURVEY_TARGETS[ids[i]].xp)) {
+      // (only where the next target needs a level above where the
+      // player was when this survey started)
+      assert.ok(getLevelForXp(xp) < nextLevel,
+        `${ids[i]} alone takes the player to Exploration ${getLevelForXp(xp)}, ` +
+        `enough for ${ids[i + 1]} (${nextLevel}) with no deep scans`);
+    }
+    // Deep scans then make up the rest of the way
+    xp = Math.max(xp, XP_TABLE[nextLevel]);
+  }
 });
 
 test("Exploration: goods found go into the home hold", () => {
@@ -3414,6 +3438,28 @@ test("Exploration: a version 14 save gains Exploration, and the first sale if it
 
   const b = parseSave(JSON.stringify(fresh));
   assert.equal(b.milestones.firstSale, undefined);        // hasn't sold anything yet
+});
+
+// =============================================================
+// RELEASES (tools/release.js)
+// =============================================================
+
+test("Release: index.html is stamped with the version in js/version.js, on every file", () => {
+  // If a new file is added (or the version changed by hand) without
+  // running "node tools/release.js", a browser could load an old copy
+  // of that file after an update. This catches it.
+  const page = readFileSync(new URL("../index.html", import.meta.url), "utf8");
+  assert.ok(page.includes(`<meta name="game-version" content="${VERSION}">`), "meta tag version");
+  assert.ok(page.includes(`href="css/style.css?v=${VERSION}"`), "stylesheet version");
+  assert.ok(page.includes(`src="js/main.js?v=${VERSION}"`), "main.js version");
+  for (const folder of ["js", "data"]) {
+    for (const name of readdirSync(new URL(`../${folder}/`, import.meta.url))) {
+      if (!name.endsWith(".js")) continue;
+      const entry = `"./${folder}/${name}": "./${folder}/${name}?v=${VERSION}"`;
+      assert.ok(page.includes(entry), `${folder}/${name} missing from the import map: run node tools/release.js`);
+    }
+  }
+  assert.match(VERSION, /^0\.\d+\.\d+$/);   // 0.phase.build, until 1.0
 });
 
 // -------------------------------------------------------------

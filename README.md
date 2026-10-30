@@ -55,7 +55,9 @@ js/exploration-screen.js  the Exploration tab: targets, the wreck's story, deep 
 js/fleet-groups.js  sorting ships into role groups (Mining, Freight) and their summaries
 js/banner.js        the level-up banners that slide down from the top
 js/art.js           code-drawn ship schematics, looked up by name
+js/version.js       the version number shown under Save (0.phase.build, up to 1.0)
 tests/              automated checks for the game rules
+tools/release.js    stamps the version on index.html (see Releasing below)
 ```
 
 A good reading order for learning: `data/content.js` → `js/state.js` → `js/jobs.js` → `js/simulation.js` → `js/main.js`.
@@ -84,3 +86,4 @@ Any save that uses them gets a red **Playtest save** badge for good, so it's nev
 
 `node tests/pacing-sim.js` plays the real engine as a sensible, active early-game player (sells at home, buys the cheapest useful thing, sends ships to the best field) and prints when each Mining level and purchase happens, up to the refinery opening. Use it to try balance changes before making them.
 
+**Releasing:** every release gets a version number, 0.phase.build (0.2.3 = Phase 2, third release in it; 1.0 is the full game). Before committing a release, run `node tools/release.js 0.2.1` with the new number. It writes the number into `js/version.js` and stamps it on every file's address in `index.html`, so browsers can't mix an old copy of one file with a new copy of another after an update. If you add a new `.js` file, run `node tools/release.js` (no number) to add it to the list. The tests fail if either step was missed.

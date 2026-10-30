@@ -5,6 +5,7 @@
 // pulls in everything else.
 //
 // What happens, in order:
+//   0. Check the page and the code are the same version.
 //   1. Load the save (or start a new game).
 //   2. Set up the screen.
 //   3. Catch up on any time the player was away.
@@ -38,6 +39,48 @@ import { describeFind } from "./exploration-screen.js";
 import { saveGame, loadGame, deleteSave, applyOfflineProgress, exportSave, importSave } from "./save.js";
 import { showLevelBanner } from "./banner.js";
 import { setupUI, buildFleetViews, render, addLog, formatNumber, formatXp, formatTonnes, formatDuration, formatPercent, showDevPanel } from "./ui.js";
+import { VERSION } from "./version.js";
+
+
+// -------------------------------------------------------------
+// 0. Same version? (see tools/release.js)
+// -------------------------------------------------------------
+// index.html carries the version it was released with, in a
+// <meta name="game-version"> tag; js/version.js carries the code's.
+// Straight after an update a browser can, rarely, end up with an
+// old page and new code (or the reverse). Rather than run a mix
+// against the player's save, the game doesn't start: it says
+// there's a new version and offers a reload.
+checkVersion();
+
+function checkVersion() {
+  // "?." means: if there's no such tag, give undefined instead of failing
+  const pageVersion = document.querySelector('meta[name="game-version"]')?.content;
+  if (pageVersion === VERSION) {
+    return;   // all good: carry on loading the game
+  }
+
+  // Cover the page with a message and a Reload button.
+  const notice = document.createElement("div");
+  notice.className = "update-notice";
+  notice.innerHTML = `
+    <div class="panel update-box">
+      <h2 class="panel-title">New version</h2>
+      <p>Project Damocles has been updated (v${VERSION}). Reload to play it.
+         Your save is safe: nothing has run.</p>
+      <p class="price-note">If this keeps appearing, wait a few minutes and reload again:
+         the new version can take a little while to reach every browser.</p>
+      <button class="btn btn-primary">Reload</button>
+    </div>
+  `;
+  notice.querySelector("button").addEventListener("click", () => location.reload());
+  document.body.appendChild(notice);
+
+  // Stop here: "throw" ends this file, so the save is never loaded
+  // and the game loop never starts. (It shows as an error in the
+  // browser's console, which is what it is.)
+  throw new Error(`Page is v${pageVersion}, code is v${VERSION}: not starting`);
+}
 
 
 // -------------------------------------------------------------

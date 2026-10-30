@@ -29,6 +29,7 @@ import { getCargoValue, getTradeXp } from "./trade.js";
 import { getBond, getSellable } from "./bonded.js";
 import { getShipArt } from "./art.js";
 import { setupNavigation, navAlert, setScreenOpen } from "./nav.js";
+import { VERSION } from "./version.js";
 import { getTarget, getAllTargetIds, getTargetStatus, canScoutGo, getScoutPlan, getScanFactor, isExplorationOpen, DEEP_SCAN_ID } from "./exploration.js";
 import { buildExplorationScreen, renderExploration } from "./exploration-screen.js";
 import { getRoleGroups, describeGroup } from "./fleet-groups.js";
@@ -90,6 +91,7 @@ function part(card, name) {
 // -------------------------------------------------------------
 export function setupUI(state, actions) {
   setupNavigation();
+  byId("game-version").textContent = "v" + VERSION;   // bottom of the menu
   setupResetButton(actions);
   setupBackup(actions);
 
