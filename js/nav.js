@@ -24,7 +24,13 @@
 // The screens that exist. The first is the default. A new
 // screen needs its name here, a <section data-screen="..."> and
 // a button in index.html.
-const SCREENS = ["command", "fleet", "shipyard", "industry", "skills", "save"];
+const SCREENS = ["command", "fleet", "shipyard", "industry", "exploration", "skills", "save"];
+
+// Screens that aren't open YET, e.g. Exploration before the first
+// sale (see setScreenOpen). Their buttons are hidden, and asking
+// for one (an old bookmark) shows Command instead. Exploration
+// starts closed so a new game never flashes it on screen.
+const closedScreens = new Set(["exploration"]);
 
 // The width (in CSS pixels) where the sidebar turns into the
 // phone bar. Must match the @media rules in style.css.
@@ -80,6 +86,13 @@ export function setupNavigation() {
   setupCollapse();
   setupDrawer();
 
+  // Screens that start closed have their buttons hidden at once.
+  for (const screen of closedScreens) {
+    for (const button of buttonsFor(screen)) button.hidden = true;
+    const group = document.querySelector(`[data-group-for="${screen}"]`);
+    if (group) group.hidden = true;
+  }
+
   // Show the right screen straight away on page load.
   showScreenFromAddress();
 }
@@ -93,11 +106,43 @@ function showScreenFromAddress() {
     name = "fleet";
   }
 
-  // Unknown or empty? Fall back to the first screen.
-  if (!SCREENS.includes(name)) {
+  // Unknown, empty or not open yet? Fall back to the first screen.
+  if (!SCREENS.includes(name) || closedScreens.has(name)) {
     name = SCREENS[0];
   }
   showScreen(name);
+}
+
+
+// -------------------------------------------------------------
+// setScreenOpen(screen, open)
+// Shows or hides a screen's menu buttons (sidebar and phone bar).
+// ui.js calls this 4 times a second, so it only does anything
+// when the answer changes. A group whose only screen is closed
+// (Expansion, before Exploration opens) hides its heading too.
+// -------------------------------------------------------------
+export function setScreenOpen(screen, open) {
+  if (closedScreens.has(screen) !== open) return;   // no change
+
+  if (open) {
+    closedScreens.delete(screen);
+  } else {
+    closedScreens.add(screen);
+  }
+  for (const button of buttonsFor(screen)) {
+    button.hidden = !open;
+  }
+  const group = document.querySelector(`[data-group-for="${screen}"]`);
+  if (group) group.hidden = !open;
+
+  if (open) {
+    // Opened while you were looking for it in the address bar
+    // (a refresh on #exploration): take you there now.
+    if (location.hash.slice(1) === screen) showScreen(screen);
+  } else if (!document.querySelector(`section[data-screen="${screen}"]`).hidden) {
+    // Closed while you're on it (a Reset): go back to Command.
+    showScreen(SCREENS[0]);
+  }
 }
 
 

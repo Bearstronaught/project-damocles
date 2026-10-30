@@ -54,6 +54,12 @@
       <path d="M3 20V11l5 3v-3l5 3V5h4v15z"/>
       <path d="M3 20h18"/>
     </symbol>
+    <!-- Exploration: a scanner sweep -->
+    <symbol id="icon-exploration" viewBox="0 0 24 24">
+      <circle cx="12" cy="12" r="8"/>
+      <circle cx="12" cy="12" r="4"/>
+      <path d="M12 12l6-6"/>
+    </symbol>
     <!-- Skills: three rising bars -->
     <symbol id="icon-skills" viewBox="0 0 24 24">
       <path d="M5 20v-6M12 20V9M19 20V4"/>
@@ -91,8 +97,9 @@
        screen only needs a new button here and a new <section>.
 
        Items sit in groups with small headings (agreed 30 Oct). The
-       Expansion group (Exploration) and Factions group (Contracts)
-       are added when those screens are built. -->
+       Factions group (Contracts) is added when that screen is built.
+       A screen that isn't open yet (Exploration, before the first
+       sale) has its buttons hidden by nav.js (setScreenOpen). -->
   <nav class="sidebar" id="sidebar" aria-label="Main menu">
     <div class="sidebar-head">
       <span class="sidebar-label">Menu</span>
@@ -130,6 +137,13 @@
       </button>
     </div>
 
+    <div class="nav-group" data-group-for="exploration">
+      <div class="nav-heading">Expansion</div>
+      <button class="nav-btn" data-screen="exploration" title="Exploration">
+        <svg class="icon"><use href="#icon-exploration"/></svg><span class="nav-text">Exploration</span>
+      </button>
+    </div>
+
     <div class="nav-group">
       <button class="nav-btn" data-screen="skills" title="Skills">
         <svg class="icon"><use href="#icon-skills"/></svg><span class="nav-text">Skills</span>
@@ -150,9 +164,8 @@
 
   <!-- ===== Phone menu bar (bottom of the screen) =====
        The screens you use most, one tap away, plus More, which
-       opens the full menu above as a drawer. Exploration joins
-       this bar when it's built. These buttons are copies of the
-       sidebar ones: same data-screen, same dots. -->
+       opens the full menu above as a drawer. These buttons are
+       copies of the sidebar ones: same data-screen, same dots. -->
   <nav class="bottom-bar" aria-label="Quick menu">
     <button class="nav-btn" data-screen="command">
       <svg class="icon"><use href="#icon-command"/></svg><span class="nav-text">Command</span>
@@ -162,6 +175,9 @@
     </button>
     <button class="nav-btn" data-screen="industry">
       <svg class="icon"><use href="#icon-industry"/></svg><span class="nav-text">Industry</span>
+    </button>
+    <button class="nav-btn" data-screen="exploration">
+      <svg class="icon"><use href="#icon-exploration"/></svg><span class="nav-text">Explore</span>
     </button>
     <!-- Not a screen: opens the drawer. Gets a dot when a screen
          that's only in the drawer has one. -->
@@ -191,6 +207,7 @@
     <span class="status-item">Trade <b id="trade-level">Lv 1</b></span>
     <span class="status-item">Refining <b id="refining-level">Lv 1</b></span>
     <span class="status-item">Manufacturing <b id="manufacturing-level">Lv 1</b></span>
+    <span class="status-item" id="exploration-readout" hidden>Exploration <b id="exploration-level">Lv 1</b></span>
     <!-- Only shown at a playtest speed (not 1x) -->
     <span class="status-item status-speed" id="speed-readout" hidden>Speed <b id="speed-value">1×</b></span>
     <!-- Only shown once this save has used a playtest tool -->
@@ -467,6 +484,44 @@
         <p class="order-message" id="upgrade-message" role="status"></p>
         <div id="upgrades-list"></div>
       </details>
+    </section>
+
+    <!-- ===================== EXPLORATION SCREEN ===================== -->
+    <!-- The home system's survey targets, the wreck's story, and
+         deep scans (exploration-screen.js fills it in). Scouts are
+         sent out from their cards on the Command screen. Opens with
+         the first sale of ore (design doc, Early exploration). -->
+    <section class="screen layout layout-flow" data-screen="exploration" hidden>
+
+      <!-- Survey targets: one row each (built by exploration-screen.js) -->
+      <div class="panel">
+        <div class="panel-head">
+          <h2 class="panel-title">Survey targets</h2>
+          <span class="panel-tag" id="explore-tag"></span>
+        </div>
+        <p class="flow-note">One-off trips around the home system. Scouts work through them in order, then run deep scans.</p>
+        <p class="price-note" id="explore-note">Buy a Pathfinder in the Shipyard to start surveying.</p>
+        <ul class="target-list" id="target-list"></ul>
+      </div>
+
+      <!-- The wreck: its story, one stage at a time -->
+      <div class="panel">
+        <div class="panel-head">
+          <h2 class="panel-title">The wreck</h2>
+          <span class="panel-tag" id="wreck-tag"></span>
+        </div>
+        <ol class="wreck-list" id="wreck-list"></ol>
+      </div>
+
+      <!-- Deep scans: what scouts do when there's nothing left to survey -->
+      <div class="panel">
+        <div class="panel-head">
+          <h2 class="panel-title">Deep scans</h2>
+          <span class="panel-tag" id="explore-level"></span>
+        </div>
+        <p class="price-note">When every target they can reach is done, scouts scan the whole system from its edge. It never runs out, earns steady XP, and now and then turns up credits or wreck alloy.</p>
+        <dl class="stats" id="deep-stats"></dl>
+      </div>
     </section>
 
     <!-- ===================== SKILLS SCREEN ===================== -->

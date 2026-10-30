@@ -16,11 +16,13 @@ export const BALANCE = {
     structural_frames: { sellPrice: 30, hubPrice: 48 },
     cargo_pod: { sellPrice: 31, hubPrice: 50 },
     thruster_assembly: { sellPrice: 51, hubPrice: 82 },
+    wreck_alloy: { sellPrice: 300, hubPrice: 480 },
   },
   ships: {
     prospector: { role: 'mining', size: 'small', skill: 'mining', unlockLevel: 1, cost: 5000, cargoCapacity: 120, miningRate: 120, speed: 1 },
     excavator: { role: 'mining', size: 'medium', skill: 'mining', unlockLevel: 10, cost: 60000, cargoCapacity: 480, miningRate: 240, speed: 0.75 },
     courier: { role: 'freight', size: 'small', skill: 'trade', unlockLevel: 1, cost: 50000, cargoCapacity: 600, speed: 1 },
+    pathfinder: { role: 'scout', size: 'small', skill: 'exploration', unlockLevel: 1, cost: 2000, cargoCapacity: 0, speed: 1.25 },
   },
   fields: {
     inner_belt: { yields: 'iron_ore', travelSeconds: 45, tonnesPerXp: 6, unlockLevel: 1 },
@@ -81,6 +83,17 @@ export const BALANCE = {
     courier_hold_3: { hull: 'courier', part: 'hold', grade: 3, skill: 'trade', level: 20, credits: 480000, costs: { cargo_pod: 60 }, bonus: 0.15 },
     courier_drive_3: { hull: 'courier', part: 'drive', grade: 3, skill: 'trade', level: 25, credits: 600000, costs: { thruster_assembly: 60 }, bonus: 0.1 },
   },
+  surveyTargets: {
+    inner_belt_survey: { unlockLevel: 1, requires: null, travelSeconds: 45, scanSeconds: 120, xp: 85, credits: 400, item: null, tonnes: 0 },
+    outer_belt_survey: { unlockLevel: 2, requires: null, travelSeconds: 90, scanSeconds: 240, xp: 100, credits: 0, item: 'nickel_ore', tonnes: 100 },
+    wreck_1: { unlockLevel: 3, requires: 'outer_belt_survey', travelSeconds: 90, scanSeconds: 300, xp: 120, credits: 0, item: 'wreck_alloy', tonnes: 2 },
+    ice_moon: { unlockLevel: 4, requires: null, travelSeconds: 120, scanSeconds: 360, xp: 150, credits: 800, item: null, tonnes: 0 },
+    wreck_2: { unlockLevel: 6, requires: 'wreck_1', travelSeconds: 90, scanSeconds: 600, xp: 200, credits: 0, item: 'wreck_alloy', tonnes: 3 },
+    silent_relay: { unlockLevel: 8, requires: null, travelSeconds: 150, scanSeconds: 480, xp: 250, credits: 1200, item: null, tonnes: 0 },
+    wreck_3: { unlockLevel: 10, requires: 'wreck_2', travelSeconds: 90, scanSeconds: 900, xp: 350, credits: 0, item: 'wreck_alloy', tonnes: 5 },
+    system_edge: { unlockLevel: 12, requires: null, travelSeconds: 240, scanSeconds: 900, xp: 400, credits: 2000, item: null, tonnes: 0 },
+    wreck_4: { unlockLevel: 15, requires: 'wreck_3', travelSeconds: 90, scanSeconds: 1500, xp: 600, credits: 0, item: 'wreck_alloy', tonnes: 8 },
+  },
   hullSizes: {
     small: { commandPoints: 1, loadingRate: 20 },
     medium: { commandPoints: 2, loadingRate: 40 },
@@ -96,5 +109,6 @@ export const BALANCE = {
   levelPerks: { miningDrillPerLevel: 0.005, tradeHubPricePerLevel: 0.005 },
   refinery: { slotLevels: [1, 10, 25], speedPerLevel: 0.005, openAtMiningLevel: 8 },
   workshop: { openAtRefiningLevel: 8, slotLevels: [1, 12, 35], queueLevels: [8, 25], baseQueue: 3, maxOrderBatches: 20, speedPerLevel: 0.005, standingPerSlot: 2 },
+  exploration: { scanSpeedPerLevel: 0.005, deepScan: { unlockLevel: 1, travelSeconds: 60, scanSeconds: 600, xp: 120, findChance: 0.3, alloyShare: 0.33, alloyTonnes: 1, creditsMin: 300, creditsMax: 900 } },
   rules: { offlineCapHours: 24 },
 };

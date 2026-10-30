@@ -10,7 +10,7 @@
 // =============================================================
 
 import { RULES, SHIP_TYPES } from "../data/content.js";
-import { SAVE_VERSION } from "./state.js";
+import { SAVE_VERSION, createExploration } from "./state.js";
 import { getTripPlan } from "./jobs.js";
 import { advanceTo } from "./simulation.js";
 import { createClock } from "./clock.js";
@@ -205,7 +205,10 @@ function looksLikeASave(state) {
     typeof state.clock.speed === "number" &&
     typeof state.clock.realAt === "number" &&
     typeof state.clock.gameAt === "number" &&
-    typeof state.shipUpgrades === "object" && state.shipUpgrades !== null
+    typeof state.shipUpgrades === "object" && state.shipUpgrades !== null &&
+    typeof state.exploration === "object" && state.exploration !== null &&
+    typeof state.exploration.surveyed === "object" && state.exploration.surveyed !== null &&
+    typeof state.milestones === "object" && state.milestones !== null
   );
 }
 
@@ -401,7 +404,22 @@ function upgradeSave(state) {
     state.version = 14;
   }
 
-  // (Future: if (state.version === 14) { ...; state.version = 15; })
+  // --- Version 14 -> 15: Exploration ---
+  // Nobody has explored yet. The Pathfinder unlocks once the
+  // player has sold ore, which anyone with an older save has
+  // already done if they've earned any credits or Mining XP, so
+  // they get the milestone straight away.
+  if (state.version === 14) {
+    state.skills.exploration = { xp: 0 };
+    state.exploration = createExploration();
+    state.milestones = {};
+    if (state.credits > 0 || state.skills.mining.xp > 0 || state.ships.length > 1) {
+      state.milestones.firstSale = true;
+    }
+    state.version = 15;
+  }
+
+  // (Future: if (state.version === 15) { ...; state.version = 16; })
 
   if (state.version > SAVE_VERSION) {
     // A save from a NEWER version of the game than this one.

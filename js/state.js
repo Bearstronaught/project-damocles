@@ -30,7 +30,8 @@ import { createClock } from "./clock.js";
 //   Version 12: standing orders (the Control centre)
 //   Version 13: the game clock (playtest speed) and the playtest mark
 //   Version 14: ship upgrades, and loading/unloading time on trips
-export const SAVE_VERSION = 14;
+//   Version 15: the Exploration skill, survey records, milestones
+export const SAVE_VERSION = 15;
 
 
 // -------------------------------------------------------------
@@ -61,6 +62,7 @@ export function createNewGame() {
       structural_frames: 0,
       cargo_pod: 0,
       thruster_assembly: 0,
+      wreck_alloy: 0,
     },
 
     // The player's fleet. Each ship has its own unique ID
@@ -112,7 +114,20 @@ export function createNewGame() {
       trade: { xp: 0 },
       refining: { xp: 0 },
       manufacturing: { xp: 0 },
+      exploration: { xp: 0 },
     },
+
+    // EXPLORATION (exploration.js): which survey targets are done,
+    // e.g. { inner_belt_survey: true }, how many deep scans have
+    // run, how many found something, and this save's "seed" for
+    // the deep scan dice rolls (a random whole number, made once
+    // here, so each player gets their own luck but the same hour
+    // always plays out the same way).
+    exploration: createExploration(),
+
+    // MILESTONES: one-off things the player has done, e.g.
+    // { firstSale: true } (see MILESTONES in content.js).
+    milestones: {},
 
     // Jobs that are currently running (empty at the start):
     // ships' trips (see jobs.js), refinery slots (refinery.js)
@@ -139,6 +154,23 @@ export function createNewGame() {
     // True once any playtest tool has been used on this save
     // (speed, dev panel). It never goes back. See playtest.js.
     playtest: false,
+  };
+}
+
+
+// -------------------------------------------------------------
+// createExploration()
+// A fresh exploration record (new games, and old saves upgraded
+// to version 15 in save.js).
+// -------------------------------------------------------------
+export function createExploration() {
+  return {
+    surveyed: {},
+    deepScans: 0,
+    deepFinds: 0,
+    // Math.random() gives 0 to 1; times 2^32, rounded down, gives a
+    // whole number from 0 to 4,294,967,295.
+    seed: Math.floor(Math.random() * 4294967296),
   };
 }
 

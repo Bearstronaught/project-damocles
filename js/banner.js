@@ -33,9 +33,12 @@ let showing = false;
 //   title    e.g. "Mining level 5"
 //   unlocks  a list of lines, e.g. ["New field: Outer Belt"]
 //            (an empty list is fine)
+//   kicker   the small line above the title: "Level up" unless
+//            it's something else, like "Unlocked" for the first
+//            sale (main.js)
 // -------------------------------------------------------------
-export function showLevelBanner(title, unlocks = []) {
-  queue.push({ title, unlocks });
+export function showLevelBanner(title, unlocks = [], kicker = "Level up") {
+  queue.push({ title, unlocks, kicker });
   if (!showing) {
     showNext();
   }
@@ -92,7 +95,7 @@ function showNext() {
 // Built from separate pieces with textContent, never as one
 // HTML string, so text can never be read as HTML.
 // -------------------------------------------------------------
-function makeBanner({ title, unlocks }) {
+function makeBanner({ title, unlocks, kicker: kickerText }) {
   const banner = document.createElement("div");
   banner.className = "level-banner";
   // Tells screen readers to read it out when it appears,
@@ -102,7 +105,7 @@ function makeBanner({ title, unlocks }) {
 
   const kicker = document.createElement("div");
   kicker.className = "level-banner-kicker";
-  kicker.textContent = "Level up";
+  kicker.textContent = kickerText;
 
   const heading = document.createElement("div");
   heading.className = "level-banner-title";

@@ -97,6 +97,29 @@ const SCHEMATICS = {
       <polygon class="hull" points="104,32 122,34 130,40 122,46 104,48" />
       <rect class="detail" x="112" y="37" width="8" height="6" />
     </svg>`,
+
+  // --- Pathfinder: a slim scout. A long narrow hull, two sensor
+  //     pods on short booms, and a sensor dome (the "accent": it
+  //     pulses while scanning, like a drill while mining). ---
+  hull_pathfinder: `
+    <svg viewBox="0 0 140 80" class="schematic" aria-hidden="true">
+      <!-- drive flame -->
+      <polygon class="engine" points="20,37 4,40 20,43" />
+      <!-- engine block -->
+      <rect class="hull" x="20" y="34" width="10" height="12" />
+      <!-- the long, narrow hull, coming to a sharp nose -->
+      <polygon class="hull" points="30,32 76,30 112,37 124,40 112,43 76,50 30,48" />
+      <!-- cockpit -->
+      <rect class="detail" x="96" y="37" width="9" height="6" />
+      <!-- sensor pods on short booms, above and below -->
+      <line class="detail" x1="58" y1="31" x2="58" y2="22" />
+      <line class="detail" x1="58" y1="49" x2="58" y2="58" />
+      <rect class="detail" x="46" y="17" width="24" height="5" />
+      <rect class="detail" x="46" y="58" width="24" height="5" />
+      <!-- the sensor dome on the spine -->
+      <circle class="accent" cx="62" cy="40" r="6" />
+      <line class="detail" x1="40" y1="40" x2="54" y2="40" />
+    </svg>`,
 };
 
 

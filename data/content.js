@@ -80,6 +80,13 @@ export const ITEMS = {
     name: "Thruster assemblies",
     ...BALANCE.items.thruster_assembly,
   },
+  // Found, not made: your Pathfinder brings it back from the
+  // alien wreck and deep scans (see SURVEY_TARGETS below). Worth
+  // a lot per tonne; later it will feed Research.
+  wreck_alloy: {
+    name: "Wreck alloy",
+    ...BALANCE.items.wreck_alloy,
+  },
 };
 
 
@@ -112,6 +119,11 @@ export const SKILLS = {
     name: "Manufacturing",
     description: "Turn metal into components and assemblies at the Anvil Station workshop, which opens at a Refining milestone. Queue work orders: each runs a set number of batches, then the slot goes idle. Products sell for more than their metal. Levels unlock recipes, workshop slots and longer queues, and every level makes batches a little faster.",
     perk: "workshop speed",
+  },
+  exploration: {
+    name: "Exploration",
+    description: "Send scouts to survey the home system. Each survey target is a one-off trip that brings back a find: credits, goods, or another piece of the alien wreck's story. When the targets run out, scouts run deep scans for XP and the odd find. Your first scout, the Pathfinder, goes on sale once you've sold your first ore. Levels unlock new targets, and every level makes scans a little faster.",
+    perk: "scan speed",
   },
 };
 
@@ -169,6 +181,7 @@ export const FLEET_XP_EXPONENT = BALANCE.fleetXpExponent;
 export const ROLES = {
   mining: { name: "Mining" },
   freight: { name: "Freight" },
+  scout: { name: "Scouting" },
 };
 
 
@@ -199,6 +212,12 @@ export const ROLES = {
 //                  1.0 = normal, 0.75 = takes a third longer
 //   (resale        what it sells for if it has no shop price.
 //                  No ship uses this at the moment.)
+//
+// Written here, optional:
+//   unlockAfter    a milestone that must happen before the ship
+//                  can be bought, on top of the skill level, e.g.
+//                  "firstSale" = the player has sold ore once
+//                  (see MILESTONES below)
 export const SHIP_TYPES = {
   prospector: {
     name: "Prospector-class barge",
@@ -218,6 +237,23 @@ export const SHIP_TYPES = {
     art: "hull_courier",
     ...BALANCE.ships.courier,
   },
+  pathfinder: {
+    name: "Pathfinder-class scout",
+    description: "Light, fast and nosy. Flies out to survey targets in the home system and brings back whatever it finds. Carries no cargo of its own.",
+    art: "hull_pathfinder",
+    unlockAfter: "firstSale",
+    ...BALANCE.ships.pathfinder,
+  },
+};
+
+// -------------------------------------------------------------
+// MILESTONES: one-off things the player has done, used to
+// unlock something that isn't tied to a skill level.
+// -------------------------------------------------------------
+// "says" is how the Shipyard and Skills screens describe what's
+// still needed.
+export const MILESTONES = {
+  firstSale: { says: "Sell your first ore to unlock" },
 };
 
 // Names given to newly bought ships, used in order.
@@ -452,6 +488,116 @@ export const UPGRADES = {
     description: "Unlocks standing orders: each workshop slot can keep a product topped up to a set amount whenever it has no work orders to run.",
     ...BALANCE.upgrades.control_centre,
   },
+};
+
+
+// -------------------------------------------------------------
+// SURVEY TARGETS: places in the home system a scout can survey.
+// -------------------------------------------------------------
+// Each target is surveyed ONCE: the scout flies out, scans it,
+// flies home, and brings back its find. They show (and scouts
+// work through them) in the order listed here.
+//
+// Written here (names and lore are placeholders for Dan's lore):
+//   name        what the player sees
+//   description what the Exploration screen says before it's surveyed
+//   find        what the log and Exploration screen say was found
+//   lore        one line of story, shown once it's surveyed
+//
+// From the balance sheet (Exploration tab):
+//   unlockLevel    Exploration level needed
+//   requires       a target that must be surveyed first (null = none);
+//                  the wreck's stages go in order
+//   travelSeconds  one way, for a ship with speed 1.0
+//   scanSeconds    how long the scan takes at Exploration level 1
+//   xp             Exploration XP for finishing the survey
+//   credits        credits found (0 = none)
+//   item, tonnes   goods found, put straight into the home hold
+//                  (item null = none)
+const TARGET_WORDS = {
+  inner_belt_survey: {
+    name: "Inner Belt survey",
+    description: "Chart the rubble your barges already mine. Someone must have been here before you.",
+    find: "an abandoned prospector's cache",
+    lore: "The cache belonged to the outfit that held this contract before you. Their last log entry just says \"Not worth it.\"",
+  },
+  outer_belt_survey: {
+    name: "Outer Belt survey",
+    description: "A long sweep of the sparse rock on the system's edge.",
+    find: "a pocket of high-grade nickel, which your barges strip on their next pass",
+    lore: "The sensors keep snagging on something big and cold in the far side of the belt. It isn't rock.",
+  },
+  wreck_1: {
+    name: "The wreck: first pass",
+    description: "Something big and cold is drifting in the Outer Belt. Get a closer look.",
+    find: "fragments of an alloy nobody can identify",
+    lore: "A hull, kilometres long, older than the station. No markings anyone recognises, and no sign it was ever meant to be found.",
+  },
+  ice_moon: {
+    name: "Ice moon",
+    description: "A frozen moon circling the gas giant. Worth a look for anything a mining outfit can use.",
+    find: "an old fuel depot's unclaimed balance",
+    lore: "Thick ice under a thin crust. One day it could be fuel; for now it's a very cold view.",
+  },
+  wreck_2: {
+    name: "The wreck: hull breach",
+    description: "There's a gap in the wreck's hull. Send the scout in, carefully.",
+    find: "more of the alloy, cut from the breach",
+    lore: "The breach wasn't made by a collision. Something cut its way OUT.",
+  },
+  silent_relay: {
+    name: "Silent relay",
+    description: "An old comms relay that stopped answering years ago.",
+    find: "a forgotten maintenance fund, still claimable",
+    lore: "The relay's logs mention belt independents trading a few systems away. Nobody has heard from them since the lanes went quiet.",
+  },
+  wreck_3: {
+    name: "The wreck: inner chambers",
+    description: "Past the breach, the wreck opens up into chambers nobody has seen.",
+    find: "a large haul of alloy from the inner chambers",
+    lore: "The chambers hold equipment arranged around empty spaces, as if its crew were never quite solid.",
+  },
+  system_edge: {
+    name: "System edge",
+    description: "The furthest your drives can take you. The scout looks outward.",
+    find: "survey data the belt independents will pay for",
+    lore: "Other stars, close enough to name, far too far to reach. Something on the wreck says that doesn't have to be true.",
+  },
+  wreck_4: {
+    name: "The wreck: the sealed core",
+    description: "At the wreck's heart, a sealed chamber is still drawing power.",
+    find: "the last of the loose alloy around the core",
+    lore: "The core is sealed and still warm. Whatever is inside moves mass in ways physics says it shouldn't. You can't open it. Yet.",
+  },
+};
+
+export const SURVEY_TARGETS = {};
+for (const [id, numbers] of Object.entries(BALANCE.surveyTargets)) {
+  SURVEY_TARGETS[id] = { ...TARGET_WORDS[id], ...numbers };
+}
+
+// DEEP SCAN: what a scout does when there are no targets left.
+// It never runs out: each run earns XP, and some bring back a
+// small find. From the balance sheet (Exploration tab):
+//   unlockLevel, travelSeconds, scanSeconds, xp   as for targets
+//   findChance    share of runs that find something (0.3 = 30%)
+//   alloyShare    of those finds, the share that are wreck alloy
+//                 (alloyTonnes of it); the rest are credits,
+//                 between creditsMin and creditsMax
+// Which runs find something is decided by a dice roll that's
+// fixed for each save (see exploration.js), so an hour away
+// always gives the same finds as an hour played.
+export const DEEP_SCAN = {
+  name: "Deep scan",
+  description: "A long, slow scan of the whole system from its quiet edge. Never runs out, earns steady XP, and now and then picks something up.",
+  ...BALANCE.exploration.deepScan,
+};
+
+// EXPLORATION settings (balance sheet, Settings tab):
+//   scanSpeedPerLevel   each Exploration level above 1 makes the
+//                       scan part of a trip this much faster
+export const EXPLORATION = {
+  scanSpeedPerLevel: BALANCE.exploration.scanSpeedPerLevel,
 };
 
 

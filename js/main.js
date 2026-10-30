@@ -33,6 +33,8 @@ import { addOrder, cancelOrder, getWorkshopJob, getWorkshopRecipeUnlocksAtLevel,
 import { buyIndustryUpgrade, getUpgradeUnlocksAtLevel } from "./upgrades.js";
 import { buyShipUpgrade, getShipUpgradeUnlocksAtLevel, getUpgradeName, getPendingRefits } from "./ship-upgrades.js";
 import { getLevelPerk } from "./skills.js";
+import { startScoutJob, canScoutGo, chooseNextTarget, getTarget, getTargetUnlocksAtLevel, isExplorationOpen, DEEP_SCAN_ID } from "./exploration.js";
+import { describeFind } from "./exploration-screen.js";
 import { saveGame, loadGame, deleteSave, applyOfflineProgress, exportSave, importSave } from "./save.js";
 import { showLevelBanner } from "./banner.js";
 import { setupUI, buildFleetViews, render, addLog, formatNumber, formatXp, formatTonnes, formatDuration, formatPercent, showDevPanel } from "./ui.js";
@@ -63,6 +65,14 @@ const actions = {
 
   setDestination(shipId, fieldId) {
     const ship = findShip(state, shipId);
+    // A scout's "destination" is a survey target (or the deep scan).
+    if (ship && SHIP_TYPES[ship.type].role === "scout") {
+      if (!getJobForShip(state, shipId) && canScoutGo(state, shipId, fieldId)) {
+        ship.destination = fieldId;
+      }
+      refresh();
+      return;
+    }
     // Only docked ships can change course, and only to fields
     // that are unlocked. (The buttons are disabled otherwise,
     // but checking here too means the rule can't be skipped.)
@@ -76,8 +86,18 @@ const actions = {
   dispatchShip(shipId) {
     const ship = findShip(state, shipId);
 
-    // Freighters go on hub runs; everything else goes mining.
-    if (SHIP_TYPES[ship.type].role === "freight") {
+    // Scouts survey; freighters go on hub runs; barges go mining.
+    if (SHIP_TYPES[ship.type].role === "scout") {
+      // The chosen target, or the next one it can do if that's
+      // gone (surveyed by now, or taken by another scout).
+      const targetId = canScoutGo(state, shipId, ship.destination) ? ship.destination : chooseNextTarget(state, shipId);
+      const job = startScoutJob(state, shipId, targetId, gameNow(state));
+      if (job) {
+        addLog(targetId === DEEP_SCAN_ID
+          ? `${ship.name} departs to run deep scans.`
+          : `${ship.name} departs to survey ${getTarget(targetId).name}.`, "explore");
+      }
+    } else if (SHIP_TYPES[ship.type].role === "freight") {
       const job = startHaulJob(state, shipId, gameNow(state));
       if (job && job.status === "travelling") {
         addLog(`${ship.name} loads ${describeCargo(job.cargo)} and departs for the ${HUB.name.toLowerCase()}.`, "fleet");
@@ -235,19 +255,23 @@ const actions = {
   },
 
   sellItem(itemId) {
+    const wasOpen = isExplorationOpen(state);
     // sale = { credits, xp, newLevels } (see trade.js)
     const sale = sellAll(state, itemId);
     if (sale.credits > 0) {
       addLog(`Sold ${ITEMS[itemId].name.toLowerCase()} at ${HOME.name} for ${formatNumber(sale.credits)} cr.`, "trade");
     }
+    announceFirstSale(wasOpen);
     refresh();
   },
 
   sellCargo() {
+    const wasOpen = isExplorationOpen(state);
     const sale = sellEverything(state);
     if (sale.credits > 0) {
       addLog(`Sold the whole hold at ${HOME.name} for ${formatNumber(sale.credits)} cr.`, "trade");
     }
+    announceFirstSale(wasOpen);
     refresh();
   },
 
@@ -479,12 +503,20 @@ function tick() {
       continue;
     }
 
+    // Scouts have their own lines (finds and lore).
+    if (result.kind === "scout") {
+      logScoutResult(result);
+      continue;
+    }
+
     const ship = findShip(state, result.shipId);
     if (result.kind === "mining") {
       const itemName = ITEMS[result.itemId].name.toLowerCase();
       addLog(`${ship.name} docked with ${formatTonnes(result.amount)} of ${itemName} (+${formatXp(result.xpGained)} Mining XP).`, "trip");
     } else if (result.kind === "haul") {
       addLog(`${ship.name} sold ${describeCargo(result.cargo)} at the ${HUB.name.toLowerCase()} for ${formatNumber(result.credits)} cr (+${formatXp(result.xpGained)} Trade XP).`, "trade");
+    } else if (result.kind === "docked" && result.skillId === "exploration") {
+      addLog(`${ship.name} docked at ${HOME.name}, its scan unfinished. Standing by.`, "explore");
     } else if (result.kind === "docked") {
       addLog(result.returnedCargo
         ? `${ship.name} docked at ${HOME.name}; ${describeCargo(result.returnedCargo)} back in the hold. Standing by.`
@@ -496,6 +528,53 @@ function tick() {
   }
 
   render(state, now);
+}
+
+// -------------------------------------------------------------
+// announceFirstSale(wasOpen)
+// The very first sale unlocks the Pathfinder and the Exploration
+// tab (design doc, Early exploration). Said once, with a banner,
+// so the new goal can't be missed.
+// -------------------------------------------------------------
+function announceFirstSale(wasOpen) {
+  if (wasOpen || !isExplorationOpen(state)) return;
+  addLog(`First sale made. A ${SHIP_TYPES.pathfinder.name} is now for sale in the Shipyard, and the Exploration tab is open: there's more out there than rock.`, "explore");
+  showLevelBanner("Exploration", [
+    `New ship: ${SHIP_TYPES.pathfinder.name} (Shipyard)`,
+    "New: the Exploration tab",
+  ], "Unlocked");
+}
+
+// -------------------------------------------------------------
+// logScoutResult(result)
+// Log lines for a scout's trips, e.g.
+//   "Wayfarer surveyed the Inner Belt survey: found an abandoned
+//    prospector's cache, 400 cr (+85 Exploration XP)."
+//   then the find's line of lore, and a line per deep scan find.
+// -------------------------------------------------------------
+function logScoutResult(result) {
+  const ship = findShip(state, result.shipId);
+  const lines = [];   // the trip lines, before the lore
+  for (const targetId of result.surveys) {
+    const target = getTarget(targetId);
+    lines.push(`${ship.name} surveyed ${target.name}: found ${target.find}, ${describeFind(target)}`);
+  }
+  if (result.deepScans > 0) {
+    const scans = result.deepScans === 1 ? "a deep scan" : result.deepScans + " deep scans";
+    const deepFinds = result.finds.filter((find) => find.targetId === DEEP_SCAN_ID);
+    const found = deepFinds.length === 0 ? "nothing new" : "found " + deepFinds.map(describeFind).join(" and ");
+    lines.push(`${ship.name} finished ${scans}: ${found}`);
+  }
+  // The XP goes on the end of the last line, e.g. "(+85 Exploration XP)."
+  lines[lines.length - 1] += ` (+${formatXp(result.xpGained)} Exploration XP)`;
+  for (const line of lines) {
+    addLog(line + ".", "explore");
+  }
+  // Then each survey's line of lore
+  for (const targetId of result.surveys) {
+    addLog(getTarget(targetId).lore, "lore");
+  }
+  logLevelUps(result.skillId, result.newLevels);
 }
 
 // refresh() - redraw straight away after a button press, and
@@ -575,6 +654,11 @@ function getUnlockLines(skillId, level, withPerk = true) {
   for (const upgradeId of getShipUpgradeUnlocksAtLevel(skillId, level)) {
     lines.push("New ship component (Shipyard): " + getUpgradeName(SHIP_UPGRADES[upgradeId]));
   }
+  if (skillId === "exploration") {
+    for (const targetId of getTargetUnlocksAtLevel(level)) {
+      lines.push("New survey target: " + getTarget(targetId).name);
+    }
+  }
   if (skillId === "manufacturing") {
     for (const recipeId of getWorkshopRecipeUnlocksAtLevel(level)) {
       lines.push("New recipe: " + WORKSHOP_RECIPES[recipeId].name);
@@ -643,6 +727,11 @@ function logLevelUps(skillId, levels, showBanners = true) {
     for (const upgradeId of getShipUpgradeUnlocksAtLevel(skillId, level)) {
       addLog(`New ship component available: ${getUpgradeName(SHIP_UPGRADES[upgradeId])}. Find it under Ship components on the Shipyard tab.`, "level");
     }
+    if (skillId === "exploration") {
+      for (const targetId of getTargetUnlocksAtLevel(level)) {
+        addLog(`New survey target: ${getTarget(targetId).name}. Your scouts will head there after their current trip.`, "level");
+      }
+    }
     if (skillId === "manufacturing") {
       for (const recipeId of getWorkshopRecipeUnlocksAtLevel(level)) {
         addLog(`New recipe unlocked: ${WORKSHOP_RECIPES[recipeId].name}. Pick it in a workshop order.`, "level");
@@ -696,6 +785,10 @@ function reportOfflineProgress(report, opening = null) {
   const made = {};       // products made, e.g. { hull_plating: 900 }
   let manufacturingXp = 0;
   const idleSlots = [];  // workshop slots whose queue ran out
+  const surveys = [];    // survey targets finished while away
+  let deepScans = 0;
+  const finds = [];      // everything scouts brought home
+  let explorationXp = 0;
 
   for (const result of report.results) {
     if (result.kind === "mining") {
@@ -714,6 +807,11 @@ function reportOfflineProgress(report, opening = null) {
       made[result.itemId] = (made[result.itemId] || 0) + result.amount;
       manufacturingXp += result.xpGained;
       if (result.slotIdle) idleSlots.push(result.slot + 1);
+    } else if (result.kind === "scout") {
+      surveys.push(...result.surveys);
+      deepScans += result.deepScans;
+      finds.push(...result.finds);
+      explorationXp += result.xpGained;
     }
   }
 
@@ -729,10 +827,22 @@ function reportOfflineProgress(report, opening = null) {
   if (Object.keys(made).length > 0) {
     message += ` The workshop made ${describeCargo(made)}, earning ${formatXp(manufacturingXp)} Manufacturing XP.`;
   }
+  if (surveys.length > 0 || deepScans > 0) {
+    const parts = [];
+    if (surveys.length > 0) parts.push(`surveyed ${surveys.map((id) => getTarget(id).name).join(", ")}`);
+    if (deepScans > 0) parts.push(`ran ${deepScans} deep scan${deepScans === 1 ? "" : "s"}`);
+    const found = finds.length > 0 ? `, bringing home ${finds.map(describeFind).join(", ")}` : "";
+    message += ` Your scouts ${parts.join(" and ")}${found}, earning ${formatXp(explorationXp)} Exploration XP.`;
+  }
   if (idleSlots.length > 0) {
     message += ` Workshop ${idleSlots.length === 1 ? "slot " + idleSlots[0] + " ran out of orders and is" : "slots " + idleSlots.join(" and ") + " ran out of orders and are"} idle.`;
   }
   addLog(message, "system");
+
+  // Each survey finished while away gets its line of lore.
+  for (const targetId of surveys) {
+    addLog(getTarget(targetId).lore, "lore");
+  }
 
   // Any level-ups while away get their own log lines after it.
   // levelsGained collects them per skill, e.g. { mining: [4, 5, 6] }.

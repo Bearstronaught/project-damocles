@@ -9,7 +9,7 @@
 // if we change the curve later, everyone's levels update.
 // =============================================================
 
-import { SHIP_TYPES, FIELDS, RULES, LEVEL_PERKS, REFINERY, WORKSHOP } from "../data/content.js";
+import { SHIP_TYPES, FIELDS, RULES, LEVEL_PERKS, REFINERY, WORKSHOP, EXPLORATION } from "../data/content.js";
 
 // The highest level (99, set in content.js).
 export const MAX_LEVEL = RULES.maxLevel;
@@ -130,6 +130,11 @@ export function addXp(state, skillId, amount) {
 // -------------------------------------------------------------
 export function isShipTypeUnlocked(state, shipTypeId) {
   const shipType = SHIP_TYPES[shipTypeId];
+  // Some ships also wait for a milestone (the Pathfinder waits
+  // for the first sale - see MILESTONES in content.js).
+  if (shipType.unlockAfter && !state.milestones[shipType.unlockAfter]) {
+    return false;
+  }
   return getLevel(state, shipType.skill) >= shipType.unlockLevel;
 }
 
@@ -205,6 +210,7 @@ export function getLevelPerk(state, skillId, level = getLevel(state, skillId)) {
     trade: LEVEL_PERKS.tradeHubPricePerLevel,
     refining: REFINERY.speedPerLevel,
     manufacturing: WORKSHOP.speedPerLevel,
+    exploration: EXPLORATION.scanSpeedPerLevel,
   }[skillId];
   return { perLevel: perLevel, total: perLevel * (level - 1) };
 }

@@ -11,10 +11,11 @@
 // open the whole time or closed for 6 hours - the maths is the
 // same. Offline progress comes for free.
 //
-// There are two kinds of SHIP job. (The refinery's batches and
-// the workshop's work orders are jobs too - see js/refinery.js
-// and js/workshop.js - so they play out on the same timeline
-// as the ships.)
+// There are three kinds of SHIP job: mining trips and haul runs
+// (below), and scout trips (js/exploration.js). The refinery's
+// batches and the workshop's work orders are jobs too - see
+// js/refinery.js and js/workshop.js - so everything plays out on
+// the same timeline.
 //
 // A MINING trip has four phases, one after the other:
 //   OUTBOUND  fly from home to the field
@@ -73,6 +74,7 @@ import { startWaitingBatches, finishBatch } from "./refinery.js";
 import { startWaitingOrders, finishWorkshopBatch } from "./workshop.js";
 import { getSellable } from "./bonded.js";
 import { getShipStats, getHullGrades } from "./ship-upgrades.js";
+import { finishScoutTrip } from "./exploration.js";
 
 
 // =============================================================
@@ -399,6 +401,7 @@ export function recallJob(state, jobId, now) {
     original.unloadMs = job.unloadMs;
   }
   if (job.type === "haul") original.tradeMs = job.tradeMs;
+  if (job.type === "scout") original.scanMs = job.scanMs;
 
   // How long it has been FLYING out (a freighter loads first).
   const flownOut = at - loadMs;
@@ -418,6 +421,9 @@ export function recallJob(state, jobId, now) {
       job.miningMs = 0;
       job.unloadMs = 0;            // nothing to unload
       job.amountOverride = 0;      // nothing mined
+    } else if (job.type === "scout") {
+      job.scanMs = 0;
+      job.abandoned = true;        // never reached the target: no find
     } else {
       job.tradeMs = 0;
       job.noSale = true;           // bring the cargo back unsold
@@ -432,6 +438,13 @@ export function recallJob(state, jobId, now) {
     job.miningMs = minedMs;
     job.unloadMs = getLoadMs(findShip(state, job.shipId).type, job.amountOverride);   // a part load unloads quicker
     job.durationMs = job.outboundMs + minedMs + job.returnMs + job.unloadMs;
+  } else if (job.type === "scout" && at < job.outboundMs + job.scanMs) {
+    // SCANNING: stop now and fly home. An unfinished scan finds
+    // nothing and earns no XP (the target stays unsurveyed).
+    mode = "leftEarly";
+    job.scanMs = at - job.outboundMs;
+    job.durationMs = job.outboundMs + job.scanMs + job.returnMs;
+    job.abandoned = true;
   } else {
     // ALREADY HEADING HOME (or selling at the hub): carry on as
     // normal, just don't start another trip.
@@ -486,6 +499,7 @@ export function resumeJob(state, jobId, now) {
     job.startedAt = now - loadMs - distanceOut;
     delete job.amountOverride;
     delete job.noSale;
+    delete job.abandoned;
   } else if (mode === "leftEarly") {
     // This short trip finishes as it is; the NEXT one is normal.
     job.restoreAfterTrip = original;
@@ -634,9 +648,10 @@ export function getJobProgress(job, now) {
 //     msLeftInPhase: 12000,
 //     fills: [1, 0.4, 0, 0],   how full each phase is, 0 to 1
 //   }
-// The four phases, in order:
+// The phases, in order:
 //   barge:      outbound, mining, returning, unloading
 //   freighter:  loading, outbound, trading, returning
+//   scout:      outbound, scanning, returning
 // -------------------------------------------------------------
 export function getJobPhase(job, now) {
   // A freighter waiting at home hasn't started its run yet.
@@ -646,19 +661,29 @@ export function getJobPhase(job, now) {
 
   // Each phase's name and length, in order. ("|| 0" covers trips
   // saved before loading time existed.)
-  const phases = job.type === "haul"
-    ? [
-        ["loading", job.loadMs || 0],
-        ["outbound", job.outboundMs],
-        ["trading", job.tradeMs],
-        ["returning", job.returnMs],
-      ]
-    : [
-        ["outbound", job.outboundMs],
-        ["mining", job.miningMs],
-        ["returning", job.returnMs],
-        ["unloading", job.unloadMs || 0],
-      ];
+  let phases;
+  if (job.type === "haul") {
+    phases = [
+      ["loading", job.loadMs || 0],
+      ["outbound", job.outboundMs],
+      ["trading", job.tradeMs],
+      ["returning", job.returnMs],
+    ];
+  } else if (job.type === "scout") {
+    // A scout carries no cargo, so it has nothing to unload.
+    phases = [
+      ["outbound", job.outboundMs],
+      ["scanning", job.scanMs],
+      ["returning", job.returnMs],
+    ];
+  } else {
+    phases = [
+      ["outbound", job.outboundMs],
+      ["mining", job.miningMs],
+      ["returning", job.returnMs],
+      ["unloading", job.unloadMs || 0],
+    ];
+  }
 
   // Time into this trip, kept between 0 and the trip length.
   const elapsed = Math.min(Math.max(now - job.startedAt, 0), job.durationMs);
@@ -731,6 +756,9 @@ export function getJobPhase(job, now) {
 //             trips, ordersFinished, slotIdle,
 //             skillId: "manufacturing", xpGained, newLevels }
 //           (the same, for the workshop)
+//   scout:  { kind: "scout", shipId, trips, surveys, deepScans,
+//             finds, skillId: "exploration", xpGained, newLevels }
+//           (see exploration.js, finishScoutTrip)
 // -------------------------------------------------------------
 export function processJobs(state, now) {
   const results = [];
@@ -788,6 +816,7 @@ function startWaitingAll(state, time) {
 // The earliest thing due to happen at or before "now", as
 // { job, time }, or null if nothing is due yet.
 //   Mining job:  the trip finishing (ship docks with ore)
+//   Scout job:   the trip finishing (scout docks with its find)
 //   Haul job:    selling at the hub, then docking back home
 //   Refinery or workshop job: the current batch finishing
 //   Waiting freighters, refinery slots and workshop slots have
@@ -799,8 +828,8 @@ function findNextEvent(state, now) {
   for (const job of state.jobs) {
     let time;
 
-    if (job.type === "mining") {
-      time = job.startedAt + job.durationMs;
+    if (job.type === "mining" || job.type === "scout") {
+      time = job.startedAt + job.durationMs;              // docks home
     } else if (job.type === "refine" && job.status === "working") {
       time = job.startedAt + job.durationMs;              // batch done
     } else if (job.type === "workshop" && job.status === "working") {
@@ -838,6 +867,11 @@ function runEvent(state, job, time) {
   // --- A workshop batch finishes: a product into the hold ---
   if (job.type === "workshop") {
     return finishWorkshopBatch(state, job);
+  }
+
+  // --- A scout docks: its find and Exploration XP ---
+  if (job.type === "scout") {
+    return finishScoutTrip(state, job);
   }
 
   // --- A mining trip finishes: unload ore, earn Mining XP ---
@@ -960,6 +994,8 @@ function mergeResultsByShip(results) {
       // the original) and keep it.
       const copy = { ...result, newLevels: [...result.newLevels] };
       if (copy.cargo) copy.cargo = { ...copy.cargo };
+      if (copy.surveys) copy.surveys = [...copy.surveys];
+      if (copy.finds) copy.finds = [...copy.finds];
       byShip[key] = copy;
       merged.push(copy);
       continue;
@@ -976,6 +1012,11 @@ function mergeResultsByShip(results) {
 
     if (result.kind === "mining" || result.kind === "refine") {
       total.amount += result.amount;
+    } else if (result.kind === "scout") {
+      // Several trips: every survey and find, one after another.
+      total.surveys.push(...result.surveys);
+      total.deepScans += result.deepScans;
+      total.finds.push(...result.finds);
     } else if (result.kind === "workshop") {
       total.amount += result.amount;
       total.ordersFinished += result.ordersFinished;

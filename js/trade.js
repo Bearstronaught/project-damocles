@@ -70,6 +70,11 @@ export function sellAll(state, itemId) {
   state.inventory[itemId] -= amount;   // the goods leave the hold (the bond stays)...
   state.credits += earned;       // ...and the money arrives
 
+  // The first sale ever unlocks the Pathfinder and the Exploration
+  // tab (design doc, Early exploration). Written straight onto the
+  // state, so there's nothing to import here.
+  state.milestones.firstSale = true;
+
   return { credits: earned, xp: 0, newLevels: [] };
 }
 
@@ -121,6 +126,7 @@ export function sellAtHub(state, cargo, xpShare = 1) {
   const credits = Math.round(value * (1 + getTradeHubPerk(state)));
 
   state.credits += credits;
+  state.milestones.firstSale = true;   // (see sellAll)
 
   // Trade XP for the haul: tonnes x distance, times the share.
   const xp = getTradeXp(tonnes, HUB.travelSeconds) * xpShare;

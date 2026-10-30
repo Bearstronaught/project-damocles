@@ -18,6 +18,10 @@
 //      XP per hour
 // Once the refinery opens it also keeps the refinery smelting
 // and sells the metal. No freighters or workshop yet.
+// With "explore" on (the default), it buys one Pathfinder as soon
+// as it can and keeps it scouting (design doc, Early exploration);
+// every finished survey and Exploration level is printed too.
+// Run with "--no-explore" to see the game without it.
 // It's simpler than a real player, so treat its times as a guide.
 // =============================================================
 
@@ -32,6 +36,7 @@ import { buyUpgrade, getNextUpgradeCost, canBuyUpgrade } from "../js/command.js"
 import { canBuyShipUpgrade, buyShipUpgrade } from "../js/ship-upgrades.js";
 import { setRecipe, getRefineJob, getSlotCount, isRecipeUnlocked } from "../js/refinery.js";
 import { getCommandFree } from "../js/command.js";
+import { startScoutJob, chooseNextTarget, getTarget } from "../js/exploration.js";
 
 const MINUTE = 60 * 1000;
 const START = 1_000_000_000_000;
@@ -45,22 +50,36 @@ const START = 1_000_000_000_000;
 // "hourly" (optional) is called once an hour with a report:
 //   { hour, earned, nextShipPrice, freePoints, blockedBy }
 // -------------------------------------------------------------
-export function simulate(hours, untilMiningLevel, hourly = null) {
+export function simulate(hours, untilMiningLevel, hourly = null, explore = true) {
   const state = createNewGame();
   state.clock = { realAt: START, gameAt: START, speed: 1 };
   state.simulatedUpTo = START;
   const events = [];
   let lastLevel = 1;
+  let lastExploreLevel = 1;
   let earnedThisHour = 0;   // credits from selling, for the hourly report
 
   for (let minute = 0; minute <= hours * 60; minute++) {
     const now = START + minute * MINUTE;
-    advanceTo(state, now);
+    const report = advanceTo(state, now);
+
+    // Surveys finished since last time (deep scans are routine)
+    for (const result of report.results) {
+      if (result.kind !== "scout") continue;
+      for (const targetId of result.surveys) {
+        events.push({ minute, text: `surveyed ${getTarget(targetId).name}`, goal: true });
+      }
+    }
+    const exploreLevel = getLevel(state, "exploration");
+    for (let l = lastExploreLevel + 1; l <= exploreLevel; l++) {
+      events.push({ minute, text: `Exploration ${l}` });
+    }
+    lastExploreLevel = exploreLevel;
 
     // Level-ups since last time
     const level = getLevel(state, "mining");
     for (let l = lastLevel + 1; l <= level; l++) {
-      events.push({ minute, text: `Mining ${l}` + (l === REFINERY.openAtMiningLevel ? " - REFINERY OPENS" : "") });
+      events.push({ minute, text: `Mining ${l}` + (l === REFINERY.openAtMiningLevel ? " - REFINERY OPENS" : ""), goal: true });
     }
     lastLevel = level;
     if (level >= untilMiningLevel) break;
@@ -107,19 +126,29 @@ export function simulate(hours, untilMiningLevel, hourly = null) {
         options.push({ cost: getShipPrice(state, "excavator"), buy: () => buyShip(state, "excavator"), text: "Excavator" });
       }
       if (canBuyShip(state, "prospector").ok) {
-        options.push({ cost: getShipPrice(state, "prospector"), buy: () => buyShip(state, "prospector"), text: "Prospector #" + (state.ships.length + 1) });
+        options.push({ cost: getShipPrice(state, "prospector"), buy: () => buyShip(state, "prospector"), text: "Prospector #" + (state.ships.filter((s) => s.type === "prospector").length + 1) });
       } else if (canBuyShip(state, "prospector").reason === "Not enough command points" && canBuyUpgrade(state).ok) {
         options.push({ cost: getNextUpgradeCost(state), buy: () => buyUpgrade(state), text: "command upgrade" });
+      }
+      // One Pathfinder, as soon as it's for sale and affordable
+      const hasScout = state.ships.some((ship) => ship.type === "pathfinder");
+      if (explore && !hasScout && canBuyShip(state, "pathfinder").ok) {
+        options.push({ cost: getShipPrice(state, "pathfinder"), buy: () => buyShip(state, "pathfinder"), text: "Pathfinder" });
       }
       if (options.length === 0) break;
       options.sort((a, b) => a.cost - b.cost);
       options[0].buy();
-      events.push({ minute, text: `bought ${options[0].text} (${options[0].cost.toLocaleString("en-GB")} cr)` });
+      events.push({ minute, text: `bought ${options[0].text} (${options[0].cost.toLocaleString("en-GB")} cr)`, goal: true });
     }
 
     // 3. Send docked ships to the best field for Mining XP per hour
     for (const ship of state.ships) {
       if (getJobForShip(state, ship.id)) continue;
+      // A docked scout goes to the next target (it moves on by itself after that)
+      if (ship.type === "pathfinder") {
+        startScoutJob(state, ship.id, chooseNextTarget(state, ship.id), now);
+        continue;
+      }
       let best = null;
       for (const fieldId of Object.keys(FIELDS)) {
         if (!isFieldUnlocked(state, fieldId)) continue;
@@ -134,11 +163,28 @@ export function simulate(hours, untilMiningLevel, hourly = null) {
 }
 
 // When this file is run directly (not imported), print a timeline.
+// Also prints the gaps between GOALS (purchases, Mining levels and
+// surveys): the design doc wants a next goal every 10 to 20 minutes
+// in the first hour, and roughly every hour in the first day.
 if (import.meta.url === `file://${process.argv[1]}`) {
-  const events = simulate(4, REFINERY.openAtMiningLevel);
+  const explore = !process.argv.includes("--no-explore");
+  const events = simulate(4, REFINERY.openAtMiningLevel, null, explore);
+  const time = (minute) => `${Math.floor(minute / 60)}h${String(minute % 60).padStart(2, "0")}`;
   for (const e of events) {
-    const h = Math.floor(e.minute / 60);
-    const m = String(e.minute % 60).padStart(2, "0");
-    console.log(`${h}h${m}  ${e.text}`);
+    console.log(`${time(e.minute)}  ${e.text}`);
+  }
+
+  // The longest wait for a next goal in each hour
+  const goals = events.filter((e) => e.goal).map((e) => e.minute);
+  const end = events[events.length - 1].minute;
+  console.log("\nLongest wait between goals:");
+  for (let hour = 0; hour * 60 < end; hour++) {
+    let longest = 0;
+    let previous = goals.filter((m) => m < hour * 60).pop() ?? 0;
+    for (const m of goals.filter((m) => m >= hour * 60 && m < hour * 60 + 60)) {
+      longest = Math.max(longest, m - previous);
+      previous = m;
+    }
+    console.log(`  hour ${hour + 1}: ${longest} min`);
   }
 }

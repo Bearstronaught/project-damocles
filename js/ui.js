@@ -17,7 +17,7 @@
 // flicker and sometimes swallow clicks.)
 // =============================================================
 
-import { ITEMS, SHIP_TYPES, FIELDS, SKILLS, HULL_SIZES, COMMAND, HUB, HOME, HAUL_MODES, RECIPES, REFINERY, WORKSHOP_RECIPES, WORKSHOP, UPGRADES, SHIP_UPGRADES, SHIP_PARTS } from "../data/content.js";
+import { ITEMS, SHIP_TYPES, FIELDS, SKILLS, HULL_SIZES, COMMAND, HUB, HOME, HAUL_MODES, RECIPES, REFINERY, WORKSHOP_RECIPES, WORKSHOP, UPGRADES, SHIP_UPGRADES, SHIP_PARTS, SURVEY_TARGETS } from "../data/content.js";
 import { isOwned, canBuyIndustryUpgrade, getUpgradeLines } from "./upgrades.js";
 import { gameNow, SPEEDS } from "./clock.js";
 import { getShipStats, getHullParts, getPartGrade, getPartBonus, getNextUpgrade, canBuyShipUpgrade, getUpgradeName, getHullShortName, findUpgrade, getBonusUpTo, getShipGrades, getPendingRefits } from "./ship-upgrades.js";
@@ -28,7 +28,9 @@ import { getShipPoints, getCommandCapacity, getCommandUsed, getNextUpgradeCost, 
 import { getCargoValue, getTradeXp } from "./trade.js";
 import { getBond, getSellable } from "./bonded.js";
 import { getShipArt } from "./art.js";
-import { setupNavigation, navAlert } from "./nav.js";
+import { setupNavigation, navAlert, setScreenOpen } from "./nav.js";
+import { getTarget, getAllTargetIds, getTargetStatus, canScoutGo, getScoutPlan, getScanFactor, isExplorationOpen, DEEP_SCAN_ID } from "./exploration.js";
+import { buildExplorationScreen, renderExploration } from "./exploration-screen.js";
 import { getRoleGroups, describeGroup } from "./fleet-groups.js";
 import { isRefineryOpen, getRefineJob, getSlotCount, getSlotUnlockLevel, isRecipeUnlocked, getBatchMs, getBatchOutput, hasInputs, describeInputs, getMaxSlots } from "./refinery.js";
 import { isWorkshopOpen, getWorkshopSlotCount, getWorkshopSlotUnlockLevel, getQueueLimit, isWorkshopRecipeUnlocked, getWorkshopBatchMs, getWorkshopJob, hasWorkshopInputs, describeWorkshopInputs, getMaxOrderBatches, getRunningIndex, hasSmartQueue, hasControlCentre, getStandingOrders, standingNeedsWork } from "./workshop.js";
@@ -40,6 +42,7 @@ const PHASE_LABELS = {
   trading: "Trading",
   returning: "Returning",
   waiting: "Waiting for cargo",
+  scanning: "Scanning",
 };
 
 
@@ -102,6 +105,7 @@ export function setupUI(state, actions) {
   buildUpgrades(actions);
   buildStationHold(actions);
   buildComponents(actions);
+  buildExplorationScreen();
   buildDevPanel(actions);
   setupTips(actions);
 }
@@ -261,7 +265,7 @@ function renderStatsBoxes(state) {
   for (const box of document.querySelectorAll("[data-stats]")) {
     const typeId = box.dataset.stats;
     const key = JSON.stringify(getShipStats(state, typeId)) +
-      getLevel(state, "trade") + "/" + getLevel(state, "mining");
+      getLevel(state, "trade") + "/" + getLevel(state, "mining") + "/" + getLevel(state, "exploration");
     if (box.dataset.key !== key) {
       box.dataset.key = key;
       box.innerHTML = statsList(state, typeId);
@@ -286,7 +290,7 @@ function renderStatsBoxes(state) {
     const pending = getPendingRefits(state, ship);
     const key = JSON.stringify([fitted, pending]);
     const statsKey = key + JSON.stringify(getShipStats(state, ship.type, fitted)) +
-      getLevel(state, "trade") + "/" + getLevel(state, "mining");
+      getLevel(state, "trade") + "/" + getLevel(state, "mining") + "/" + getLevel(state, "exploration");
 
     for (const box of document.querySelectorAll(`[data-ship-art="${ship.id}"]`)) {
       if (box.dataset.key !== key) {
@@ -463,6 +467,11 @@ function itemTip(state, itemId) {
       (locked ? `(needs Refining ${recipe.unlockLevel})` : `(Refining ${recipe.unlockLevel})`)];
   }
 
+  // Found by scouts, not made (exploration.js)
+  if (itemId === "wreck_alloy") {
+    return [name, "Found by scouts at the alien wreck, and now and then on deep scans (Exploration tab)"];
+  }
+
   // Product: a workshop recipe
   const workshopId = Object.keys(WORKSHOP_RECIPES).find((id) => WORKSHOP_RECIPES[id].output === itemId);
   if (workshopId) {
@@ -485,6 +494,9 @@ function itemTip(state, itemId) {
 // "grades": one ship's fitted parts; "pending": bought but not
 // fitted yet, shown as "Mk II waiting (fitted when it docks)".
 function partsList(state, typeId, grades, pending = {}) {
+  if (getHullParts(typeId).length === 0) {
+    return `<p class="price-note">No components for this hull yet.</p>`;
+  }
   const rows = getHullParts(typeId).map((partId) => {
     const grade = grades[partId] || 0;
     const gradeName = grade === 0 ? "Stock" : findUpgrade(typeId, partId, grade).gradeName;
@@ -525,6 +537,9 @@ function statsList(state, typeId, grades) {
   const shipType = SHIP_TYPES[typeId];
   if (shipType.role === "freight") {
     return freighterStats(state, typeId, grades);
+  }
+  if (shipType.role === "scout") {
+    return scoutStats(state, typeId, grades);
   }
   const sizeName = HULL_SIZES[shipType.size].name;
   const stats = getShipStats(state, typeId, grades);
@@ -624,6 +639,34 @@ function freighterStats(state, typeId, grades) {
 
 
 // -------------------------------------------------------------
+// scoutStats(state, typeId)
+// A scout's stat block: its hull, how fast it scans, and how long
+// the shortest and longest survey trips and a deep scan take.
+// -------------------------------------------------------------
+function scoutStats(state, typeId, grades) {
+  const shipType = SHIP_TYPES[typeId];
+  const stats = getShipStats(state, typeId, grades);
+  // Every survey target's trip length, to show the range
+  const trips = Object.keys(SURVEY_TARGETS).map((id) => getScoutPlan(state, typeId, id, grades).durationMs);
+  const deep = getScoutPlan(state, typeId, DEEP_SCAN_ID, grades);
+  const scanBonus = 1 - getScanFactor(state);
+
+  return `
+    <div class="stat-block">
+      <dl class="stats">
+        <dt>Hull</dt>         <dd>${HULL_SIZES[shipType.size].name} · ${getShipPoints(typeId)} cmd pt${getShipPoints(typeId) === 1 ? "" : "s"}</dd>
+        <dt>Cargo hold</dt>   <dd>None (finds come home with it)</dd>
+        <dt>Drive speed</dt>  <dd>${stats.speed.toFixed(2)}×</dd>
+        <dt>Scan speed</dt>   <dd>${scanBonus > 0 ? bonusTag(scanBonus).trim() + " (Exploration level)" : "Base"}</dd>
+        <dt>Survey trips</dt> <dd>${formatDuration(Math.min(...trips))} to ${formatDuration(Math.max(...trips))}</dd>
+        <dt>Deep scan</dt>    <dd>${formatDuration(deep.durationMs)} · ${formatXp(deep.xp)} XP</dd>
+      </dl>
+    </div>
+  `;
+}
+
+
+// -------------------------------------------------------------
 // routeTracker()
 // The four-part bar showing a trip, in order:
 //   barge:      out, mine, back, unload (at home)
@@ -685,6 +728,26 @@ function destinationPicker() {
   return `
     <label class="dest-select-row">
       <span class="dest-label">Destination</span>
+      <select class="dest-select" data-part="dest">${options}</select>
+    </label>
+  `;
+}
+
+
+// -------------------------------------------------------------
+// targetPicker()
+// A dropdown of survey targets (and the deep scan), to choose
+// where a scout goes first. After that it moves on by itself.
+// render() greys out targets it can't go to, with the reason.
+// -------------------------------------------------------------
+function targetPicker() {
+  const options = getAllTargetIds().map((targetId) => `
+    <option value="${targetId}">${getTarget(targetId).name}</option>
+  `).join("");
+
+  return `
+    <label class="dest-select-row">
+      <span class="dest-label">Target</span>
       <select class="dest-select" data-part="dest">${options}</select>
     </label>
   `;
@@ -873,14 +936,18 @@ function buildShipCard(ship, actions) {
   const shipType = SHIP_TYPES[ship.type];
 
   const isFreighter = shipType.role === "freight";
+  const isScout = shipType.role === "scout";
 
   const card = document.createElement("div");
   card.className = "ship-card";
   card.id = "ship-" + ship.id;
 
-  // Barges pick a field; freighters pick a haul mode.
-  // (Freighters have no drill, so their specs skip it.)
-  const picker = isFreighter ? haulModePicker() : destinationPicker();
+  // Barges pick a field; freighters pick a haul mode; scouts pick
+  // a survey target. (Freighters have no drill, so their specs
+  // skip it.)
+  let picker = destinationPicker();
+  if (isFreighter) picker = haulModePicker();
+  if (isScout) picker = targetPicker();
 
   // The card's layout. Parts we update later get a
   // "data-part" label so we can find them again.
@@ -1412,7 +1479,7 @@ function buildShipyard(actions) {
       <p class="ship-desc">${shipType.description}</p>
       ${statsBox(typeId)}
       <dl class="stats stats-yard">
-        <dt>Requires</dt>  <dd>${skillName} level ${shipType.unlockLevel}</dd>
+        <dt>Requires</dt>  <dd>${skillName} level ${shipType.unlockLevel}${shipType.unlockAfter ? " · first ore sold" : ""}</dd>
         <dt>Next one</dt>  <dd data-part="price"></dd>
         <dt>Owned</dt>     <dd data-part="owned">0</dd>
       </dl>
@@ -1486,6 +1553,11 @@ function buildSkillCards() {
         unlocks.push({ level: queueLevel, name: `Queue of ${size} orders per slot`, kind: "Queue", key: "queue:" + queueLevel });
       });
     }
+    if (skillId === "exploration") {
+      for (const [targetId, target] of Object.entries(SURVEY_TARGETS)) {
+        unlocks.push({ level: target.unlockLevel, name: target.name, kind: "Target", key: "target:" + targetId });
+      }
+    }
     unlocks.sort((a, b) => a.level - b.level);   // lowest level first
 
     // Turn each unlock into a line of the list. A skill with
@@ -1555,6 +1627,13 @@ export function render(state, now) {
   renderWorkshop(state, now);
   const upgradesReady = renderUpgrades(state);
   const componentsReady = renderComponents(state);
+  const explorationReady = renderExploration(state);
+
+  // The Exploration tab appears with the first sale of ore.
+  setScreenOpen("exploration", isExplorationOpen(state));
+  // Its dot: a survey target a scout could go to that you haven't
+  // seen on the tab yet.
+  screenAlert("exploration", explorationReady);
 
   // Nav dots: something you can buy that you haven't seen yet on
   // that tab (see screenAlert - the same rule for every tab).
@@ -1723,6 +1802,8 @@ function renderStatusStrip(state, now) {
   byId("trade-level").textContent = "Lv " + getLevel(state, "trade");
   byId("refining-level").textContent = "Lv " + getLevel(state, "refining");
   byId("manufacturing-level").textContent = "Lv " + getLevel(state, "manufacturing");
+  byId("exploration-level").textContent = "Lv " + getLevel(state, "exploration");
+  byId("exploration-readout").hidden = !isExplorationOpen(state);
   byId("command-readout").textContent = getCommandUsed(state) + "/" + getCommandCapacity(state);
 
   // "1 ship" / "2 ships" in the panel corners
@@ -1738,9 +1819,13 @@ function renderFleet(state, now) {
     const card = byId("ship-" + ship.id);
     if (!card) continue;   // (not built yet - skip this time)
 
-    // Freighters have their own card logic (below).
+    // Freighters and scouts have their own card logic (below).
     if (SHIP_TYPES[ship.type].role === "freight") {
       renderFreighterCard(state, ship, card, now);
+      continue;
+    }
+    if (SHIP_TYPES[ship.type].role === "scout") {
+      renderScoutCard(state, ship, card, now);
       continue;
     }
 
@@ -1871,6 +1956,14 @@ function renderSpecs(state, ship, card) {
   // What THIS ship has fitted now (it may still be flying with
   // older parts until it docks).
   const stats = getShipStats(state, ship.type, getShipGrades(state, ship));
+  // Scouts carry nothing: their line is drive and scan speed.
+  if (SHIP_TYPES[ship.type].role === "scout") {
+    const scan = 1 - getScanFactor(state);
+    const scoutHtml = `Drive <b>${stats.speed.toFixed(2)}×</b> · Scan speed <b>${scan > 0 ? "+" + formatPercent(scan) : "base"}</b>`;
+    const specs = part(card, "specs");
+    if (specs.innerHTML !== scoutHtml) specs.innerHTML = scoutHtml;
+    return;
+  }
   // Freighters have no drill, so their specs skip it.
   const drill = stats.miningRate === undefined
     ? ""
@@ -1890,7 +1983,7 @@ function renderSpecs(state, ship, card) {
 // Every phase class a card can have, so each frame can clear
 // last frame's before adding the current one.
 const ALL_PHASE_CLASSES = ["phase-outbound", "phase-mining", "phase-trading",
-  "phase-returning", "phase-waiting", "phase-loading", "phase-unloading", "busy"];
+  "phase-returning", "phase-waiting", "phase-loading", "phase-unloading", "phase-scanning", "busy"];
 
 
 // -------------------------------------------------------------
@@ -1961,6 +2054,92 @@ function renderFreighterCard(state, ship, card, now) {
 }
 
 
+// -------------------------------------------------------------
+// renderScoutCard(state, ship, card, now)
+// A scout's card: its target dropdown, the Home -> target -> Home
+// tracker, and what it's doing. After each trip it moves on to
+// the next target by itself (exploration.js), so the dropdown
+// follows it.
+// -------------------------------------------------------------
+function renderScoutCard(state, ship, card, now) {
+  const job = getJobForShip(state, ship.id);
+
+  // A busy scout shows where it's going; a docked one where it
+  // WILL go. A docked scout whose choice is no longer possible
+  // (already surveyed) is shown the next best target instead.
+  let targetId = job ? job.targetId : ship.destination;
+  if (!job && !canScoutGo(state, ship.id, targetId)) {
+    targetId = chooseFirstAvailable(state, ship);
+  }
+  const target = getTarget(targetId);
+  part(card, "route-field").textContent = target.name;
+  renderSpecs(state, ship, card);
+
+  // The dropdown: grey out what it can't do, and say why.
+  const select = part(card, "dest");
+  for (const option of select.options) {
+    const status = getTargetStatus(state, option.value);
+    const name = getTarget(option.value).name;
+    let label = name;
+    if (status === "surveyed") label = `${name} (surveyed)`;
+    else if (status === "locked") label = `${name} (Exploration ${getTarget(option.value).unlockLevel})`;
+    else if (status === "needs") label = `${name} (after ${SURVEY_TARGETS[getTarget(option.value).requires].name})`;
+    else if (!canScoutGo(state, ship.id, option.value) && option.value !== targetId) label = `${name} (another scout)`;
+    const usable = option.value === targetId || canScoutGo(state, ship.id, option.value);
+    if (option.textContent !== label) option.textContent = label;
+    if (option.disabled === usable) option.disabled = !usable;
+  }
+  if (select.value !== targetId) select.value = targetId;
+  if (select.disabled !== Boolean(job)) select.disabled = Boolean(job);
+
+  // The tracker: out, scan, back (and no dock stop: nothing to unload)
+  const timing = job || getScoutPlan(state, ship.type, targetId);
+  setRoute(card, [
+    ["out", timing.outboundMs],
+    ["mine", timing.scanMs],        // the scan, hatched like mining
+    ["back", timing.returnMs],
+    ["dock", 0],
+  ]);
+
+  const fills = part(card, "route").querySelectorAll(".seg-fill");
+  const status = part(card, "status");
+  const button = part(card, "button");
+  card.classList.remove(...ALL_PHASE_CLASSES);
+
+  if (!job) {
+    fills.forEach((fill) => { fill.style.width = "0%"; });
+    status.textContent = `Docked at ${HOME.name} — awaiting orders`;
+    button.textContent = targetId === DEEP_SCAN_ID ? "Start deep scans" : "Dispatch to " + target.name;
+    return;
+  }
+
+  const phase = getJobPhase(job, now);
+  phase.fills.forEach((amount, i) => {
+    fills[i].style.width = (amount * 100) + "%";
+  });
+  const timeLeft = formatDuration(phase.msLeftInPhase);
+  let text;
+  if (phase.phase === "outbound") text = `Outbound to ${target.name} — arrives in ${timeLeft}`;
+  if (phase.phase === "scanning") text = `Scanning ${target.name} — done in ${timeLeft}`;
+  if (phase.phase === "returning") text = `Returning home — docks in ${timeLeft}`;
+  if (job.recall) {
+    const docksIn = formatDuration(Math.max(0, job.startedAt + job.durationMs - now));
+    text = job.abandoned
+      ? `Recalled — scan abandoned, docks in ${docksIn}`
+      : `Recalled — bringing its find home, docks in ${docksIn}`;
+  }
+  status.textContent = text;
+  button.textContent = job.recall ? "Resume" : "Recall";
+  card.classList.add("busy", "phase-" + phase.phase);
+}
+
+// The first target in the list this scout can go to (or the
+// deep scan), for a docked scout whose last choice is done.
+function chooseFirstAvailable(state, ship) {
+  return getAllTargetIds().find((id) => canScoutGo(state, ship.id, id)) || DEEP_SCAN_ID;
+}
+
+
 // Each ship's row on the Ships screen
 function renderOwnedList(state) {
   const now = gameNow(state);   // the game's time (clock.js)
@@ -1974,6 +2153,10 @@ function renderOwnedList(state) {
       if (job.recall) {
         part(row, "status").textContent = "Recalled · docks in " +
           formatDuration(Math.max(0, job.startedAt + job.durationMs - now));
+      } else if (job.type === "scout") {
+        // e.g. "Scanning · Ice moon · 3m 10s"
+        part(row, "status").textContent =
+          PHASE_LABELS[phase.phase] + " · " + getTarget(job.targetId).name + " · " + formatDuration(phase.msLeftInPhase);
       } else if (job.type === "haul") {
         // e.g. "Trading · Merchant hub · 12s", or just "Waiting for cargo"
         part(row, "status").textContent = phase.phase === "waiting"
@@ -2176,6 +2359,7 @@ function renderSkills(state) {
       else if (kind === "queue") unlocked = getLevel(state, "manufacturing") >= Number(id);
       else if (kind === "upgrade") unlocked = getLevel(state, UPGRADES[id].skill) >= UPGRADES[id].level;
       else if (kind === "component") unlocked = getLevel(state, SHIP_UPGRADES[id].skill) >= SHIP_UPGRADES[id].level;
+      else if (kind === "target") unlocked = getLevel(state, "exploration") >= SURVEY_TARGETS[id].unlockLevel;
       else unlocked = Number(id) < getSlotCount(state);   // "slot:1" = the second slot
       line.classList.toggle("unlocked", unlocked);
       part(line, "state").textContent = unlocked ? "Unlocked" : "Locked";
@@ -2525,6 +2709,8 @@ const LOG_TAGS = {
   trade: "TRADE",
   level: "LEVEL",
   fleet: "FLEET",
+  explore: "SCAN",
+  lore: "LORE",
   system: "SYS",
 };
 
