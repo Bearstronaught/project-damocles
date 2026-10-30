@@ -93,14 +93,14 @@ function gameAtLevel10(credits) {
 // balance as it stands. If you change content.js, update them.
 // =============================================================
 
-test("Prospector trip: 45s out, 1m mining, 45s back, 6s unloading = 2m 36s, 120 t ore, 12 XP", () => {
+test("Prospector trip: 45s out, 1m mining, 45s back, 6s unloading = 2m 36s, 120 t ore, 20 XP", () => {
   assert.equal(PROSPECTOR.outboundMs, 45 * SECOND);
   assert.equal(PROSPECTOR.miningMs, 60 * SECOND);
   assert.equal(PROSPECTOR.returnMs, 45 * SECOND);
   assert.equal(PROSPECTOR.unloadMs, 6 * SECOND);     // 120 t at 20 t/s (small hull)
   assert.equal(PROSPECTOR.durationMs, 156 * SECOND);
   assert.equal(PROSPECTOR.orePerTrip, 120);
-  assert.equal(PROSPECTOR.xpPerTrip, 12);
+  assert.equal(PROSPECTOR.xpPerTrip, 20);           // 120 t ÷ 6 (Dan, 30 Oct: was ÷ 10)
 });
 
 test("Excavator trip: 1m out (slower drive), 2m mining, 1m back, 12s unloading = 4m 12s, 480 t ore", () => {
@@ -407,13 +407,15 @@ test("Each trip earns XP for every unit of ore brought home", () => {
   assert.equal(state.skills.mining.xp, PROSPECTOR.xpPerTrip * 2);
 });
 
-test("Mining level 2 arrives on the 7th Prospector trip (17m 30s)", () => {
+test("Mining level 2 arrives on the 5th Prospector trip (13m)", () => {
+  // Level 2 needs 83 XP; a trip earns 20. (Dan, 30 Oct: the first
+  // level used to take 7 trips, 18 minutes - too slow a start.)
   const state = createNewGame();
   startMiningJob(state, "ship-1", "inner_belt", START);
-  processJobs(state, START + TRIP * 6);
-  assert.equal(getLevel(state, "mining"), 1);    // 72 XP after 6 trips
-  const results = processJobs(state, START + TRIP * 7);
-  assert.equal(getLevel(state, "mining"), 2);    // 84 XP after 7
+  processJobs(state, START + TRIP * 4);
+  assert.equal(getLevel(state, "mining"), 1);    // 80 XP after 4 trips
+  const results = processJobs(state, START + TRIP * 5);
+  assert.equal(getLevel(state, "mining"), 2);    // 100 XP after 5
   assert.deepEqual(results[0].newLevels, [2]);
 });
 
@@ -802,7 +804,7 @@ test("Prospector to the Outer Belt: 1m 30s each way, 1m mining, 6s unloading = 4
   assert.equal(plan.outboundMs, 90 * SECOND);
   assert.equal(plan.miningMs, 60 * SECOND);
   assert.equal(plan.durationMs, 246 * SECOND);
-  assert.equal(plan.xpPerTrip, 24);                 // 120 t ÷ 5
+  assert.equal(plan.xpPerTrip, 40);                 // 120 t ÷ 3
 });
 
 test("An Outer Belt trip brings home nickel ore, not iron", () => {
@@ -1094,14 +1096,15 @@ test("In time order: a full-load Courier leaves on the 5th Prospector trip", () 
 
   // One jump to 30 minutes: by then it has sold, come home
   // (20m), waited, and left again with the next 600 t - ready on
-  // the 10th Prospector trip. The Prospector reaches Mining 2
-  // after trip 7 (84 XP), so trips 8 to 10 drill 0.5% faster:
-  // that's exactly when the 10th trip lands, not at TRIP x 10.
-  const level2Trip = getTripPlan({ ...FRESH, skills: { ...FRESH.skills, mining: { xp: XP_TABLE[2] } } },
-                                 "prospector", "inner_belt").durationMs;
-  assert.ok(level2Trip < TRIP);
+  // the 10th Prospector trip. Each level drills 0.5% faster: the
+  // Prospector reaches Mining 2 after trip 5 (100 XP) and Mining 3
+  // after trip 9 (180 XP), so trips 6-9 are a little shorter and
+  // trip 10 shorter still. That's exactly when the 10th lands.
+  const tripAt = (level) => getTripPlan({ ...FRESH, skills: { ...FRESH.skills, mining: { xp: XP_TABLE[level] } } },
+                                        "prospector", "inner_belt").durationMs;
+  assert.ok(tripAt(3) < tripAt(2) && tripAt(2) < TRIP);
   processJobs(state, START + 30 * MINUTE);
-  assert.equal(haul.startedAt, START + TRIP * 7 + level2Trip * 3);
+  assert.equal(haul.startedAt, START + TRIP * 5 + tripAt(2) * 4 + tripAt(3));
 });
 
 test("Barges + Courier: ticking for 2 hours equals one 2-hour jump", () => {
@@ -1368,7 +1371,7 @@ test("Recall halfway through mining: leaves with half a hold (60 t)", () => {
   assert.equal(state.inventory.iron_ore, 0);         // still unloading
   processJobs(state, START + 123 * SECOND);
   assert.equal(state.inventory.iron_ore, 60);
-  assert.equal(state.skills.mining.xp, 6);           // 60 t ÷ 10
+  assert.equal(state.skills.mining.xp, 10);          // 60 t ÷ 6
   assert.equal(state.jobs.length, 0);
 });
 

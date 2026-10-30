@@ -23,8 +23,8 @@ export const BALANCE = {
     courier: { role: 'freight', size: 'small', skill: 'trade', unlockLevel: 1, cost: 50000, cargoCapacity: 600, speed: 1 },
   },
   fields: {
-    inner_belt: { yields: 'iron_ore', travelSeconds: 45, tonnesPerXp: 10, unlockLevel: 1 },
-    outer_belt: { yields: 'nickel_ore', travelSeconds: 90, tonnesPerXp: 5, unlockLevel: 5 },
+    inner_belt: { yields: 'iron_ore', travelSeconds: 45, tonnesPerXp: 6, unlockLevel: 1 },
+    outer_belt: { yields: 'nickel_ore', travelSeconds: 90, tonnesPerXp: 3, unlockLevel: 5 },
   },
   recipes: {
     iron_bar: { unlockLevel: 1, inputs: { iron_ore: 60 }, output: 'iron_bar', outputAmount: 30, seconds: 60, xp: 8 },
