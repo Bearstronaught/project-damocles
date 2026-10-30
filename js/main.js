@@ -14,7 +14,7 @@
 //   5. Start autosaving.
 // =============================================================
 
-import { RULES, ITEMS, FIELDS, SHIP_TYPES, SKILLS, HUB, HOME, HAUL_MODES, RECIPES, REFINERY, WORKSHOP_RECIPES, WORKSHOP, UPGRADES, SHIP_UPGRADES, SHIP_PARTS, CONTRACT_KINDS, CONTRACT_FACTION, CONTRACTS } from "../data/content.js";
+import { RULES, ITEMS, FIELDS, SHIP_TYPES, SKILLS, HUB, HOME, HAUL_MODES, RECIPES, REFINERY, WORKSHOP_RECIPES, WORKSHOP, UPGRADES, SHIP_UPGRADES, SHIP_PARTS, CONTRACT_KINDS, CONTRACT_FACTIONS, CONTRACTS } from "../data/content.js";
 import { createNewGame, findShip } from "./state.js";
 import { startMiningJob, startHaulJob, recallJob, resumeJob, getJobForShip } from "./jobs.js";
 import { advanceTo } from "./simulation.js";
@@ -656,17 +656,20 @@ function logScoutResult(result) {
 // -------------------------------------------------------------
 // logContract(result) and logPosted(result)
 // Log lines for the contracts board, e.g.
-//   "Contract complete: ore requisition for a belt co-op. +1,130 cr, +10 reputation."
+//   "Contract complete: ore requisition for a belt co-op. +1,130 cr,
+//    +10 reputation with the belt independents."
 //   "New contract: Mining quota. The Kessler hauling crew wants ..."
 // Reaching a new reputation tier also gets a banner.
 // -------------------------------------------------------------
 function logContract(result) {
   const contract = result.contract;
   const title = CONTRACT_KINDS[contract.kindId].title.toLowerCase();
-  addLog(`Contract complete: ${title} for ${contract.client.toLowerCase()}. +${formatNumber(result.credits)} cr, +${result.reputation} reputation.`, "contract");
+  const faction = CONTRACT_FACTIONS[contract.faction];   // who posted it
+  addLog(`Contract complete: ${title} for ${contract.client.toLowerCase()}. +${formatNumber(result.credits)} cr, ` +
+    `+${result.reputation} reputation with the ${faction.name.toLowerCase()}.`, "contract");
   if (result.tierAfter !== result.tierBefore) {
-    addLog(`The ${CONTRACT_FACTION.name.toLowerCase()} now count you as ${result.tierAfter}. Their contracts get bigger, and pay more.`, "level");
-    showLevelBanner(`${CONTRACT_FACTION.name}: ${result.tierAfter}`, ["Bigger contracts, better pay (Contracts tab)"], "Reputation");
+    addLog(`The ${faction.name.toLowerCase()} now count you as ${result.tierAfter}. Their contracts get bigger, and pay more.`, "level");
+    showLevelBanner(`${faction.name}: ${result.tierAfter}`, ["Bigger contracts, better pay (Contracts tab)"], "Reputation");
   }
 }
 
@@ -826,7 +829,8 @@ function logLevelUps(skillId, levels, showBanners = true) {
         addLog(`The ${HOME.name} refinery is open. Find it on the Industry tab.`, "level");
       }
       if (level === CONTRACTS.openAtMiningLevel) {
-        addLog(`Word of your outfit has reached the ${CONTRACT_FACTION.name.toLowerCase()}: they're posting contracts. Find them on the Contracts tab.`, "level");
+        const first = Object.values(CONTRACT_FACTIONS)[0];   // the faction that posts first
+        addLog(`Word of your outfit has reached the ${first.name.toLowerCase()}: they're posting contracts. Find them on the Contracts tab.`, "level");
       }
     }
     if (skillId === "refining") {

@@ -16,9 +16,11 @@
 //   survey    survey one target               |  themselves, as the
 //   deepScan  run some deep scans            /   work gets done
 //
-// Finishing one pays credits and REPUTATION with the belt
-// independents. Higher reputation tiers make contracts bigger and
-// better paid (REPUTATION_TIERS).
+// Every contract is posted by a FACTION (CONTRACT_FACTIONS), and
+// finishing it pays credits and REPUTATION with that faction.
+// Reputation is kept per faction: state.contracts.reputation is
+// e.g. { independents: 120 }. A higher tier with a faction makes
+// ITS contracts bigger and better paid (REPUTATION_TIERS).
 //
 // HOW IT STAYS FAIR OFFLINE: contracts are posted and finished
 // inside the game's one timeline (jobs.js, processJobs), at the
@@ -29,6 +31,7 @@
 // A contract looks like this:
 //   {
 //     number: 12,                     the 12th contract this save
+//     faction: "independents",        who posted it (CONTRACT_FACTIONS)
 //     kindId: "mining_quota",         a CONTRACT_KINDS key
 //     itemId: "nickel_ore",           what it's about (or null)
 //     fieldId: "outer_belt",          mining quotas only (or null)
@@ -42,7 +45,7 @@
 //   }
 // =============================================================
 
-import { CONTRACT_KINDS, CONTRACT_CLIENTS, REPUTATION_TIERS, CONTRACTS, FIELDS, RECIPES, WORKSHOP_RECIPES, ITEMS, SURVEY_TARGETS, SHIP_TYPES } from "../data/content.js";
+import { CONTRACT_KINDS, CONTRACT_CLIENTS, CONTRACT_FACTIONS, REPUTATION_TIERS, CONTRACTS, FIELDS, RECIPES, WORKSHOP_RECIPES, ITEMS, SURVEY_TARGETS, SHIP_TYPES } from "../data/content.js";
 import { getLevel, isFieldUnlocked } from "./skills.js";
 import { getSellable } from "./bonded.js";
 import { isRefineryOpen, isRecipeUnlocked } from "./refinery.js";
@@ -61,7 +64,12 @@ export function createContracts() {
   for (let i = 0; i < CONTRACTS.slots; i++) {
     slots.push({ contract: null, readyAt: null });
   }
-  return { slots, posted: 0, completed: 0, reputation: 0 };
+  // Reputation starts at 0 with every faction.
+  const reputation = {};
+  for (const factionId of Object.keys(CONTRACT_FACTIONS)) {
+    reputation[factionId] = 0;
+  }
+  return { slots, posted: 0, completed: 0, reputation };
 }
 
 // -------------------------------------------------------------
@@ -78,12 +86,22 @@ export function isBoardOpen(state) {
 // =============================================================
 
 // -------------------------------------------------------------
-// getTier(state, reputation)
-// The reputation tier the player is in, e.g.
+// getReputation(state, factionId)
+// The player's reputation points with one faction (0 if none yet,
+// e.g. a faction added in an update after the save was made).
+// -------------------------------------------------------------
+export function getReputation(state, factionId) {
+  return state.contracts.reputation[factionId] || 0;
+}
+
+// -------------------------------------------------------------
+// getTier(state, factionId)
+// The player's reputation tier with one faction, e.g.
 //   { index: 1, name: "Known", from: 100, size: 1.5,
 //     next: { name: "Trusted", from: 300, ... } }   (next: null at the top)
 // -------------------------------------------------------------
-export function getTier(state, reputation = state.contracts.reputation) {
+export function getTier(state, factionId) {
+  const reputation = getReputation(state, factionId);
   let index = 0;
   REPUTATION_TIERS.forEach((tier, i) => {
     if (reputation >= tier.from) index = i;
@@ -196,6 +214,11 @@ export function postContract(state, slotIndex) {
 
   // A separate stream of rolls from the deep scans' (seed + 7777),
   // and a fresh number for each contract.
+  // Who's posting it. Only one faction posts yet, so it's always
+  // the first. (A second faction will need a rule here for which
+  // one posts each contract: a roll, or one slot each.)
+  const factionId = Object.keys(CONTRACT_FACTIONS)[0];
+
   const seed = (state.exploration.seed + 7777) >>> 0;
   const number = board.posted;
   const roll = (which) => rollFor(seed, number, which);
@@ -213,8 +236,9 @@ export function postContract(state, slotIndex) {
   // 2. What it's about
   const subject = chosen.subjects[Math.floor(roll(1) * chosen.subjects.length)];
 
-  // 3. How big: 75% to 125% of the kind's amount, times the tier's size
-  const scale = getTier(state).size * (0.75 + 0.5 * roll(2));
+  // 3. How big: 75% to 125% of the kind's amount, times the size
+  //    for your tier with the faction posting it
+  const scale = getTier(state, factionId).size * (0.75 + 0.5 * roll(2));
   let amount;
   if (kind.kind === "survey") {
     amount = 1;
@@ -237,6 +261,7 @@ export function postContract(state, slotIndex) {
 
   const contract = {
     number,
+    faction: factionId,
     kindId: chosen.kindId,
     itemId: subject.itemId,
     fieldId: subject.fieldId,
@@ -346,16 +371,17 @@ export function discardContract(state, slotIndex, now) {
 // Pays out a finished contract and starts the wait for the next.
 // Returns a result for the log:
 //   { kind: "contract", slot, contract, credits, reputation,
-//     tierBefore, tierAfter, ... }
+//     tierBefore, tierAfter, ... }   (tiers with that contract's faction)
 // -------------------------------------------------------------
 function completeContract(state, slotIndex, time) {
   const board = state.contracts;
   const slot = board.slots[slotIndex];
   const contract = slot.contract;
-  const tierBefore = getTier(state).name;
+  const factionId = contract.faction;
+  const tierBefore = getTier(state, factionId).name;
 
   state.credits += contract.credits;
-  board.reputation += contract.reputation;
+  board.reputation[factionId] = getReputation(state, factionId) + contract.reputation;
   board.completed += 1;
 
   slot.contract = null;
@@ -368,7 +394,7 @@ function completeContract(state, slotIndex, time) {
     credits: contract.credits,
     reputation: contract.reputation,
     tierBefore,
-    tierAfter: getTier(state).name,
+    tierAfter: getTier(state, factionId).name,
     trips: 1,
     xpGained: 0,
     newLevels: [],

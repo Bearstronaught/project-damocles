@@ -687,13 +687,18 @@ export const CONTRACT_CLIENTS = [
   "The Lantern Dock collective",
 ];
 
-// THE FACTION the board belongs to (Factions in the design doc).
-export const CONTRACT_FACTION = {
-  name: "Belt independents",
-  description: "Self-reliant miners and traders scattered through the belt. They don't trust outsiders, but they pay for work done.",
+// THE FACTIONS that post contracts (Factions in the design doc).
+// Each has its own reputation, and its own box on the Contracts
+// screen. Only the belt independents so far; a new faction is a
+// new entry here (the first one listed is the board's default).
+export const CONTRACT_FACTIONS = {
+  independents: {
+    name: "Belt independents",
+    description: "Self-reliant miners and traders scattered through the belt. They don't trust outsiders, but they pay for work done.",
+  },
 };
 
-// REPUTATION TIERS with the belt independents. Earning reputation
+// REPUTATION TIERS, the same ladder with every faction. Earning reputation
 // moves you up; each tier makes their contracts bigger (size),
 // and pay grows with size. From the balance sheet: from (the
 // reputation it starts at) and size. Names written here.

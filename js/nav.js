@@ -24,7 +24,8 @@
 // The screens that exist. The first is the default. A new
 // screen needs its name here, a <section data-screen="..."> and
 // a button in index.html.
-const SCREENS = ["command", "fleet", "shipyard", "industry", "exploration", "contracts", "skills", "save"];
+// Same order as the sidebar (Skills sits under Command, Dan 30 Oct).
+const SCREENS = ["command", "skills", "fleet", "shipyard", "industry", "exploration", "contracts", "save"];
 
 // Screens that aren't open YET, e.g. Exploration before the first
 // sale (see setScreenOpen). Their buttons are hidden, and asking

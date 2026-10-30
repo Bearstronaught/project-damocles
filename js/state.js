@@ -33,7 +33,8 @@ import { createContracts } from "./contracts.js";
 //   Version 14: ship upgrades, and loading/unloading time on trips
 //   Version 15: the Exploration skill, survey records, milestones
 //   Version 16: the contracts board, and running totals (stats)
-export const SAVE_VERSION = 16;
+//   Version 17: reputation kept per faction, contracts name theirs
+export const SAVE_VERSION = 17;
 
 
 // -------------------------------------------------------------

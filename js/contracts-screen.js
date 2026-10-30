@@ -1,8 +1,13 @@
 // =============================================================
 // js/contracts-screen.js
 // -------------------------------------------------------------
-// THE CONTRACTS SCREEN: the belt independents' board, one card per
-// slot, and your reputation with them.
+// THE CONTRACTS SCREEN: the board, and your reputation.
+//
+// Both are split by FACTION (Dan, 30 Oct): one collapsible box per
+// faction, like the role groups on Command. The board's box holds
+// that faction's contract cards; the reputation box says where you
+// stand with them. Boxes start open; one you close stays closed
+// after a refresh (remembered in the browser, not the save).
 //
 // Built once (buildContractsScreen), then its words are updated 4
 // times a second (renderContracts), only where something changed.
@@ -10,8 +15,8 @@
 // passes button presses on to main.js (the "actions").
 // =============================================================
 
-import { CONTRACT_KINDS, CONTRACTS, CONTRACT_FACTION, ITEMS, REPUTATION_TIERS } from "../data/content.js";
-import { isBoardOpen, getTier, getProgress, canDeliver, describeContract } from "./contracts.js";
+import { CONTRACT_KINDS, CONTRACTS, CONTRACT_FACTIONS, ITEMS, REPUTATION_TIERS } from "../data/content.js";
+import { isBoardOpen, getTier, getReputation, getProgress, canDeliver, describeContract } from "./contracts.js";
 import { formatNumber, formatTonnes, formatDuration } from "./ui.js";
 import { gameNow } from "./clock.js";
 
@@ -40,22 +45,118 @@ function setText(element, text) {
 }
 
 
+// -------------------------------------------------------------
+// WHICH BOXES ARE CLOSED
+// Kept in the browser (localStorage), like the role groups on
+// Command: it's how you like the screen, not game progress. Ids
+// look like "board:independents" and "rep:independents".
+// "try" because some browsers block storage (private windows);
+// then every box simply starts open.
+// -------------------------------------------------------------
+const CLOSED_KEY = "damocles-closed-contract-groups";
+
+function loadClosed() {
+  try {
+    return new Set(JSON.parse(localStorage.getItem(CLOSED_KEY)) || []);
+  } catch (error) {
+    return new Set();
+  }
+}
+
+function saveClosed() {
+  try {
+    localStorage.setItem(CLOSED_KEY, JSON.stringify([...closedBoxes]));
+  } catch (error) {
+    // Storage blocked: the box just won't stay closed after a refresh.
+  }
+}
+
+const closedBoxes = loadClosed();
+
+// -------------------------------------------------------------
+// buildFactionBox(id, factionName)
+// One collapsible box: a heading line (faction name, a short
+// summary filled in by render, More/Less hint) and a body.
+// Uses the role-group look from the Command screen.
+// -------------------------------------------------------------
+function buildFactionBox(id, factionName) {
+  const box = document.createElement("details");
+  box.className = "role-group expandable faction-group";
+  box.id = "faction-" + id.replace(":", "-");   // e.g. faction-board-independents
+  box.open = !closedBoxes.has(id);
+  box.innerHTML = `
+    <summary class="role-group-head">
+      <span class="role-group-name">${factionName}</span>
+      <span class="role-group-summary" data-part="summary"></span>
+      <span class="expand-hint" aria-hidden="true"></span>
+    </summary>
+    <div class="faction-body" data-part="body"></div>
+  `;
+  // Remember when the player opens or closes it.
+  box.addEventListener("toggle", () => {
+    if (box.open) {
+      closedBoxes.delete(id);
+    } else {
+      closedBoxes.add(id);
+    }
+    saveClosed();
+  });
+  return box;
+}
+
+
 // =============================================================
 // BUILD (once)
 // =============================================================
 
 // -------------------------------------------------------------
 // buildContractsScreen(actions, makeTwoClick)
-// One card per board slot. "makeTwoClick" is ui.js's two-click
-// button helper, used for Discard so a stray tap can't throw a
-// contract away.
+// A board box and a reputation box for each faction, and one card
+// per board slot. "makeTwoClick" is ui.js's two-click button
+// helper, used for Discard so a stray tap can't throw a contract
+// away.
 // -------------------------------------------------------------
 export function buildContractsScreen(actions, makeTwoClick) {
-  byId("faction-name").textContent = CONTRACT_FACTION.name;
-  byId("faction-desc").textContent = CONTRACT_FACTION.description;
+  const boardArea = byId("contract-groups");
+  const repArea = byId("rep-groups");
+  boardArea.innerHTML = "";
+  repArea.innerHTML = "";
 
-  const list = byId("contract-list");
-  list.innerHTML = "";
+  for (const [factionId, faction] of Object.entries(CONTRACT_FACTIONS)) {
+    // The board box: a grid that this faction's contract cards
+    // move into (see renderContracts).
+    const boardBox = buildFactionBox("board:" + factionId, faction.name);
+    part(boardBox, "body").innerHTML = `<div class="card-grid contract-grid" data-part="cards"></div>`;
+    boardBox.dataset.faction = factionId;
+    boardArea.appendChild(boardBox);
+
+    // The reputation box: who they are, your tier and points, how
+    // far to the next tier, and the whole ladder.
+    const repBox = buildFactionBox("rep:" + factionId, faction.name);
+    part(repBox, "body").innerHTML = `
+      <p class="price-note">${faction.description}</p>
+      <div class="rep-head">
+        <span class="rep-tier" data-part="tier"></span>
+        <span class="rep-points" data-part="points"></span>
+      </div>
+      <div class="progress"><div class="progress-fill xp-fill" data-part="bar"></div></div>
+      <p class="price-note" data-part="next"></p>
+      <ul class="tier-list">
+        ${REPUTATION_TIERS.map((tier, index) => `
+          <li data-tier="${index}">
+            <span class="tier-name">${tier.name}</span>
+            <span class="tier-from">from ${formatNumber(tier.from)}</span>
+            <span class="tier-size">contracts ×${tier.size}</span>
+          </li>`).join("")}
+      </ul>
+    `;
+    repArea.appendChild(repBox);
+  }
+
+  // The slot cards. They start in the first faction's box;
+  // renderContracts moves each into the box of the faction whose
+  // contract it holds.
+  const firstGrid = part(boardArea.querySelector(".faction-group"), "cards");
   for (let slot = 0; slot < CONTRACTS.slots; slot++) {
     const card = document.createElement("div");
     card.className = "contract-card";
@@ -91,16 +192,8 @@ export function buildContractsScreen(actions, makeTwoClick) {
       part(card, "message").textContent = "";
     }, "Discard");
 
-    list.appendChild(card);
+    firstGrid.appendChild(card);
   }
-
-  // One line per reputation tier, for the Reputation panel
-  byId("tier-list").innerHTML = REPUTATION_TIERS.map((tier, index) => `
-    <li data-tier="${index}">
-      <span class="tier-name">${tier.name}</span>
-      <span class="tier-from">from ${formatNumber(tier.from)}</span>
-      <span class="tier-size">contracts ×${tier.size}</span>
-    </li>`).join("");
 }
 
 
@@ -110,7 +203,7 @@ export function buildContractsScreen(actions, makeTwoClick) {
 
 // -------------------------------------------------------------
 // renderContracts(state)
-// Updates every card and the reputation panel. Returns what the
+// Updates every card, each faction's box, and reputation. Returns what the
 // Contracts tab's nav dot is about: contracts not seen yet, and
 // deliveries that can be handed over now, e.g.
 //   { "contract:12": 1, "deliver:12": 1 }
@@ -120,10 +213,24 @@ export function renderContracts(state) {
   if (!isBoardOpen(state)) return ready;
   const now = gameNow(state);
 
+  // Per faction, for the box headings: { independents: { contracts: 2, ready: 1 } }
+  const counts = {};
+  for (const factionId of Object.keys(CONTRACT_FACTIONS)) {
+    counts[factionId] = { contracts: 0, ready: 0 };
+  }
+
   state.contracts.slots.forEach((slot, index) => {
     const card = byId("contract-slot-" + index);
     const contract = slot.contract;
     card.classList.toggle("empty", !contract);
+
+    // Put the card in its faction's box (only moves it when it's
+    // in the wrong one). A waiting slot stays where it was.
+    if (contract) {
+      const grid = part(byId("faction-board-" + contract.faction), "cards");
+      if (card.parentElement !== grid) grid.appendChild(card);
+      counts[contract.faction].contracts += 1;
+    }
 
     // --- Waiting for the next contract ---
     if (!contract) {
@@ -165,27 +272,46 @@ export function renderContracts(state) {
       const check = canDeliver(state, index);
       deliver.disabled = !check.ok;
       card.classList.toggle("deliverable", check.ok);
-      if (check.ok) ready["deliver:" + contract.number] = 1;
+      if (check.ok) {
+        ready["deliver:" + contract.number] = 1;
+        counts[contract.faction].ready += 1;
+      }
     } else {
       card.classList.remove("deliverable");
     }
   });
 
-  // --- Reputation ---
-  const reputation = state.contracts.reputation;
-  const tier = getTier(state);
-  setText(byId("rep-tier"), tier.name);
-  setText(byId("rep-points"), formatNumber(reputation) + " reputation");
-  const fill = tier.next ? (reputation - tier.from) / (tier.next.from - tier.from) : 1;
-  byId("rep-bar").style.width = (fill * 100) + "%";
-  setText(byId("rep-next"), tier.next
-    ? `${formatNumber(tier.next.from - reputation)} more to ${tier.next.name}: contracts ×${tier.next.size} the size, and the pay with them.`
-    : "Their highest regard. Contracts are as big as they get.");
-  setText(byId("contracts-done"), `${formatNumber(state.contracts.completed)} contracts finished`);
-  for (const line of document.querySelectorAll("#tier-list [data-tier]")) {
-    line.classList.toggle("current", Number(line.dataset.tier) === tier.index);
-    line.classList.toggle("reached", Number(line.dataset.tier) <= tier.index);
+  // --- Each faction's boxes ---
+  for (const [factionId, faction] of Object.entries(CONTRACT_FACTIONS)) {
+    // The board box heading, e.g. "2 contracts · 1 ready to hand over"
+    // (lit amber when one is ready, so a closed box still says so).
+    const boardBox = byId("faction-board-" + factionId);
+    const { contracts, ready: readyCount } = counts[factionId];
+    let summary = contracts === 1 ? "1 contract" : `${contracts} contracts`;
+    if (readyCount > 0) summary += ` · ${readyCount} ready to hand over`;
+    setText(part(boardBox, "summary"), summary);
+    boardBox.classList.toggle("needs-orders", readyCount > 0);
+
+    // The reputation box: heading "Known · 120 reputation"
+    const repBox = byId("faction-rep-" + factionId);
+    const reputation = getReputation(state, factionId);
+    const tier = getTier(state, factionId);
+    setText(part(repBox, "summary"), `${tier.name} · ${formatNumber(reputation)} reputation`);
+    setText(part(repBox, "tier"), tier.name);
+    setText(part(repBox, "points"), formatNumber(reputation) + " reputation");
+    // The bar fills from this tier's start to the next tier's.
+    const fill = tier.next ? (reputation - tier.from) / (tier.next.from - tier.from) : 1;
+    part(repBox, "bar").style.width = (fill * 100) + "%";
+    setText(part(repBox, "next"), tier.next
+      ? `${formatNumber(tier.next.from - reputation)} more to ${tier.next.name} with the ${faction.name.toLowerCase()}: ` +
+        `their contracts ×${tier.next.size} the size, and the pay with them.`
+      : "Their highest regard. Their contracts are as big as they get.");
+    for (const line of repBox.querySelectorAll("[data-tier]")) {
+      line.classList.toggle("current", Number(line.dataset.tier) === tier.index);
+      line.classList.toggle("reached", Number(line.dataset.tier) <= tier.index);
+    }
   }
+  setText(byId("contracts-done"), `${formatNumber(state.contracts.completed)} contracts finished`);
   return ready;
 }
 

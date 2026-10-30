@@ -41,8 +41,8 @@ import { addItemWithCarry } from "../js/state.js";
 import { UPGRADES } from "../data/content.js";
 import { getMaxSlots, getBatchOutput } from "../js/refinery.js";
 import { startScoutJob, getScoutPlan, getTargetStatus, chooseNextTarget, rollFor, isExplorationOpen, DEEP_SCAN_ID } from "../js/exploration.js";
-import { SURVEY_TARGETS, DEEP_SCAN, CONTRACT_KINDS, CONTRACTS, REPUTATION_TIERS } from "../data/content.js";
-import { isBoardOpen, getTier, getSubjects, getProgress, canDeliver, deliverContract, discardContract, checkContracts } from "../js/contracts.js";
+import { SURVEY_TARGETS, DEEP_SCAN, CONTRACT_KINDS, CONTRACTS, CONTRACT_FACTIONS, REPUTATION_TIERS } from "../data/content.js";
+import { isBoardOpen, getTier, getReputation, getSubjects, getProgress, canDeliver, deliverContract, discardContract, checkContracts } from "../js/contracts.js";
 import { getMaxOrderBatches, addStandingOrder, removeStandingOrder, getStandingOrders } from "../js/workshop.js";
 import { XP_TABLE, getLevelForXp, getLevel, getLevelProgress, addXp, isShipTypeUnlocked, MAX_LEVEL } from "../js/skills.js";
 import { canBuyShip, buyShip, canSellShip, sellShip, getSellValue, renameShip, getShipPrice } from "../js/shipyard.js";
@@ -3510,7 +3510,7 @@ function gameWithBoard() {
 function forceContract(state, kindId, fields) {
   const kind = CONTRACT_KINDS[kindId];
   state.contracts.slots[0].contract = {
-    number: 999, kindId, itemId: null, fieldId: null, targetId: null,
+    number: 999, faction: "independents", kindId, itemId: null, fieldId: null, targetId: null,
     amount: kind.amount, baseline: 0, credits: 1000, reputation: kind.reputation,
     client: "Test client", ...fields,
   };
@@ -3565,7 +3565,7 @@ test("Contracts: a delivery takes the goods and pays, and the slot refills 10 mi
   assert.equal(result.kind, "contract");
   assert.equal(state.inventory.iron_ore, 50);
   assert.equal(state.credits, credits + 1130);
-  assert.equal(state.contracts.reputation, contract.reputation);
+  assert.equal(getReputation(state, "independents"), contract.reputation);
   assert.equal(state.contracts.slots[0].contract, null);
 
   // A new contract arrives exactly 10 minutes later, not before
@@ -3615,18 +3615,18 @@ test("Contracts: discarding empties the slot and a new one comes after the wait"
   assert.equal(state.contracts.slots[1].contract, null);
   processJobs(state, START + CONTRACTS.refillMinutes * MINUTE);
   assert.ok(state.contracts.slots[1].contract);
-  assert.equal(state.contracts.reputation, 0);        // discarding earns nothing
+  assert.equal(getReputation(state, "independents"), 0);   // discarding earns nothing
 });
 
 test("Contracts: reputation tiers make contracts bigger", () => {
   const state = gameWithBoard();
-  assert.equal(getTier(state).name, "Unknown");
-  state.contracts.reputation = REPUTATION_TIERS[2].from;
-  assert.equal(getTier(state).name, REPUTATION_TIERS[2].name);
+  assert.equal(getTier(state, "independents").name, "Unknown");
+  state.contracts.reputation.independents = REPUTATION_TIERS[2].from;
+  assert.equal(getTier(state, "independents").name, REPUTATION_TIERS[2].name);
   // Post 60 contracts at each tier: the higher tier's are bigger on average
   const average = (reputation) => {
     const s = gameWithBoard();
-    s.contracts.reputation = reputation;
+    s.contracts.reputation.independents = reputation;
     let total = 0, count = 0;
     for (let i = 0; i < 60; i++) {
       discardContract(s, 0, START);
@@ -3661,6 +3661,55 @@ test("Contracts: a version 15 save gets an empty board and running totals", () =
   assert.equal(state.version, SAVE_VERSION);
   assert.equal(state.contracts.slots.length, CONTRACTS.slots);
   assert.deepEqual(state.stats, { mined: {}, refined: {} });
+});
+
+// =============================================================
+// FACTIONS (reputation per faction, 30 Oct)
+// =============================================================
+
+test("Factions: every contract posted names the faction that posted it", () => {
+  // The screen sorts cards into faction boxes by this, and the
+  // reputation it pays goes to this faction.
+  const state = gameWithBoard();
+  for (const slot of state.contracts.slots) {
+    assert.ok(slot.contract.faction in CONTRACT_FACTIONS, "a known faction: " + slot.contract.faction);
+  }
+});
+
+test("Factions: a new game starts at 0 reputation with every faction", () => {
+  const state = newGame();
+  for (const factionId of Object.keys(CONTRACT_FACTIONS)) {
+    assert.equal(getReputation(state, factionId), 0);
+  }
+});
+
+test("Factions: a finished contract's reputation goes to its own faction only", () => {
+  // A pretend second faction, so we can check the points don't
+  // land on the wrong one. (Added for this test only, then removed.)
+  CONTRACT_FACTIONS.test_rivals = { name: "Test rivals", description: "" };
+  try {
+    const state = gameWithBoard();
+    const contract = forceContract(state, "survey_request", { targetId: Object.keys(SURVEY_TARGETS)[0], faction: "test_rivals" });
+    state.exploration.surveyed[contract.targetId] = true;   // the work is done
+    checkContracts(state, START);
+    assert.equal(getReputation(state, "test_rivals"), contract.reputation);
+    assert.equal(getReputation(state, "independents"), 0);
+  } finally {
+    delete CONTRACT_FACTIONS.test_rivals;
+  }
+});
+
+test("Factions: a version 16 save keeps its reputation, now with the belt independents", () => {
+  // Before 0.2.3, reputation was one number and contracts had no faction.
+  const old = gameWithBoard();
+  old.version = 16;
+  old.contracts.reputation = 140;
+  for (const slot of old.contracts.slots) delete slot.contract.faction;
+  const state = parseSave(JSON.stringify(old));
+  assert.equal(state.version, SAVE_VERSION);
+  assert.deepEqual(state.contracts.reputation, { independents: 140 });
+  assert.equal(getTier(state, "independents").name, "Known");     // 140 is past Known's 100
+  for (const slot of state.contracts.slots) assert.equal(slot.contract.faction, "independents");
 });
 
 // =============================================================

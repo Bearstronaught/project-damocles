@@ -53,8 +53,8 @@ js/nav.js           the main menu: sidebar on a computer, bottom bar and drawer 
 js/exploration.js   scouts, survey targets, deep scans and their finds, the first-sale milestone
 js/exploration-screen.js  the Exploration tab: targets, the wreck's story, deep scans
 js/report.js        the survey report pop-up (a scout's find and lore; needs closing)
-js/contracts.js     the contracts board: kinds, posting, progress, reputation
-js/contracts-screen.js  the Contracts tab: one card per board slot, and reputation
+js/contracts.js     the contracts board: kinds, posting, progress, reputation per faction
+js/contracts-screen.js  the Contracts tab: a collapsible box per faction, for its contracts and your reputation
 js/fleet-groups.js  sorting ships into role groups (Mining, Freight) and their summaries
 js/banner.js        the level-up banners that slide down from the top
 js/art.js           code-drawn ship schematics, looked up by name

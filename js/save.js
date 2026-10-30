@@ -212,6 +212,7 @@ function looksLikeASave(state) {
     typeof state.milestones === "object" && state.milestones !== null &&
     typeof state.contracts === "object" && state.contracts !== null &&
     Array.isArray(state.contracts.slots) &&
+    typeof state.contracts.reputation === "object" && state.contracts.reputation !== null &&
     typeof state.stats === "object" && state.stats !== null
   );
 }
@@ -434,7 +435,20 @@ function upgradeSave(state) {
     state.version = 16;
   }
 
-  // (Future: if (state.version === 16) { ...; state.version = 17; })
+  // --- Version 16 -> 17: reputation per faction ---
+  // Reputation was one number (all of it with the belt
+  // independents, the only faction then). Now it's a score per
+  // faction, and every contract says which faction posted it.
+  if (state.version === 16) {
+    const points = state.contracts.reputation || 0;
+    state.contracts.reputation = { independents: points };
+    for (const slot of state.contracts.slots) {
+      if (slot.contract) slot.contract.faction = "independents";
+    }
+    state.version = 17;
+  }
+
+  // (Future: if (state.version === 17) { ...; state.version = 18; })
 
   if (state.version > SAVE_VERSION) {
     // A save from a NEWER version of the game than this one.
