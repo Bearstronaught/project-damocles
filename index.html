@@ -9,7 +9,9 @@
 <head>
   <meta charset="UTF-8">
   <!-- Makes the page fit phone screens properly -->
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!-- viewport-fit=cover lets the phone menu bar sit clear of the
+       home-swipe area on newer phones (see .bottom-bar in style.css) -->
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Project Damocles</title>
 
   <!-- Two fonts from Google Fonts:
@@ -23,6 +25,151 @@
   <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
+
+  <!-- ===== Menu icons =====
+       Each icon is drawn once here, as a <symbol>, and then reused
+       anywhere with <svg><use href="#icon-name"/></svg>. That way
+       the sidebar and the phone bar share one drawing of each.
+       They're thin line drawings in the "currentColor" - whatever
+       colour the text around them is - so they turn amber with it. -->
+  <svg class="icon-sprite" aria-hidden="true">
+    <!-- Command: a targeting reticle -->
+    <symbol id="icon-command" viewBox="0 0 24 24">
+      <circle cx="12" cy="12" r="7"/>
+      <path d="M12 2v5M12 17v5M2 12h5M17 12h5"/>
+      <circle cx="12" cy="12" r="1.5"/>
+    </symbol>
+    <!-- Fleet: two ships, flying up the page -->
+    <symbol id="icon-fleet" viewBox="0 0 24 24">
+      <path d="M7 4l3 8-3-2-3 2z"/>
+      <path d="M17 10l3 8-3-2-3 2z"/>
+    </symbol>
+    <!-- Shipyard: a ship inside a docking frame -->
+    <symbol id="icon-shipyard" viewBox="0 0 24 24">
+      <path d="M12 6l3 9-3-2-3 2z"/>
+      <path d="M4 3v18M20 3v18M4 7h3M17 7h3M4 17h3M17 17h3"/>
+    </symbol>
+    <!-- Industry: a factory with a chimney -->
+    <symbol id="icon-industry" viewBox="0 0 24 24">
+      <path d="M3 20V11l5 3v-3l5 3V5h4v15z"/>
+      <path d="M3 20h18"/>
+    </symbol>
+    <!-- Skills: three rising bars -->
+    <symbol id="icon-skills" viewBox="0 0 24 24">
+      <path d="M5 20v-6M12 20V9M19 20V4"/>
+      <path d="M3 20h18"/>
+    </symbol>
+    <!-- Save: a data disk -->
+    <symbol id="icon-save" viewBox="0 0 24 24">
+      <path d="M5 4h11l3 3v13H5z"/>
+      <path d="M8 4v5h7V4M8 20v-6h8v6"/>
+    </symbol>
+    <!-- More: three dots -->
+    <symbol id="icon-more" viewBox="0 0 24 24">
+      <circle cx="5" cy="12" r="1.5"/>
+      <circle cx="12" cy="12" r="1.5"/>
+      <circle cx="19" cy="12" r="1.5"/>
+    </symbol>
+    <!-- Collapse the sidebar: arrows pointing left -->
+    <symbol id="icon-collapse" viewBox="0 0 24 24">
+      <path d="M12 6l-6 6 6 6M19 6l-6 6 6 6"/>
+    </symbol>
+    <!-- Close the phone menu: a cross -->
+    <symbol id="icon-close" viewBox="0 0 24 24">
+      <path d="M6 6l12 12M18 6L6 18"/>
+    </symbol>
+  </svg>
+
+  <!-- ===== Main menu =====
+       On a computer: a sidebar down the left of the screen, which
+       can shrink to just its icons (the arrows button).
+       On a phone: the same list slides in from the left as a drawer
+       when you tap More on the bar at the bottom.
+
+       Every button has data-screen="..." saying which screen it
+       opens. ui.js (setupNavigation) wires them all up, so a new
+       screen only needs a new button here and a new <section>.
+
+       Items sit in groups with small headings (agreed 30 Oct). The
+       Expansion group (Exploration) and Factions group (Contracts)
+       are added when those screens are built. -->
+  <nav class="sidebar" id="sidebar" aria-label="Main menu">
+    <div class="sidebar-head">
+      <span class="sidebar-label">Menu</span>
+      <!-- Computer only: shrink the sidebar to icons -->
+      <button class="sidebar-icon-btn" id="sidebar-collapse" type="button"
+              aria-label="Shrink menu" aria-expanded="true" title="Shrink menu">
+        <svg class="icon"><use href="#icon-collapse"/></svg>
+      </button>
+      <!-- Phone only: close the drawer -->
+      <button class="sidebar-icon-btn" id="sidebar-close" type="button" aria-label="Close menu">
+        <svg class="icon"><use href="#icon-close"/></svg>
+      </button>
+    </div>
+
+    <div class="nav-group">
+      <button class="nav-btn" data-screen="command" title="Command">
+        <svg class="icon"><use href="#icon-command"/></svg><span class="nav-text">Command</span>
+      </button>
+    </div>
+
+    <div class="nav-group">
+      <div class="nav-heading">Ships</div>
+      <button class="nav-btn" data-screen="fleet" title="Fleet">
+        <svg class="icon"><use href="#icon-fleet"/></svg><span class="nav-text">Fleet</span>
+      </button>
+      <button class="nav-btn" data-screen="shipyard" title="Shipyard">
+        <svg class="icon"><use href="#icon-shipyard"/></svg><span class="nav-text">Shipyard</span>
+      </button>
+    </div>
+
+    <div class="nav-group">
+      <div class="nav-heading">Production</div>
+      <button class="nav-btn" data-screen="industry" title="Industry">
+        <svg class="icon"><use href="#icon-industry"/></svg><span class="nav-text">Industry</span>
+      </button>
+    </div>
+
+    <div class="nav-group">
+      <button class="nav-btn" data-screen="skills" title="Skills">
+        <svg class="icon"><use href="#icon-skills"/></svg><span class="nav-text">Skills</span>
+      </button>
+    </div>
+
+    <!-- Pinned to the bottom of the sidebar -->
+    <div class="nav-group nav-pinned">
+      <button class="nav-btn" data-screen="save" title="Save">
+        <svg class="icon"><use href="#icon-save"/></svg><span class="nav-text">Save</span>
+      </button>
+    </div>
+  </nav>
+
+  <!-- Phone only: darkens the page behind the open drawer.
+       Tapping it closes the drawer. -->
+  <div class="drawer-backdrop" id="drawer-backdrop" hidden></div>
+
+  <!-- ===== Phone menu bar (bottom of the screen) =====
+       The screens you use most, one tap away, plus More, which
+       opens the full menu above as a drawer. Exploration joins
+       this bar when it's built. These buttons are copies of the
+       sidebar ones: same data-screen, same dots. -->
+  <nav class="bottom-bar" aria-label="Quick menu">
+    <button class="nav-btn" data-screen="command">
+      <svg class="icon"><use href="#icon-command"/></svg><span class="nav-text">Command</span>
+    </button>
+    <button class="nav-btn" data-screen="fleet">
+      <svg class="icon"><use href="#icon-fleet"/></svg><span class="nav-text">Fleet</span>
+    </button>
+    <button class="nav-btn" data-screen="industry">
+      <svg class="icon"><use href="#icon-industry"/></svg><span class="nav-text">Industry</span>
+    </button>
+    <!-- Not a screen: opens the drawer. Gets a dot when a screen
+         that's only in the drawer has one. -->
+    <button class="nav-btn nav-more" id="nav-more" type="button"
+            aria-controls="sidebar" aria-expanded="false">
+      <svg class="icon"><use href="#icon-more"/></svg><span class="nav-text">More</span>
+    </button>
+  </nav>
 
   <!-- ===== Top bar ===== -->
   <header class="top-bar">
@@ -118,16 +265,6 @@
       <p class="price-note">Using any of these marks the save as a playtest save. Type "damocles" or tap the title 7 times to hide them again.</p>
     </details>
   </div>
-
-  <!-- ===== Navigation: one button per screen =====
-       data-screen says which screen each button opens. -->
-  <nav class="nav">
-    <button class="nav-btn" data-screen="command">Command</button>
-    <button class="nav-btn" data-screen="fleet">Fleet</button>
-    <button class="nav-btn" data-screen="shipyard">Shipyard</button>
-    <button class="nav-btn" data-screen="industry">Industry</button>
-    <button class="nav-btn" data-screen="skills">Skills</button>
-  </nav>
 
   <main>
 
@@ -344,34 +481,47 @@
       </div>
     </section>
 
-  </main>
+    <!-- ===================== SAVE SCREEN ===================== -->
+    <!-- Backups and the reset button. These used to sit in a footer
+         under every screen; now they have their own screen, pinned
+         to the bottom of the menu (agreed 30 Oct). -->
+    <section class="screen layout layout-flow" data-screen="save" hidden>
 
-  <footer class="footer">
-
-    <!-- Save backup. <details> is a box that opens and closes
-         when its <summary> line is clicked - no code needed. -->
-    <details class="panel backup">
-      <summary class="panel-title">Save backup</summary>
-      <p class="backup-help">
-        Export copies your save as one line of text. Keep it somewhere safe, or paste it
-        into the game on another device. Importing replaces your current game.
-      </p>
-      <!-- The save text appears here on export; paste one here to import. -->
-      <textarea id="backup-text" class="backup-text" rows="3" spellcheck="false"
-                placeholder="Exported save text appears here. Paste a save here to import it."></textarea>
-      <div class="backup-buttons">
-        <button id="export-save" class="btn">Export</button>
-        <button id="download-save" class="btn">Download file</button>
-        <button id="import-save" class="btn">Import</button>
-        <!-- A real file picker is hidden; this button opens it. -->
-        <button id="choose-file" class="btn">Load file</button>
-        <input id="save-file" type="file" accept=".txt,text/plain" hidden>
+      <!-- Save backup: export to text or a file, import it back -->
+      <div class="panel backup">
+        <div class="panel-head">
+          <h2 class="panel-title">Save backup</h2>
+          <span class="panel-tag"><i class="pulse-dot"></i> Autosave on</span>
+        </div>
+        <p class="backup-help">
+          Export copies your save as one line of text. Keep it somewhere safe, or paste it
+          into the game on another device. Importing replaces your current game.
+        </p>
+        <!-- The save text appears here on export; paste one here to import. -->
+        <textarea id="backup-text" class="backup-text" rows="3" spellcheck="false"
+                  placeholder="Exported save text appears here. Paste a save here to import it."></textarea>
+        <div class="backup-buttons">
+          <button id="export-save" class="btn">Export</button>
+          <button id="download-save" class="btn">Download file</button>
+          <button id="import-save" class="btn">Import</button>
+          <!-- A real file picker is hidden; this button opens it. -->
+          <button id="choose-file" class="btn">Load file</button>
+          <input id="save-file" type="file" accept=".txt,text/plain" hidden>
+        </div>
+        <p id="backup-message" class="backup-message" role="status"></p>
       </div>
-      <p id="backup-message" class="backup-message" role="status"></p>
-    </details>
 
-    <button id="reset-game" class="btn btn-danger">Reset save</button>
-  </footer>
+      <!-- Reset: starts the game again from nothing -->
+      <div class="panel">
+        <div class="panel-head">
+          <h2 class="panel-title">Reset</h2>
+        </div>
+        <p class="backup-help">Deletes this save and starts a new game. Export a backup first if you might want it back. Click twice to confirm.</p>
+        <button id="reset-game" class="btn btn-danger">Reset save</button>
+      </div>
+    </section>
+
+  </main>
 
   <!--
     Start the game. type="module" lets our files use "import"

@@ -49,6 +49,7 @@ js/playtest.js      the dev panel's tools (set levels, add goods or credits, jum
 js/dev-switch.js    the hidden dev mode switch (type "damocles", or tap the title 7 times)
 js/save.js          save, load, version upgrades, offline progress
 js/ui.js            drawing the screens and handling button clicks
+js/nav.js           the main menu: sidebar on a computer, bottom bar and drawer on a phone, nav dots
 js/fleet-groups.js  sorting ships into role groups (Mining, Freight) and their summaries
 js/banner.js        the level-up banners that slide down from the top
 js/art.js           code-drawn ship schematics, looked up by name

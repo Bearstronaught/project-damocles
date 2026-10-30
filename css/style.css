@@ -191,64 +191,359 @@ body {
 }
 
 
-/* ----- Navigation bar ----- */
-.nav {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  max-width: 980px;
-  margin: 0 auto;
-  padding: 12px 16px 0;
+/* =============================================================
+   THE MAIN MENU (agreed 30 Oct)
+   Computer (800 px and wider): a sidebar down the left.
+   Phone (below 800 px): a bar along the bottom, and the same
+   sidebar slides in from the left as a drawer when you tap More.
+   The width where it switches must match PHONE_LAYOUT in nav.js.
+   ============================================================= */
+
+/* How wide the sidebar is. The page leaves this much room on the
+   left. Shrinking the sidebar (nav-collapsed) swaps in the
+   narrow width, and everything that uses the variable follows. */
+:root {
+  --sidebar-width: 200px;
+  --sidebar-narrow: 56px;
+  --bottom-bar-height: 58px;
 }
 
+body.nav-collapsed {
+  --sidebar-width: var(--sidebar-narrow);
+}
+
+/* The icons are drawn once in index.html; this hides that "store"
+   of drawings, which takes up no space. */
+.icon-sprite {
+  display: none;
+}
+
+/* Every menu icon: thin lines in the colour of the text around it */
+.icon {
+  width: 20px;
+  height: 20px;
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* ----- The sidebar ----- */
+.sidebar {
+  position: fixed;            /* stays put while the page scrolls */
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: var(--sidebar-width);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 8px 12px;
+  background: var(--panel);
+  border-right: 1px solid var(--line-strong);
+  overflow-y: auto;           /* a long menu scrolls inside itself */
+  overflow-x: hidden;
+  z-index: 30;
+}
+
+.sidebar-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 2px 4px 8px 10px;
+  border-bottom: 1px solid var(--line);
+}
+
+.sidebar-label {
+  font-family: var(--font-display);
+  font-size: 11px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--steel-dim);
+}
+
+/* The small square buttons in the sidebar's head (shrink, close) */
+.sidebar-icon-btn {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  color: var(--steel);
+  background: none;
+  border: 1px solid transparent;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;   /* no blue flash on phones */
+}
+
+.sidebar-icon-btn:hover {
+  color: var(--amber);
+  border-color: var(--line-strong);
+}
+
+.sidebar-icon-btn:focus-visible {
+  outline: 2px solid var(--teal);
+  outline-offset: 1px;
+}
+
+/* The arrows flip round to point right when the sidebar is small */
+.sidebar-icon-btn .icon {
+  transition: transform 0.2s;
+}
+
+body.nav-collapsed #sidebar-collapse .icon {
+  transform: scaleX(-1);
+}
+
+/* A group of buttons, with an optional small heading */
+.nav-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.nav-heading {
+  padding: 6px 10px 2px;
+  font-family: var(--font-display);
+  font-size: 10px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--steel-dim);
+  white-space: nowrap;
+}
+
+/* Save sits at the very bottom: margin-top: auto takes up all the
+   spare room above it. */
+.nav-pinned {
+  margin-top: auto;
+  padding-top: 6px;
+  border-top: 1px solid var(--line);
+}
+
+/* One menu button: icon, then the screen's name */
 .nav-btn {
+  position: relative;         /* so the alert dot can sit on it */
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 8px 10px;
   font-family: var(--font-display);
   font-size: 13px;
   font-weight: 600;
-  letter-spacing: 0.16em;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
+  text-align: left;
+  white-space: nowrap;
   color: var(--steel);
-  background: var(--panel);
-  border: 1px solid var(--line-strong);
-  padding: 7px 18px;
+  background: none;
+  border: 1px solid transparent;
+  border-left: 2px solid transparent;
   cursor: pointer;
-  position: relative;         /* so the alert dot can sit on it */
+  /* Phones flash buttons blue when tapped; the amber highlight
+     already shows which screen you picked. */
+  -webkit-tap-highlight-color: transparent;
 }
 
 .nav-btn:hover {
   color: var(--amber);
+  background: var(--amber-faint);
 }
 
-/* On a phone, slimmer buttons so all four fit on one row */
-@media (max-width: 600px) {
-  .nav-btn {
-    padding: 7px 10px;
-    letter-spacing: 0.08em;
-    font-size: 12px;
-  }
-}
-
-/* The screen you're on: solid amber, with one corner cut off
-   like a panel. (Only here - clipping a button that has a
-   border would cut the border off too.) */
+/* The screen you're on: amber, with an amber bar down its left
+   edge, like a lit panel on a console */
 .nav-btn.active {
-  color: var(--bg);
-  background: var(--amber);
-  border-color: var(--amber);
-  clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 0 100%);
+  color: var(--amber);
+  background: var(--amber-faint);
+  border-left-color: var(--amber);
+  text-shadow: var(--glow-amber);
 }
 
-/* A teal dot when there's something to do on that screen */
+/* A teal dot when there's something new to do on that screen */
 .nav-btn.has-alert::after {
   content: "";
   position: absolute;
-  top: 3px;
-  right: 3px;
+  top: 50%;
+  right: 10px;
   width: 7px;
   height: 7px;
+  margin-top: -3.5px;         /* half its height: centres it */
   border-radius: 50%;
   background: var(--teal);
   box-shadow: var(--glow-teal);
+}
+
+/* ----- Shrunk sidebar: icons only ----- */
+body.nav-collapsed .sidebar {
+  padding-left: 6px;
+  padding-right: 6px;
+}
+
+body.nav-collapsed .sidebar-head {
+  justify-content: center;
+  padding-left: 0;
+  padding-right: 0;
+}
+
+body.nav-collapsed .sidebar-label,
+body.nav-collapsed .nav-text {
+  display: none;
+}
+
+/* Headings turn into a thin line, so the groups still show */
+body.nav-collapsed .nav-heading {
+  height: 1px;
+  margin: 4px 8px;
+  padding: 0;
+  overflow: hidden;
+  color: transparent;
+  background: var(--line);
+}
+
+body.nav-collapsed .nav-btn {
+  justify-content: center;
+  padding: 9px 0;
+}
+
+/* With no name to sit beside, the dot moves onto the icon's corner */
+body.nav-collapsed .nav-btn.has-alert::after {
+  top: 6px;
+  right: 8px;
+  margin-top: 0;
+}
+
+/* ----- Computer layout: room on the left for the sidebar ----- */
+@media (min-width: 800px) {
+  body {
+    padding-left: var(--sidebar-width);
+  }
+
+  /* Phone-only parts */
+  .bottom-bar,
+  .drawer-backdrop,
+  #sidebar-close {
+    display: none !important;
+  }
+}
+
+/* ----- Phone layout: the bar at the bottom, the drawer ----- */
+@media (max-width: 799px) {
+  /* Keep the end of the page clear of the bar. env(...) is the
+     strip some phones keep for the home swipe; 0 on others. */
+  body {
+    padding-bottom: calc(var(--bottom-bar-height) + env(safe-area-inset-bottom));
+  }
+
+  /* The sidebar waits off the left edge of the screen... */
+  .sidebar {
+    width: min(260px, 82vw);
+    z-index: 45;
+    transform: translateX(-100%);
+    visibility: hidden;         /* ...and can't be tabbed into while away */
+    /* keeps Save clear of the home-swipe strip on newer phones */
+    padding-bottom: calc(12px + env(safe-area-inset-bottom));
+    transition: transform 0.22s ease, visibility 0.22s;
+  }
+
+  /* ...and slides in when the drawer is open */
+  body.drawer-open .sidebar {
+    transform: none;
+    visibility: visible;
+    box-shadow: 8px 0 30px rgba(0, 0, 0, 0.6);
+  }
+
+  /* Shrinking is a computer thing: on a phone the drawer is
+     always full size, whatever was chosen on a computer. */
+  #sidebar-collapse {
+    display: none;
+  }
+
+  body.nav-collapsed .sidebar-label,
+  body.nav-collapsed .nav-text {
+    display: inline;
+  }
+
+  body.nav-collapsed .nav-heading {
+    height: auto;
+    margin: 0;
+    padding: 6px 10px 2px;
+    color: var(--steel-dim);
+    background: none;
+  }
+
+  body.nav-collapsed .sidebar-head {
+    justify-content: space-between;
+    padding: 2px 4px 8px 10px;
+  }
+
+  body.nav-collapsed .nav-btn {
+    justify-content: flex-start;
+    padding: 8px 10px;
+  }
+
+  body.nav-collapsed .nav-btn.has-alert::after {
+    top: 50%;
+    right: 10px;
+    margin-top: -3.5px;
+  }
+
+  /* Darkens the page behind the open drawer */
+  .drawer-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 44;
+    background: rgba(0, 0, 0, 0.55);
+  }
+
+  /* The bar: one equal column per button */
+  .bottom-bar {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 40;
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(0, 1fr);
+    height: calc(var(--bottom-bar-height) + env(safe-area-inset-bottom));
+    padding-bottom: env(safe-area-inset-bottom);
+    background: var(--panel);
+    border-top: 1px solid var(--line-strong);
+  }
+
+  /* Bar buttons: icon on top, a small name underneath */
+  .bottom-bar .nav-btn {
+    flex-direction: column;
+    justify-content: center;
+    gap: 3px;
+    padding: 6px 2px;
+    font-size: 10px;
+    letter-spacing: 0.08em;
+    text-align: center;
+    border: none;
+    border-top: 2px solid transparent;
+  }
+
+  .bottom-bar .nav-btn.active {
+    border-top-color: var(--amber);
+  }
+
+  /* The dot sits on the icon's top-right corner */
+  .bottom-bar .nav-btn.has-alert::after {
+    top: 7px;
+    right: calc(50% - 18px);
+    margin-top: 0;
+  }
+}
+
+/* No sliding for anyone who has asked their device for less motion */
+@media (prefers-reduced-motion: reduce) {
+  .sidebar,
+  .sidebar-icon-btn .icon {
+    transition: none;
+  }
 }
 
 
@@ -263,7 +558,15 @@ body {
   margin: 0 auto;
 }
 
-@media (max-width: 760px) {
+/* These two rules ask how wide the SCREEN area (<main>) is, not
+   the whole window: on a computer the sidebar takes some of the
+   window. "@container" asks about <main>; "container-type" on
+   main is what lets it be asked. */
+main {
+  container-type: inline-size;
+}
+
+@container (max-width: 760px) {
   .layout {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -272,7 +575,7 @@ body {
 /* The Command screen stays in one column up to 1000 px: side by
    side any narrower, the cargo panel is too thin for its table
    (six columns of numbers). Fleet goes on top, cargo below it. */
-@media (max-width: 999px) {
+@container (max-width: 999px) {
   .layout[data-screen="command"] {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -1092,33 +1395,7 @@ body {
 }
 
 
-/* ----- Footer ----- */
-.footer {
-  text-align: center;
-  padding: 8px 16px 24px;
-}
-
-/* ----- Save backup (in the footer) ----- */
-.backup {
-  max-width: 948px;           /* lines up with the panels above */
-  margin: 0 auto 16px;
-  text-align: left;
-}
-
-.backup summary {
-  cursor: pointer;
-  list-style: none;           /* hide the browser's own triangle... */
-}
-
-.backup summary::before {
-  content: "+ ";              /* ...and show our own +/- instead */
-  color: var(--amber);
-}
-
-.backup[open] summary::before {
-  content: "− ";
-}
-
+/* ----- Save screen ----- */
 .backup-help {
   margin: 10px 0;
   font-size: 12px;

@@ -28,12 +28,10 @@ import { getShipPoints, getCommandCapacity, getCommandUsed, getNextUpgradeCost, 
 import { getCargoValue, getTradeXp } from "./trade.js";
 import { getBond, getSellable } from "./bonded.js";
 import { getShipArt } from "./art.js";
+import { setupNavigation, navAlert } from "./nav.js";
 import { getRoleGroups, describeGroup } from "./fleet-groups.js";
 import { isRefineryOpen, getRefineJob, getSlotCount, getSlotUnlockLevel, isRecipeUnlocked, getBatchMs, getBatchOutput, hasInputs, describeInputs, getMaxSlots } from "./refinery.js";
 import { isWorkshopOpen, getWorkshopSlotCount, getWorkshopSlotUnlockLevel, getQueueLimit, isWorkshopRecipeUnlocked, getWorkshopBatchMs, getWorkshopJob, hasWorkshopInputs, describeWorkshopInputs, getMaxOrderBatches, getRunningIndex, hasSmartQueue, hasControlCentre, getStandingOrders, standingNeedsWork } from "./workshop.js";
-
-// The screens that exist, in nav order. The first is the default.
-const SCREENS = ["command", "fleet", "shipyard", "industry", "skills"];
 
 // Words shown for each phase of a trip.
 const PHASE_LABELS = {
@@ -106,69 +104,6 @@ export function setupUI(state, actions) {
   buildComponents(actions);
   buildDevPanel(actions);
   setupTips(actions);
-}
-
-
-// -------------------------------------------------------------
-// NAVIGATION
-// The screen name goes in the address bar after a # (like
-// index.html#ships), so refreshing keeps you on the same screen
-// and the browser's Back button works.
-// -------------------------------------------------------------
-function setupNavigation() {
-  // Clicking a nav button switches screen straight away, and
-  // also updates the # part of the address so refresh and the
-  // Back button know where you are.
-  for (const button of document.querySelectorAll(".nav-btn")) {
-    button.addEventListener("click", () => {
-      const name = button.dataset.screen;   // dataset.screen = data-screen="..."
-      showScreen(name);
-      location.hash = name;
-    });
-  }
-
-  // When the # changes some other way (the Back button, or
-  // typing it in the address bar), show the matching screen.
-  window.addEventListener("hashchange", showScreenFromAddress);
-
-  // Show the right screen straight away on page load.
-  showScreenFromAddress();
-}
-
-function showScreenFromAddress() {
-  // location.hash is "#fleet"; .slice(1) drops the "#".
-  let name = location.hash.slice(1);
-
-  // Old bookmarks to the Ships screen go to Fleet now.
-  if (name === "ships") {
-    name = "fleet";
-  }
-
-  // Unknown or empty? Fall back to the first screen.
-  if (!SCREENS.includes(name)) {
-    name = SCREENS[0];
-  }
-  showScreen(name);
-}
-
-export function showScreen(name) {
-  // Show the matching screen and hide the others.
-  // ("hidden" is a built-in HTML switch for hiding things.)
-  for (const screen of document.querySelectorAll(".screen")) {
-    screen.hidden = screen.dataset.screen !== name;
-  }
-
-  // Highlight the matching nav button.
-  for (const button of document.querySelectorAll(".nav-btn")) {
-    const isCurrent = button.dataset.screen === name;
-    button.classList.toggle("active", isCurrent);
-    // aria-current tells screen readers which page is open
-    if (isCurrent) {
-      button.setAttribute("aria-current", "page");
-    } else {
-      button.removeAttribute("aria-current");
-    }
-  }
 }
 
 
@@ -1696,15 +1631,6 @@ function saveSeen(seenAll) {
   } catch (error) {
     // Blocked storage: nothing to do.
   }
-}
-
-
-// -------------------------------------------------------------
-// navAlert(screen, on)
-// Lights (or clears) the teal dot on a nav button.
-// -------------------------------------------------------------
-function navAlert(screen, on) {
-  document.querySelector(`.nav-btn[data-screen="${screen}"]`).classList.toggle("has-alert", on);
 }
 
 
