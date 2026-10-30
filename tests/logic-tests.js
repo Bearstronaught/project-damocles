@@ -3325,6 +3325,37 @@ test("Exploration: goods found go into the home hold", () => {
   assert.equal(state.inventory[target.item], target.tonnes);
 });
 
+test("Exploration: deep scans needed per level start at 1 and rise with the level", () => {
+  // Dan, 30 Oct: "one for level 2, 2 for 3 etc." Play it the way a
+  // scout does: each level, survey whatever has just opened, then
+  // deep scan until the next level. Count the deep scans per level.
+  const ids = Object.keys(SURVEY_TARGETS);
+  const done = new Set();
+  let xp = 0;
+  const scansFor = {};   // level -> deep scans it took to reach it
+  for (let level = 2; level <= 15; level++) {
+    // Surveys open at the current level (and their earlier stage done) go first
+    for (const id of ids) {
+      const target = SURVEY_TARGETS[id];
+      if (!done.has(id) && target.unlockLevel <= level - 1 && (!target.requires || done.has(target.requires))) {
+        xp += target.xp;
+        done.add(id);
+      }
+    }
+    const scans = Math.max(0, Math.ceil((XP_TABLE[level] - xp) / DEEP_SCAN.xp));
+    scansFor[level] = scans;
+    xp += scans * DEEP_SCAN.xp;
+  }
+  assert.equal(scansFor[2], 1, "level 2 should take one deep scan");
+  for (let level = 3; level <= 15; level++) {
+    assert.ok(scansFor[level] >= 1, `level ${level} needs no deep scans`);
+    // Rising: never fewer than one below the level before
+    assert.ok(scansFor[level] >= scansFor[level - 1] - 1,
+      `level ${level} takes ${scansFor[level]} deep scans, level ${level - 1} took ${scansFor[level - 1]}`);
+  }
+  assert.ok(scansFor[15] >= 3 * scansFor[3], "late levels should take several times the early ones");
+});
+
 test("Exploration: locked targets and out-of-order wreck stages are refused", () => {
   const state = gameWithScout();
   assert.equal(getTargetStatus(state, "wreck_1"), "locked");               // Exploration 3 needed

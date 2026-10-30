@@ -2789,3 +2789,58 @@ body.nav-collapsed .nav-version {
     letter-spacing: 0.12em;
   }
 }
+
+
+/* ----- The survey report pop-up (report.js) -----
+   Covers the page until it's closed, so a scout's lore can't be
+   missed. Above the level-up banners (z-index 50). */
+.report-cover {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgba(6, 8, 10, 0.8);
+}
+
+.report-box {
+  width: min(520px, 100%);
+  max-height: calc(100vh - 32px);
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 0 40px rgba(70, 214, 200, 0.12);
+}
+
+/* A long report (lots of surveys after time away) scrolls inside */
+.report-body {
+  overflow-y: auto;
+  margin-bottom: 12px;
+}
+
+.report-entry + .report-entry {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.report-target {
+  margin: 0 0 4px;
+  font-family: var(--font-display);
+  font-size: 15px;
+  letter-spacing: 0.08em;
+  color: var(--amber);
+}
+
+.report-find {
+  margin: 0 0 6px;
+  font-size: 12px;
+  color: var(--teal);
+}
+
+.report-lore {
+  margin: 0;
+  font-style: italic;
+  line-height: 1.6;
+  color: var(--steel);
+}

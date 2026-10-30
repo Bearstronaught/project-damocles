@@ -57,6 +57,7 @@ export function simulate(hours, untilMiningLevel, hourly = null, explore = true)
   const events = [];
   let lastLevel = 1;
   let lastExploreLevel = 1;
+  let scansAtLastLevel = 0;   // deep scans done when the last level came
   let earnedThisHour = 0;   // credits from selling, for the hourly report
 
   for (let minute = 0; minute <= hours * 60; minute++) {
@@ -70,9 +71,13 @@ export function simulate(hours, untilMiningLevel, hourly = null, explore = true)
         events.push({ minute, text: `surveyed ${getTarget(targetId).name}`, goal: true });
       }
     }
+    // Each Exploration level, with how many deep scans it took
+    // since the last level (Dan, 30 Oct: they should rise with the level)
     const exploreLevel = getLevel(state, "exploration");
     for (let l = lastExploreLevel + 1; l <= exploreLevel; l++) {
-      events.push({ minute, text: `Exploration ${l}` });
+      const scans = state.exploration.deepScans - scansAtLastLevel;
+      events.push({ minute, text: `Exploration ${l} (${scans} deep scan${scans === 1 ? "" : "s"} since level ${l - 1})` });
+      scansAtLastLevel = state.exploration.deepScans;
     }
     lastExploreLevel = exploreLevel;
 

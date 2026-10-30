@@ -36,6 +36,7 @@ import { buyShipUpgrade, getShipUpgradeUnlocksAtLevel, getUpgradeName, getPendin
 import { getLevelPerk } from "./skills.js";
 import { startScoutJob, canScoutGo, chooseNextTarget, getTarget, getTargetUnlocksAtLevel, isExplorationOpen, DEEP_SCAN_ID } from "./exploration.js";
 import { describeFind } from "./exploration-screen.js";
+import { showSurveyReport } from "./report.js";
 import { saveGame, loadGame, deleteSave, applyOfflineProgress, exportSave, importSave } from "./save.js";
 import { showLevelBanner } from "./banner.js";
 import { setupUI, buildFleetViews, render, addLog, formatNumber, formatXp, formatTonnes, formatDuration, formatPercent, showDevPanel } from "./ui.js";
@@ -613,11 +614,27 @@ function logScoutResult(result) {
   for (const line of lines) {
     addLog(line + ".", "explore");
   }
-  // Then each survey's line of lore
+  // Then each survey's line of lore, and the report pop-up
   for (const targetId of result.surveys) {
     addLog(getTarget(targetId).lore, "lore");
   }
+  showSurveyReport(surveyEntries(result.surveys));
   logLevelUps(result.skillId, result.newLevels);
+}
+
+// -------------------------------------------------------------
+// surveyEntries(targetIds)
+// What the survey report pop-up (report.js) shows for each survey:
+//   { title: "Ice moon",
+//     find: "Found an old fuel depot's unclaimed balance: 800 cr",
+//     lore: "Thick ice under a thin crust. ..." }
+// -------------------------------------------------------------
+function surveyEntries(targetIds) {
+  return targetIds.map((targetId) => {
+    const target = getTarget(targetId);
+    // "Found an abandoned ...": capital F, then the find's own words
+    return { title: target.name, find: `Found ${target.find}: ${describeFind(target)}`, lore: target.lore };
+  });
 }
 
 // refresh() - redraw straight away after a button press, and
@@ -882,10 +899,12 @@ function reportOfflineProgress(report, opening = null) {
   }
   addLog(message, "system");
 
-  // Each survey finished while away gets its line of lore.
+  // Each survey finished while away gets its line of lore, and
+  // they all come together in one survey report pop-up.
   for (const targetId of surveys) {
     addLog(getTarget(targetId).lore, "lore");
   }
+  showSurveyReport(surveyEntries(surveys));
 
   // Any level-ups while away get their own log lines after it.
   // levelsGained collects them per skill, e.g. { mining: [4, 5, 6] }.
