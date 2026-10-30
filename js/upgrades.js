@@ -65,19 +65,6 @@ export function getEffectMax(effect) {
 }
 
 // -------------------------------------------------------------
-// isShown(state, upgradeId)
-// The Industry tab only lists upgrades that are owned, or the
-// NEXT tier of their line (design doc: "showing only what is
-// available or next"). Furnace lining II stays hidden until
-// Furnace lining I is owned.
-// -------------------------------------------------------------
-export function isShown(state, upgradeId) {
-  const upgrade = UPGRADES[upgradeId];
-  return isOwned(state, upgradeId) || upgrade.requires === null || isOwned(state, upgrade.requires);
-}
-
-
-// -------------------------------------------------------------
 // canBuyIndustryUpgrade(state, upgradeId)
 // Checks every rule, in the order a player would want to know.
 // Returns { ok: true } or { ok: false, reason: "..." }.
@@ -142,4 +129,42 @@ export function getUpgradeUnlocksAtLevel(skillId, level) {
   return Object.keys(UPGRADES).filter(
     (id) => UPGRADES[id].skill === skillId && UPGRADES[id].level === level
   );
+}
+
+// -------------------------------------------------------------
+// getUpgradeLines()
+// The upgrades grouped into LINES - each tier that needs the one
+// before it, e.g. Furnace lining I -> II -> III - for the
+// Industry tab's collapsible groups. Worked out from each
+// upgrade's "requires", so the balance sheet needs nothing new.
+// Returns, in level order of each line's first tier:
+//   [{ id: "furnace_lining", name: "Furnace lining",
+//      building: "refinery", tiers: ["furnace_lining_1", ...] }, ...]
+// -------------------------------------------------------------
+export function getUpgradeLines() {
+  const lines = [];
+  // A line starts with an upgrade that needs nothing before it.
+  const firsts = Object.keys(UPGRADES)
+    .filter((id) => UPGRADES[id].requires === null)
+    .sort((a, b) => UPGRADES[a].level - UPGRADES[b].level);
+
+  for (const firstId of firsts) {
+    // Follow the chain: the next tier is whichever upgrade
+    // requires the last one in the line.
+    const tiers = [firstId];
+    let next = Object.keys(UPGRADES).find((id) => UPGRADES[id].requires === firstId);
+    while (next) {
+      tiers.push(next);
+      const last = next;
+      next = Object.keys(UPGRADES).find((id) => UPGRADES[id].requires === last);
+    }
+    lines.push({
+      id: firstId,
+      // "Furnace lining I" -> "Furnace lining" (drop the tier number)
+      name: UPGRADES[firstId].name.replace(/ I$/, ""),
+      building: UPGRADES[firstId].building,
+      tiers: tiers,
+    });
+  }
+  return lines;
 }

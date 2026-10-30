@@ -77,3 +77,7 @@ Type `damocles` anywhere on the page (not in a text box), or tap the game title 
 
 Any save that uses them gets a red **Playtest save** badge for good, so it's never mistaken for a real run.
 
+## Pacing simulator
+
+`node tests/pacing-sim.js` plays the real engine as a sensible, active early-game player (sells at home, buys the cheapest useful thing, sends ships to the best field) and prints when each Mining level and purchase happens, up to the refinery opening. Use it to try balance changes before making them.
+

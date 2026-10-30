@@ -18,7 +18,7 @@
 // =============================================================
 
 import { ITEMS, SHIP_TYPES, FIELDS, SKILLS, HULL_SIZES, COMMAND, HUB, HOME, HAUL_MODES, RECIPES, REFINERY, WORKSHOP_RECIPES, WORKSHOP, UPGRADES, SHIP_UPGRADES, SHIP_PARTS } from "../data/content.js";
-import { isOwned, isShown, canBuyIndustryUpgrade } from "./upgrades.js";
+import { isOwned, canBuyIndustryUpgrade, getUpgradeLines } from "./upgrades.js";
 import { gameNow, SPEEDS } from "./clock.js";
 import { getShipStats, getHullParts, getPartGrade, getPartBonus, getNextUpgrade, canBuyShipUpgrade, getUpgradeName, getHullShortName, findUpgrade, getBonusUpTo, getShipGrades, getPendingRefits } from "./ship-upgrades.js";
 import { getJobForShip, getJobPhase, getTripPlan, getHaulPlan, getOreInHold, getMiningXpShare } from "./jobs.js";
@@ -26,7 +26,7 @@ import { getLevel, getLevelProgress, isShipTypeUnlocked, isFieldUnlocked, getMin
 import { canBuyShip, canSellShip, getSellValue, getShipPrice, MAX_NAME_LENGTH } from "./shipyard.js";
 import { getShipPoints, getCommandCapacity, getCommandUsed, getNextUpgradeCost, canBuyUpgrade } from "./command.js";
 import { getCargoValue, getTradeXp } from "./trade.js";
-import { getBond, getSellable, getBondedInHold } from "./bonded.js";
+import { getBond, getSellable } from "./bonded.js";
 import { getShipArt } from "./art.js";
 import { getRoleGroups, describeGroup } from "./fleet-groups.js";
 import { isRefineryOpen, getRefineJob, getSlotCount, getSlotUnlockLevel, isRecipeUnlocked, getBatchMs, getBatchOutput, hasInputs, describeInputs, getMaxSlots } from "./refinery.js";
@@ -1186,99 +1186,132 @@ function buildWorkshop(actions) {
 
 // -------------------------------------------------------------
 // buildUpgrades(actions)
-// One row per upgrade, under a heading for the refinery and one
-// for the workshop. Each row has the name, what it does, its
-// cost, and a Buy button. render() hides rows that aren't owned
-// or next in their line, and greys out what can't be bought yet.
+// Under a heading for the refinery and one for the workshop, one
+// collapsible frame per upgrade LINE (Furnace lining I to III,
+// Smart queue...; see getUpgradeLines in upgrades.js), with a row
+// for every tier: name, what it does, cost and a Buy button.
 // -------------------------------------------------------------
 function buildUpgrades(actions) {
   const list = byId("upgrades-list");
   list.innerHTML = "";
 
   for (const building of ["refinery", "workshop"]) {
-    const heading = document.createElement("h3");
-    heading.className = "sub-title";
-    heading.textContent = building === "refinery" ? "Refinery" : "Workshop";
-    list.appendChild(heading);
+    // One heading per building, with that building's lines under it
+    const group = document.createElement("div");
+    group.className = "upgrade-building";
+    group.id = "upgrades-" + building;
+    group.innerHTML = `<h3 class="sub-title">${building === "refinery" ? "Refinery" : "Workshop"}</h3>`;
 
-    // Upgrades for this building, lowest level first
-    const ids = Object.keys(UPGRADES)
-      .filter((id) => UPGRADES[id].building === building)
-      .sort((a, b) => UPGRADES[a].level - UPGRADES[b].level);
-
-    for (const upgradeId of ids) {
-      const upgrade = UPGRADES[upgradeId];
-      // The cost, e.g. "20 t hull plating + 15,000 cr"
-      const goods = Object.entries(upgrade.costs)
-        .map(([itemId, tonnes]) => `${formatTonnes(tonnes)} ${ITEMS[itemId].name.toLowerCase()}`);
-      const cost = [...goods, formatNumber(upgrade.credits) + " cr"].join(" + ");
-
-      const row = document.createElement("div");
-      row.className = "upgrade-row";
-      row.id = "upgrade-" + upgradeId;
-      row.innerHTML = `
-        <div class="upgrade-text">
-          <div class="upgrade-name">${upgrade.name}
-            <span class="upgrade-level">${SKILLS[upgrade.skill].name} ${upgrade.level}</span></div>
-          <div class="upgrade-desc">${upgrade.description}</div>
-          <div class="upgrade-cost">${cost}</div>
-          <div class="upgrade-reason" data-part="reason"></div>
-        </div>
-        <button class="btn btn-small" data-part="buy">Buy</button>
+    for (const line of getUpgradeLines().filter((l) => l.building === building)) {
+      // One collapsible frame per line (Dan, 30 Oct), like the ship
+      // components menu: name and tally on top, every tier inside.
+      const frame = document.createElement("details");
+      frame.className = "component-group expandable upgrade-line";
+      frame.id = "upline-" + line.id;
+      frame.innerHTML = `
+        <summary class="component-summary">
+          <div class="component-head">
+            <span class="card-name">${line.name}</span>
+            <span class="component-tally" data-part="tally"></span>
+          </div>
+          <span class="expand-hint" aria-hidden="true"></span>
+        </summary>
+        <div class="component-body"></div>
       `;
-      part(row, "buy").addEventListener("click", () => {
-        const result = actions.buyIndustryUpgrade(upgradeId);
-        byId("upgrade-message").textContent = result.ok ? "" : `${upgrade.name}: ${result.reason}`;
-      });
-      list.appendChild(row);
+      const body = frame.querySelector(".component-body");
+
+      for (const upgradeId of line.tiers) {
+        const upgrade = UPGRADES[upgradeId];
+        // The cost, e.g. "20 t hull plating + 15,000 cr"
+        const goods = Object.entries(upgrade.costs)
+          .map(([itemId, tonnes]) => `${formatTonnes(tonnes)} ${ITEMS[itemId].name.toLowerCase()}`);
+        const cost = [...goods, formatNumber(upgrade.credits) + " cr"].join(" + ");
+
+        const row = document.createElement("div");
+        row.className = "upgrade-row";
+        row.id = "upgrade-" + upgradeId;
+        row.innerHTML = `
+          <div class="upgrade-text">
+            <div class="upgrade-name">${upgrade.name}
+              <span class="upgrade-level">${SKILLS[upgrade.skill].name} ${upgrade.level}</span></div>
+            <div class="upgrade-desc">${upgrade.description}</div>
+            <div class="upgrade-cost">${cost}</div>
+            <div class="upgrade-reason" data-part="reason"></div>
+          </div>
+          <button class="btn btn-small" data-part="buy">Buy</button>
+        `;
+        part(row, "buy").addEventListener("click", () => {
+          const result = actions.buyIndustryUpgrade(upgradeId);
+          byId("upgrade-message").textContent = result.ok ? "" : `${upgrade.name}: ${result.reason}`;
+        });
+        body.appendChild(row);
+      }
+      rememberOpenState(frame);
+      group.appendChild(frame);
     }
+    list.appendChild(group);
   }
 }
 
 
 // -------------------------------------------------------------
 // renderUpgrades(state)
-// Shows owned upgrades (marked Owned) and the next tier of each
-// line; hides later tiers. The Buy button is only clickable when
-// the upgrade can be bought; otherwise it says why on the row.
+// Every tier of every line, marked Owned, Buy, or Locked with
+// the reason; each line's tally ("1 of 3 owned · 1 ready to
+// buy") shows even while its frame is closed. The workshop's
+// lines appear once the workshop is open. Returns how many
+// upgrades can be bought right now (for the Industry nav dot).
 // -------------------------------------------------------------
 function renderUpgrades(state) {
   // Nothing to upgrade until the refinery is open.
   const panel = byId("upgrades-panel");
   panel.hidden = !isRefineryOpen(state);
+  byId("upgrades-workshop").hidden = !isWorkshopOpen(state);
 
   let owned = 0;
-  let ready = 0;   // shown, not owned, and can be bought right now
-  for (const upgradeId of Object.keys(UPGRADES)) {
-    const row = byId("upgrade-" + upgradeId);
-    row.hidden = !isShown(state, upgradeId);
-    const button = part(row, "buy");
-    const reason = part(row, "reason");
+  let ready = 0;   // can be bought right now (and its group is showing)
+  for (const line of getUpgradeLines()) {
+    const frame = byId("upline-" + line.id);
+    const showing = !panel.hidden && !frame.closest(".upgrade-building").hidden;
+    let lineOwned = 0;
+    let lineReady = 0;
 
-    if (isOwned(state, upgradeId)) {
-      owned++;
-      row.classList.add("owned");
-      if (button.textContent !== "Owned") button.textContent = "Owned";
-      button.disabled = true;
-      reason.textContent = "";
-      continue;
+    for (const upgradeId of line.tiers) {
+      const row = byId("upgrade-" + upgradeId);
+      const button = part(row, "buy");
+      const reason = part(row, "reason");
+
+      if (isOwned(state, upgradeId)) {
+        lineOwned++;
+        row.classList.add("owned");
+        row.classList.remove("blocked", "ready");
+        setText(button, "Owned");
+        button.disabled = true;
+        setText(reason, "");
+        continue;
+      }
+      row.classList.remove("owned");
+      const check = canBuyIndustryUpgrade(state, upgradeId);
+      // A later tier says "Locked" until the one before is owned.
+      const previous = UPGRADES[upgradeId].requires;
+      setText(button, previous === null || isOwned(state, previous) ? "Buy" : "Locked");
+      button.disabled = !check.ok;
+      // Why it can't be bought yet, e.g. "Need 12 t more hull plating."
+      row.classList.toggle("blocked", !check.ok);
+      row.classList.toggle("ready", check.ok);
+      setText(reason, check.ok ? "" : check.reason);
+      if (check.ok && showing) lineReady++;
     }
-    row.classList.remove("owned");
-    const check = canBuyIndustryUpgrade(state, upgradeId);
-    if (button.textContent !== "Buy") button.textContent = "Buy";
-    button.disabled = !check.ok;
-    // A row that can't be bought yet says why under its cost,
-    // e.g. "Need 12 t more hull plating."
-    row.classList.toggle("blocked", !check.ok);
-    // A row you can buy now is lit up, so it stands out in the list.
-    row.classList.toggle("ready", check.ok && !row.hidden);
-    if (check.ok && !row.hidden && !panel.hidden) ready++;
-    if (reason.textContent !== (check.ok ? "" : check.reason)) {
-      reason.textContent = check.ok ? "" : check.reason;
-    }
+
+    setText(part(frame, "tally"),
+      `${lineOwned} of ${line.tiers.length} owned` + (lineReady > 0 ? ` · ${lineReady} ready to buy` : ""));
+    frame.classList.toggle("has-ready", lineReady > 0);
+    owned += lineOwned;
+    ready += lineReady;
   }
-  // e.g. "3 of 15 owned · 2 ready to buy" - shows on the header even
-  // when the Upgrades box is closed.
+
+  // e.g. "3 of 15 owned · 2 ready to buy" - on the panel header,
+  // so it shows even when the Upgrades box is closed.
   setText(byId("upgrades-tag"),
     `${owned} of ${Object.keys(UPGRADES).length} owned` + (ready > 0 ? ` · ${ready} ready to buy` : ""));
   panel.classList.toggle("has-ready", ready > 0);
@@ -1592,16 +1625,22 @@ function navAlert(screen, on) {
 
 
 // -------------------------------------------------------------
-// showStock(row, amount, bonded)
-// Fills a cargo row's Stock cell: the amount, plus a small
-// "100 t bonded" line under it, hidden when nothing is bonded.
-// Used by both the Command cargo hold and the Industry hold.
+// showStock(row, amount, bond)
+// Fills a cargo row's Stock cell: the amount, plus a small line
+// under it with the BOND you set (Dan, 30 Oct: show the bond
+// itself, not just how much of it is in the hold). When the hold
+// has less than the bond, it also says how much is still to come:
+//   120 t / 100 t bonded
+//    40 t / 100 t bonded · 60 t short
+// Hidden when nothing is bonded. Used by both the Command cargo
+// hold and the Industry hold.
 // -------------------------------------------------------------
-function showStock(row, amount, bonded) {
+function showStock(row, amount, bond) {
   part(row, "stock").textContent = formatTonnes(amount);
   const note = part(row, "bonded");
-  note.hidden = bonded === 0;
-  note.textContent = formatTonnes(bonded) + " bonded";
+  note.hidden = bond === 0;
+  const short = bond - amount;
+  setText(note, formatTonnes(bond) + " bonded" + (short > 0 ? ` · ${formatTonnes(short)} short` : ""));
 }
 
 // Credits and the cargo hold
@@ -1612,13 +1651,13 @@ function renderCargo(state) {
     const row = byId("cargo-" + itemId);
     const amount = state.inventory[itemId] || 0;
     const sellable = getSellable(state, itemId);         // above the bond
-    const bonded = getBondedInHold(state, itemId);       // held back by it
+    const bond = getBond(state, itemId);                 // the bond you set
 
     // The stock, e.g. "120 t", and under it "100 t bonded" when
     // some of it is bonded. (Once these were on one line, which
     // made the column too wide and pushed the Value and Sell
     // columns out of the panel.)
-    showStock(row, amount, bonded);
+    showStock(row, amount, bond);
     // Only the part that can be sold is worth anything here.
     // Short form ("2.4M cr") so big values fit the narrow panel.
     part(row, "value").textContent = formatCreditsShort(sellable * item.sellPrice);
@@ -1628,7 +1667,7 @@ function renderCargo(state) {
 
     // The same on the Industry screen's station hold, with its bond
     const holdRow = byId("hold-" + itemId);
-    showStock(holdRow, amount, bonded);
+    showStock(holdRow, amount, bond);
     holdRow.classList.toggle("empty", amount === 0 && getBond(state, itemId) === 0);
     const input = part(holdRow, "bond");
     if (!input.dataset.editing && document.activeElement !== input) {

@@ -34,7 +34,7 @@ import { getMiningDrillPerk, getTradeHubPerk, getLevelPerk } from "../js/skills.
 import { SHIP_UPGRADES } from "../data/content.js";
 import { getShipArt } from "../js/art.js";
 import { getBond, getSellable, getBondedInHold, setBond } from "../js/bonded.js";
-import { isOwned, getEffect, canBuyIndustryUpgrade, buyIndustryUpgrade, isShown } from "../js/upgrades.js";
+import { isOwned, getEffect, canBuyIndustryUpgrade, buyIndustryUpgrade, getUpgradeLines } from "../js/upgrades.js";
 import { addItemWithCarry } from "../js/state.js";
 import { UPGRADES } from "../data/content.js";
 import { getMaxSlots, getBatchOutput } from "../js/refinery.js";
@@ -2353,13 +2353,20 @@ test("Bonded goods can pay for upgrades", () => {
   assert.equal(buyIndustryUpgrade(state, "furnace_lining_1").ok, true);
 });
 
-test("Only owned upgrades and the next tier of each line are shown", () => {
-  const state = richGame(40, 1);
-  assert.equal(isShown(state, "furnace_lining_1"), true);
-  assert.equal(isShown(state, "furnace_lining_2"), false);     // hidden until I is owned
-  buyIndustryUpgrade(state, "furnace_lining_1");
-  assert.equal(isShown(state, "furnace_lining_2"), true);
-  assert.equal(isShown(state, "furnace_lining_3"), false);
+test("Upgrade lines: every upgrade is in exactly one line, tiers in order", () => {
+  // The Industry tab groups upgrades into these collapsible lines.
+  const lines = getUpgradeLines();
+  const furnace = lines.find((l) => l.id === "furnace_lining_1");
+  assert.equal(furnace.name, "Furnace lining");
+  assert.deepEqual(furnace.tiers, ["furnace_lining_1", "furnace_lining_2", "furnace_lining_3"]);
+  assert.deepEqual(lines.find((l) => l.id === "smart_queue").tiers, ["smart_queue"]);
+  // No upgrade lost or counted twice
+  const all = lines.flatMap((l) => l.tiers).sort();
+  assert.deepEqual(all, Object.keys(UPGRADES).sort());
+  // Each tier needs the one before it
+  for (const line of lines) {
+    line.tiers.forEach((id, i) => assert.equal(UPGRADES[id].requires, i === 0 ? null : line.tiers[i - 1]));
+  }
 });
 
 test("Furnace linings make refinery batches 10% faster each, on top of levels", () => {
