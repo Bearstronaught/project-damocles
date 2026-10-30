@@ -10,14 +10,21 @@
 // new contract CONTRACTS.refillMinutes later.
 //
 // Kinds of contract (CONTRACT_KINDS in content.js):
-//   deliver   hand goods over from the hold (a button press)
-//   charter   lend a mining ship: its hauls from \
-//             one field go to the client        |  these finish by
-//   survey    survey one target                 |  themselves, as the
-//   deepScan  run some deep scans              /   work gets done
+//   deliver   hand goods over from the hold
+//   charter   lend a mining ship: its hauls from one field go to
+//             the client
+//   toll      lend a refinery slot: it smelts the client's ore,
+//             and the metal goes to them ("toll smelting")
+//   survey    survey one target
+//   deepScan  run some deep scans
 // (Mining and smelting quotas, where you kept the goods, were
-// replaced by charters on 30 Oct: Dan felt "you keep the ore"
-// didn't work as a story.)
+// replaced by charters and toll smelting on 30 Oct: Dan felt "you
+// keep the ore" didn't work as a story.)
+//
+// EVERY CONTRACT IS HANDED IN BY HAND (Dan, 30 Oct): when the
+// work is done it waits on the board, ready, until the player
+// presses Hand in. (A contract manager that does this for you is
+// planned as a later upgrade.)
 //
 // Every contract is posted by a FACTION (CONTRACT_FACTIONS), and
 // finishing it pays credits and REPUTATION with that faction.
@@ -47,14 +54,16 @@
 //     client: "A belt co-op",
 //     shipId: "ship-2",               charters only: the ship lent
 //                                     (null until the player picks one)
-//     delivered: 120,                 charters only: tonnes handed over
+//     refinerySlot: 1,                toll smelting only: the slot lent
+//                                     (null until the player picks one)
+//     delivered: 120,                 charters and tolls: tonnes handed over
 //   }
 // =============================================================
 
 import { CONTRACT_KINDS, CONTRACT_CLIENTS, CONTRACT_FACTIONS, REPUTATION_TIERS, CONTRACTS, FIELDS, RECIPES, WORKSHOP_RECIPES, ITEMS, SURVEY_TARGETS, SHIP_TYPES } from "../data/content.js";
 import { getLevel, isFieldUnlocked, addXp } from "./skills.js";
 import { getSellable } from "./bonded.js";
-import { isRefineryOpen, isRecipeUnlocked } from "./refinery.js";
+import { isRefineryOpen, isRecipeUnlocked, getSlotCount as getRefinerySlotCount, getRefineJob, endTollJob, startWaitingBatches } from "./refinery.js";
 import { isWorkshopOpen, isWorkshopRecipeUnlocked } from "./workshop.js";
 import { isSurveyed, isExplorationOpen, rollFor } from "./exploration.js";
 
@@ -134,7 +143,7 @@ export function getSubjects(state, kindId, allowRepeats = false) {
   const kind = CONTRACT_KINDS[kindId];
   let subjects = [];
 
-  if (kind.kind === "deliver" || kind.kind === "charter") {
+  if (kind.kind === "deliver" || kind.kind === "charter" || kind.kind === "toll") {
     // Goods the player can get: ore from fields they can mine,
     // metal from recipes they have, products likewise.
     if (kind.goods === "ore") {
@@ -173,6 +182,7 @@ export function getSubjects(state, kindId, allowRepeats = false) {
     }
   }
 
+  if (kind.kind === "toll" && kind.goods !== "metal") subjects = [];   // only metal is smelted
   if (kind.kind === "charter" && !state.ships.some((ship) => SHIP_TYPES[ship.type].role === "mining")) {
     subjects = [];   // nothing to lend (every barge sold)
   }
@@ -286,6 +296,10 @@ export function postContract(state, slotIndex) {
     contract.shipId = null;      // the player picks a ship on the card
     contract.delivered = 0;
   }
+  if (kind.kind === "toll") {
+    contract.refinerySlot = null;   // the player picks a slot on the card
+    contract.delivered = 0;
+  }
   slot.contract = contract;
   slot.readyAt = null;
   return { kind: "posted", slot: slotIndex, contract, trips: 1, xpGained: 0, newLevels: [] };
@@ -331,39 +345,55 @@ export function getProgress(state, contract) {
   let have;
   if (kind === "deliver") have = getSellable(state, contract.itemId);
   else if (kind === "survey") have = isSurveyed(state, contract.targetId) ? 1 : 0;
-  else if (kind === "charter") have = contract.delivered;
+  else if (kind === "charter" || kind === "toll") have = contract.delivered;
   else have = getCounter(state, contract.kindId, contract) - contract.baseline;
   return { have: Math.min(have, contract.amount), need: contract.amount };
 }
 
 // -------------------------------------------------------------
-// canDeliver(state, slotIndex)
-// Can the player hand this delivery over now? { ok, reason }
+// canHandIn(state, slotIndex)
+// Can the player hand this contract in now? { ok, reason }
+//   delivery: the goods are in the hold (not counting bonded stock)
+//   anything else: the work is done
 // -------------------------------------------------------------
-export function canDeliver(state, slotIndex) {
+export function canHandIn(state, slotIndex) {
   const contract = state.contracts.slots[slotIndex]?.contract;
   if (!contract) return { ok: false, reason: "No contract here." };
-  if (CONTRACT_KINDS[contract.kindId].kind !== "deliver") {
-    return { ok: false, reason: "This one finishes by itself when the work is done." };
+  const kind = CONTRACT_KINDS[contract.kindId].kind;
+  if (kind === "deliver") {
+    const have = getSellable(state, contract.itemId);
+    if (have < contract.amount) {
+      return { ok: false, reason: `Need ${contract.amount - have} t more ${ITEMS[contract.itemId].name.toLowerCase()}.` };
+    }
+    return { ok: true };
   }
-  const have = getSellable(state, contract.itemId);
-  if (have < contract.amount) {
-    return { ok: false, reason: `Need ${contract.amount - have} t more ${ITEMS[contract.itemId].name.toLowerCase()}.` };
-  }
+  const progress = getProgress(state, contract);
+  if (progress.have < progress.need) return { ok: false, reason: "The work isn't done yet." };
   return { ok: true };
 }
 
 // -------------------------------------------------------------
-// deliverContract(state, slotIndex, now)
-// The player hands a delivery over: the goods leave the hold and
-// the contract pays. Returns the result (see completeContract),
-// or null if it couldn't be delivered.
+// handInContract(state, slotIndex, now)
+// The player hands a contract in: a delivery's goods leave the
+// hold, and the contract pays. Returns the result (see
+// completeContract), or null if it can't be handed in yet.
 // -------------------------------------------------------------
-export function deliverContract(state, slotIndex, now) {
-  if (!canDeliver(state, slotIndex).ok) return null;
+export function handInContract(state, slotIndex, now) {
+  if (!canHandIn(state, slotIndex).ok) return null;
   const contract = state.contracts.slots[slotIndex].contract;
-  state.inventory[contract.itemId] -= contract.amount;
+  if (CONTRACT_KINDS[contract.kindId].kind === "deliver") {
+    state.inventory[contract.itemId] -= contract.amount;
+  }
   return completeContract(state, slotIndex, now);
+}
+
+// -------------------------------------------------------------
+// isReady(state, contract)
+// Done and waiting to be handed in? (For the screen's highlight,
+// the nav dot and the "contract ready" banner.)
+// -------------------------------------------------------------
+export function isReady(state, slotIndex) {
+  return canHandIn(state, slotIndex).ok;
 }
 
 // -------------------------------------------------------------
@@ -376,6 +406,9 @@ export function discardContract(state, slotIndex, now) {
   if (!slot || !slot.contract) return false;
   // A chartered ship is simply free again: hauls already handed
   // over stay handed over (and unpaid), the rest are yours.
+  // A lent refinery slot goes back to its own recipe; a batch of
+  // the client's ore in the furnace goes back to them unfinished.
+  endToll(state, slot.contract);
   slot.contract = null;
   slot.readyAt = now + CONTRACTS.refillMinutes * 60 * 1000;
   return true;
@@ -448,7 +481,10 @@ export function getContractXp(state, contract) {
 // -------------------------------------------------------------
 export function getCharter(state, shipId) {
   for (const slot of state.contracts.slots) {
-    if (slot.contract && slot.contract.shipId === shipId) return slot.contract;
+    const contract = slot.contract;
+    // Once its tonnes are handed over the ship is free, even while
+    // the contract waits to be handed in.
+    if (contract && contract.shipId === shipId && contract.delivered < contract.amount) return contract;
   }
   return null;
 }
@@ -506,6 +542,109 @@ export function takeCharterHaul(state, contractNumber, tonnes) {
 
 
 // =============================================================
+// TOLL SMELTING: lending a refinery slot (30 Oct)
+// -------------------------------------------------------------
+// The client sends their own ore; the player lends one refinery
+// slot, picked on the card. That slot smelts the contract's metal
+// from the CLIENT'S ore (none of yours is used) and the metal goes
+// to them until the tonnes are made; Refining XP is earned as
+// usual. Then the slot goes back to the recipe it was running
+// before (or stops, if it was idle). The batches themselves run in
+// refinery.js, which looks for job.toll.
+// =============================================================
+
+// -------------------------------------------------------------
+// getToll(state, refinerySlot)
+// The toll contract this refinery slot is lent to, or null.
+// -------------------------------------------------------------
+export function getToll(state, refinerySlot) {
+  for (const slot of state.contracts.slots) {
+    const contract = slot.contract;
+    if (contract && contract.refinerySlot === refinerySlot && contract.delivered < contract.amount) return contract;
+  }
+  return null;
+}
+
+// The recipe that makes a metal, e.g. "iron_bar" for iron bars.
+export function getRecipeFor(itemId) {
+  return Object.keys(RECIPES).find((recipeId) => RECIPES[recipeId].output === itemId);
+}
+
+// -------------------------------------------------------------
+// canLendSlot(state, slotIndex, refinerySlot)
+// Can this refinery slot take this toll contract? { ok, reason }
+// -------------------------------------------------------------
+export function canLendSlot(state, slotIndex, refinerySlot) {
+  const contract = state.contracts.slots[slotIndex]?.contract;
+  if (!contract || CONTRACT_KINDS[contract.kindId].kind !== "toll") {
+    return { ok: false, reason: "This isn't toll smelting." };
+  }
+  if (contract.refinerySlot !== null) return { ok: false, reason: "A slot is already on this contract." };
+  if (!isRefineryOpen(state)) return { ok: false, reason: "The refinery isn't open." };
+  if (!(refinerySlot >= 0 && refinerySlot < getRefinerySlotCount(state))) return { ok: false, reason: "Pick a refinery slot." };
+  if (getToll(state, refinerySlot)) return { ok: false, reason: `Slot ${refinerySlot + 1} is already smelting for a client.` };
+  return { ok: true };
+}
+
+// -------------------------------------------------------------
+// lendSlot(state, slotIndex, refinerySlot, now)
+// Lends the refinery slot. Whatever it was making stops (any ore
+// in a half-done batch of yours goes back into the hold, as when
+// you change a recipe), and the client's batches start at once.
+// Returns { ok, reason }.
+// -------------------------------------------------------------
+export function lendSlot(state, slotIndex, refinerySlot, now) {
+  const check = canLendSlot(state, slotIndex, refinerySlot);
+  if (!check.ok) return check;
+  const contract = state.contracts.slots[slotIndex].contract;
+
+  // Remember the slot's own recipe, to go back to afterwards.
+  const current = getRefineJob(state, refinerySlot);
+  const ownRecipe = current ? current.recipeId : null;
+  if (current) {
+    if (current.status === "working" && current.inputs) {
+      for (const [itemId, amount] of Object.entries(current.inputs)) {
+        state.inventory[itemId] = (state.inventory[itemId] || 0) + amount;   // your ore back
+      }
+    }
+    state.jobs = state.jobs.filter((job) => job !== current);
+  }
+
+  contract.refinerySlot = refinerySlot;
+  state.jobs.push({
+    id: "refine-slot-" + refinerySlot,
+    type: "refine",
+    slot: refinerySlot,
+    recipeId: getRecipeFor(contract.itemId),
+    status: "waiting",       // refinery.js starts it (no ore needed from you)
+    startedAt: now,
+    durationMs: 0,
+    inputs: null,
+    repeat: true,
+    toll: contract.number,   // the client's: see refinery.js
+    afterToll: ownRecipe,    // what to go back to
+  });
+  // The client's ore is here already: the first batch starts now.
+  startWaitingBatches(state, now);
+  return { ok: true };
+}
+
+// -------------------------------------------------------------
+// endToll(state, contract)
+// The slot lent to this contract goes back to its own recipe (or
+// stops). Called when the tonnes are made (refinery.js, through
+// the job) and when the contract is discarded. A batch of the
+// client's ore that's still in the furnace is dropped: it was
+// theirs. Safe to call for any contract.
+// -------------------------------------------------------------
+export function endToll(state, contract) {
+  if (!contract) return;
+  const job = state.jobs.find((j) => j.type === "refine" && j.toll === contract.number);
+  if (job) endTollJob(state, job);   // (refinery.js)
+}
+
+
+// =============================================================
 // HOW MANY SLOTS: the Diplomacy skill (30 Oct)
 // -------------------------------------------------------------
 // The board starts with CONTRACTS.slots (3), shared by every
@@ -525,9 +664,9 @@ export function getSlotCount(state) {
 // -------------------------------------------------------------
 // checkContracts(state, time)
 // Runs after every event in the timeline (and once at the start):
-//   - work contracts whose work is now done are paid out
+//   - a Diplomacy level may have added a slot to the board
 //   - slots never posted to (a new board) get a contract now
-// Returns a list of results (finished and posted contracts).
+// Returns a list of results (newly posted contracts).
 // -------------------------------------------------------------
 export function checkContracts(state, time) {
   const results = [];
@@ -539,15 +678,8 @@ export function checkContracts(state, time) {
     state.contracts.slots.push({ contract: null, readyAt: null });
   }
 
-  state.contracts.slots.forEach((slot, index) => {
-    const contract = slot.contract;
-    if (contract && CONTRACT_KINDS[contract.kindId].kind !== "deliver") {
-      const progress = getProgress(state, contract);
-      if (progress.have >= progress.need) {
-        results.push(completeContract(state, index, time));
-      }
-    }
-  });
+  // (Finished work isn't paid out here any more: every contract
+  // waits to be handed in by hand. See handInContract.)
 
   // Empty slots that have never had a contract (readyAt null) are
   // filled at once. (Slots waiting after a finished or discarded

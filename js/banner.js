@@ -14,7 +14,7 @@
 //     sliding (handled in css/style.css)
 // =============================================================
 
-const SHOW_MS = 3000;   // how long each banner stays on screen
+const SHOW_MS = 4500;   // how long each banner stays on screen (was 3s; Dan, 30 Oct: a little longer)
 const MOVE_MS = 350;    // how long it takes to slide in or out
                         // (matches the transition in style.css)
 

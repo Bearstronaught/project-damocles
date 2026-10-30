@@ -109,6 +109,7 @@ export const BALANCE = {
     mining_charter: { kind: 'charter', goods: 'ore', weight: 3, amount: 300, pay: 1.4, reputation: 15, xp: 40 },
     survey_request: { kind: 'survey', goods: 'none', weight: 2, amount: 1, pay: 120, reputation: 15, xp: 35 },
     deep_scan_contract: { kind: 'deepScan', goods: 'none', weight: 1, amount: 3, pay: 150, reputation: 10, xp: 30 },
+    toll_smelting: { kind: 'toll', goods: 'metal', weight: 3, amount: 90, pay: 0.5, reputation: 15, xp: 40 },
   },
   reputationTiers: [
     { from: 0, size: 1 },

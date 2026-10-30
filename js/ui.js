@@ -388,7 +388,11 @@ function getPartLabels(state, typeId, grades = getGrades(state, typeId), pending
 // is, and after a scroll or a redraw we look again at what's
 // under it (recheckTip).
 // -------------------------------------------------------------
-const TIP_TARGETS = "[data-tip-title], [data-tip-item]";
+const TIP_TARGETS = "[data-tip-title], [data-tip-item], .route-track";
+
+// The pointer's last spot across the screen (mouse or finger), so a
+// trip bar knows which segment it's over (see show, below).
+let pointerX = 0;
 
 // Where the mouse was last seen ({x, y}), or null when the last
 // pointer was a finger or the mouse has left the page.
@@ -402,11 +406,32 @@ function setupTips(actions) {
   const tip = byId("hardpoint-tip");
 
   function show(marker) {
+    // A trip bar: the segment under the pointer, left to right. (The
+    // whole bar is the target, with a little room above and below,
+    // because the segments are only 8 pixels tall: easy to miss.)
+    if (marker.classList.contains("route-track")) {
+      const segment = [...marker.querySelectorAll(".seg")].find((seg) => {
+        const box = seg.getBoundingClientRect();
+        return seg.dataset.tipSeg && box.width > 0 && pointerX >= box.left - 2 && pointerX <= box.right + 2;
+      });
+      if (!segment) {
+        hide();
+        return;
+      }
+      marker = segment;
+    }
+
     // An item's tip is worked out now, from the game as it is
     // (levels and upgrades change batch times and amounts).
-    const [title, detail] = marker.dataset.tipItem
-      ? itemTip(actions.getState(), marker.dataset.tipItem)
-      : [marker.dataset.tipTitle, marker.dataset.tip];
+    // A trip segment's tip is worked out now too (its countdown).
+    let title, detail;
+    if (marker.dataset.tipSeg) {
+      [title, detail] = segmentTip(actions.getState(), marker);
+    } else if (marker.dataset.tipItem) {
+      [title, detail] = itemTip(actions.getState(), marker.dataset.tipItem);
+    } else {
+      [title, detail] = [marker.dataset.tipTitle, marker.dataset.tip];
+    }
     tip.querySelector("b").textContent = title;
     tip.querySelector("span").textContent = detail;
     tip.hidden = false;
@@ -441,7 +466,12 @@ function setupTips(actions) {
   // Keep track of the mouse. "clientX/Y" is its spot on the screen.
   document.addEventListener("pointermove", (event) => {
     mouseAt = event.pointerType === "mouse" ? { x: event.clientX, y: event.clientY } : null;
+    pointerX = event.clientX;
   });
+  // A tap has no "move" before it: note where it landed.
+  document.addEventListener("pointerdown", (event) => {
+    pointerX = event.clientX;
+  }, true);
   // The mouse left the window: nothing is under it any more.
   document.documentElement.addEventListener("pointerleave", () => {
     mouseAt = null;
@@ -454,6 +484,7 @@ function setupTips(actions) {
   // and their "pointer left" would hide the box straight away.
   document.addEventListener("pointerover", (event) => {
     if (event.pointerType !== "mouse") return;
+    pointerX = event.clientX;   // (this can come before the pointermove)
     const marker = event.target.closest && event.target.closest(TIP_TARGETS);
     if (marker) show(marker);
   });
@@ -760,20 +791,69 @@ function routeTracker() {
 
 
 // -------------------------------------------------------------
-// setRoute(card, segments)
+// setRoute(card, segments, startedAt)
 // Sizes and styles the four route segments. "segments" lists
-// [style, lengthMs] in order, e.g. for a barge:
-//   [["out", 45000], ["mine", 60000], ["back", 45000], ["dock", 6000]]
+// [style, lengthMs, name] in order, e.g. for a barge:
+//   [["out", 45000, "Outbound to the Inner Belt"],
+//    ["mine", 60000, "Mining at the Inner Belt"], ...]
 // The style picks the colour (seg-out, seg-mine, seg-back,
 // seg-dock in style.css).
+//
+// HOVERING A SEGMENT (Dan, 30 Oct) shows its name, how long it
+// takes and how far along it is (segmentTip). So each segment
+// remembers its name, where it starts in the trip and how long it
+// is, plus when the trip started ("startedAt"; null when the ship
+// is docked and the bar is only a preview of its next trip).
 // -------------------------------------------------------------
-function setRoute(card, segments) {
-  segments.forEach(([style, lengthMs], i) => {
+function setRoute(card, segments, startedAt = null) {
+  let offset = 0;   // where this segment starts, in ms from the trip's start
+  segments.forEach(([style, lengthMs, name], i) => {
     const segment = part(card, "seg-" + i);
     const className = "seg seg-" + style;
     if (segment.className !== className) segment.className = className;
     segment.style.flexGrow = lengthMs;
+    // For the tooltip (data-... values are always text)
+    segment.dataset.tipSeg = name || "";
+    segment.dataset.segFrom = offset;
+    segment.dataset.segLength = lengthMs;
+    segment.dataset.tripStart = startedAt === null ? "" : startedAt;
+    offset += lengthMs;
   });
+  // The whole trip's length, for "docks in" (on the bar itself)
+  part(card, "route").dataset.tripLength = offset;
+}
+
+// -------------------------------------------------------------
+// segmentTip(state, segment)
+// What hovering a trip segment says, as [title, detail], e.g.
+//   ["Mining at the Inner Belt", "1m 0s · 24s left · docks in 1m 33s"]
+//   ["Flying home", "45s · starts in 1m 24s · docks in 2m 9s"]
+//   ["Outbound to the Inner Belt", "45s · done · docks in 1m 2s"]
+//   ["Mining at the Inner Belt", "1m 0s · next trip, when dispatched"]
+// Worked out each time it's shown, so the countdown stays live
+// (the tooltip is re-shown 4 times a second while hovered).
+// -------------------------------------------------------------
+function segmentTip(state, segment) {
+  const name = segment.dataset.tipSeg;
+  const length = Number(segment.dataset.segLength);
+  const lengthText = formatDuration(length);
+
+  // Docked: the bar is a preview of the next trip
+  if (segment.dataset.tripStart === "") {
+    return [name, `${lengthText} · next trip, when dispatched`];
+  }
+
+  const now = gameNow(state);
+  const tripStart = Number(segment.dataset.tripStart);
+  const start = tripStart + Number(segment.dataset.segFrom);
+  const end = start + length;
+  const tripEnd = tripStart + Number(segment.closest("[data-trip-length]").dataset.tripLength);
+
+  let where;
+  if (now >= end) where = "done";
+  else if (now >= start) where = `${formatDuration(end - now)} left`;
+  else where = `starts in ${formatDuration(start - now)}`;
+  return [name, `${lengthText} · ${where} · docks in ${formatDuration(Math.max(0, tripEnd - now))}`];
 }
 
 
@@ -1954,11 +2034,11 @@ function renderFleet(state, now) {
     renderSpecs(state, ship, card);
     const timing = job || getTripPlan(state, ship.type, fieldId);
     setRoute(card, [
-      ["out", timing.outboundMs],
-      ["mine", timing.miningMs],
-      ["back", timing.returnMs],
-      ["dock", timing.unloadMs || 0],   // unloading at home
-    ]);
+      ["out", timing.outboundMs, `Outbound to the ${fieldName}`],
+      ["mine", timing.miningMs, `Mining at the ${fieldName}`],
+      ["back", timing.returnMs, "Flying home"],
+      ["dock", timing.unloadMs || 0, "Unloading at home"],
+    ], job ? job.startedAt : null);
 
     const fills = part(card, "route").querySelectorAll(".seg-fill");
     const status = part(card, "status");
@@ -2103,11 +2183,11 @@ function renderFreighterCard(state, ship, card, now) {
   part(card, "route-field").textContent = HUB.name;
   const timing = job || getHaulPlan(state, ship.type);
   setRoute(card, [
-    ["dock", timing.loadMs || 0],   // loading at home
-    ["out", timing.outboundMs],
-    ["mine", timing.tradeMs],       // unloading and selling at the hub
-    ["back", timing.returnMs],
-  ]);
+    ["dock", timing.loadMs || 0, "Loading at home"],
+    ["out", timing.outboundMs, `Outbound to the ${HUB.name}`],
+    ["mine", timing.tradeMs, `Selling at the ${HUB.name}`],
+    ["back", timing.returnMs, "Flying home"],
+  ], job && job.status === "travelling" ? job.startedAt : null);   // (a freighter waiting to load hasn't set off)
 
   const fills = part(card, "route").querySelectorAll(".seg-fill");
   const status = part(card, "status");
@@ -2190,12 +2270,13 @@ function renderScoutCard(state, ship, card, now) {
 
   // The tracker: out, scan, back (and no dock stop: nothing to unload)
   const timing = job || getScoutPlan(state, ship.type, targetId);
+  const targetName = targetId === DEEP_SCAN_ID ? "a deep scan" : getTarget(targetId).name;
   setRoute(card, [
-    ["out", timing.outboundMs],
-    ["mine", timing.scanMs],        // the scan, hatched like mining
-    ["back", timing.returnMs],
-    ["dock", 0],
-  ]);
+    ["out", timing.outboundMs, `Outbound to ${targetName}`],
+    ["mine", timing.scanMs, "Scanning"],          // hatched like mining
+    ["back", timing.returnMs, "Flying home"],
+    ["dock", 0, ""],                               // (no stop: nothing to unload)
+  ], job ? job.startedAt : null);
 
   const fills = part(card, "route").querySelectorAll(".seg-fill");
   const status = part(card, "status");
@@ -2534,6 +2615,10 @@ function renderRefinery(state, now) {
     const job = getRefineJob(state, slot);
     const chosen = job ? job.recipeId : "";
     if (select.value !== chosen) select.value = chosen;
+    // Lent to a client (toll smelting): its recipe can't be changed
+    // until the client's metal is made (contracts.js).
+    const tolled = Boolean(job && job.toll !== undefined);
+    if (select.disabled !== tolled) select.disabled = tolled;
 
     // --- Off: nothing to show but a hint ---
     if (!job) {
@@ -2557,8 +2642,10 @@ function renderRefinery(state, now) {
     if (job.status === "working") {
       const elapsed = Math.min(Math.max(now - job.startedAt, 0), job.durationMs);
       bar.style.width = (elapsed / job.durationMs * 100) + "%";
-      tag.textContent = "Working";
-      status.textContent = `Smelting ${recipe.name.toLowerCase()} — ${formatDuration(job.durationMs - elapsed)} left`;
+      tag.textContent = tolled ? "For a client" : "Working";
+      status.textContent = tolled
+        ? `Toll smelting ${recipe.name.toLowerCase()} from a client's ore — ${formatDuration(job.durationMs - elapsed)} left`
+        : `Smelting ${recipe.name.toLowerCase()} — ${formatDuration(job.durationMs - elapsed)} left`;
       box.classList.add("busy");
       box.classList.remove("waiting");
     } else {

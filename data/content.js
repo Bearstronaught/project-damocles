@@ -664,8 +664,9 @@ export const EXPLORATION = {
 //   amount     a typical size at the first reputation tier: tonnes,
 //              surveys or deep scans. Each contract is between 75%
 //              and 125% of it, times the tier's size.
-//   pay        deliver/charter: times the goods' home price per
-//              tonne (1.5 = half as much again as selling it).
+//   pay        deliver/charter/toll: times the goods' home price per
+//              tonne (1.5 = half as much again as selling it; a
+//              toll's 0.5 is for smelting only, the ore is theirs).
 //              survey: credits per Exploration level of the target,
 //              plus 4 levels' worth. deepScan: credits per scan.
 //   reputation what it earns with the faction that posted it
@@ -686,6 +687,10 @@ const CONTRACT_WORDS = {
   mining_charter: {
     title: "Mining charter",
     text: "{client} has a buyer but no barge. Lend them one of your mining ships to work the {field}: its hauls are theirs until {amount} of {item} is handed over.",
+  },
+  toll_smelting: {
+    title: "Toll smelting",
+    text: "{client} has ore but no furnace. Lend them a refinery slot to smelt {amount} of {item} from their ore; the metal is theirs, and none of your ore is used.",
   },
   survey_request: {
     title: "Survey request",

@@ -38,7 +38,7 @@ import { canBuyShipUpgrade, buyShipUpgrade } from "../js/ship-upgrades.js";
 import { setRecipe, getRefineJob, getSlotCount, isRecipeUnlocked } from "../js/refinery.js";
 import { getCommandFree } from "../js/command.js";
 import { startScoutJob, chooseNextTarget, getTarget } from "../js/exploration.js";
-import { canDeliver, deliverContract, canCharter, charterShip, getCharter } from "../js/contracts.js";
+import { canHandIn, handInContract, canCharter, charterShip, getCharter, canLendSlot, lendSlot } from "../js/contracts.js";
 const getCharterField = (state, shipId) => getCharter(state, shipId)?.fieldId;
 import { CONTRACT_KINDS } from "../data/content.js";
 
@@ -104,15 +104,17 @@ export function simulate(hours, untilMiningLevel, hourly = null, explore = true)
     }
     lastDiplomacy = diplomacy;
 
-    // 0. Hand over any delivery contract it has the goods for
-    //    (before selling them), and note contracts that finished
+    // 0. Hand in every contract that's ready (by hand since 30 Oct;
+    //    an active player checks the board), deliveries before
+    //    their goods are sold
     for (let slot = 0; slot < state.contracts.slots.length; slot++) {
-      if (canDeliver(state, slot).ok) {
-        const done = deliverContract(state, slot, now);
+      if (canHandIn(state, slot).ok) {
+        const done = handInContract(state, slot, now);
         earnedThisHour += done.credits;
-        events.push({ minute, text: `contract: delivered ${done.contract.kindId} (${done.credits.toLocaleString("en-GB")} cr)`, goal: true });
+        events.push({ minute, text: `contract: handed in ${done.contract.kindId} (${done.credits.toLocaleString("en-GB")} cr)`, goal: true });
       }
     }
+
     // 0b. Lend a mining ship to any charter waiting for one. A
     //     sensible player does: it pays 1.4x the ore's home price.
     for (let slot = 0; slot < state.contracts.slots.length; slot++) {
@@ -124,14 +126,24 @@ export function simulate(hours, untilMiningLevel, hourly = null, explore = true)
         events.push({ minute, text: `chartered ${free.name} to the ${FIELDS[contract.fieldId].name} (${contract.amount} t)` });
       }
     }
+    // 0c. Lend a refinery slot to any toll smelting contract (the
+    //     first free slot; it goes back to its own recipe after)
+    for (let slot = 0; slot < state.contracts.slots.length; slot++) {
+      const contract = state.contracts.slots[slot].contract;
+      if (!contract || CONTRACT_KINDS[contract.kindId].kind !== "toll" || contract.refinerySlot !== null) continue;
+      for (let refinerySlot = 0; refinerySlot < 3; refinerySlot++) {
+        if (canLendSlot(state, slot, refinerySlot).ok) {
+          lendSlot(state, slot, refinerySlot, now);
+          events.push({ minute, text: `lent refinery slot ${refinerySlot + 1} for toll smelting (${contract.amount} t)` });
+          break;
+        }
+      }
+    }
     for (const result of report.results) {
       // Newly posted contracts (not goals, just so you can see the board)
       if (result.kind === "posted") {
         const c = result.contract;
         events.push({ minute, text: `  posted: ${c.kindId} ${c.itemId || c.targetId || ""} ${c.amount}` });
-      }
-      if (result.kind === "contract") {
-        events.push({ minute, text: `contract: finished ${result.contract.kindId} (${result.credits.toLocaleString("en-GB")} cr)`, goal: true });
       }
     }
 

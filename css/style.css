@@ -823,6 +823,18 @@ main {
   display: flex;
   gap: 3px;
   height: 8px;
+  /* An invisible 5px above and below, so the thin bar is easier to
+     point at for its tooltips; the negative margin keeps it in
+     exactly the same place on screen. */
+  box-sizing: content-box;
+  padding: 5px 0;
+  margin: -5px 0;
+  cursor: help;
+}
+
+/* The segment the tooltip is about is lit (hover only) */
+.route-track:hover .seg:hover {
+  border-color: var(--amber-dim);
 }
 
 /* Each segment's width (flex-grow) is set by ui.js to match

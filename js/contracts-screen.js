@@ -15,8 +15,9 @@
 // passes button presses on to main.js (the "actions").
 // =============================================================
 
-import { CONTRACT_KINDS, CONTRACTS, CONTRACT_FACTIONS, ITEMS, REPUTATION_TIERS, SHIP_TYPES, FIELDS } from "../data/content.js";
-import { isBoardOpen, getTier, getReputation, getProgress, canDeliver, describeContract, getCharter } from "./contracts.js";
+import { CONTRACT_KINDS, CONTRACTS, CONTRACT_FACTIONS, ITEMS, REPUTATION_TIERS, SHIP_TYPES, FIELDS, RECIPES } from "../data/content.js";
+import { isBoardOpen, getTier, getReputation, getProgress, canHandIn, describeContract, getCharter, getToll, canLendSlot } from "./contracts.js";
+import { getSlotCount as getRefinerySlotCount, getRefineJob } from "./refinery.js";
 import { formatNumber, formatTonnes, formatDuration } from "./ui.js";
 import { gameNow } from "./clock.js";
 
@@ -24,6 +25,7 @@ import { gameNow } from "./clock.js";
 const KIND_TAGS = {
   deliver: "Delivery",
   charter: "Charter",
+  toll: "Toll smelting",
   survey: "Exploration",
   deepScan: "Exploration",
 };
@@ -194,8 +196,13 @@ function addSlotCards(count) {
         <select class="dest-select" data-part="ships" aria-label="Ship to charter"></select>
         <button class="btn btn-primary" data-part="charter-go">Charter</button>
       </div>
+      <!-- Toll smelting only: pick a refinery slot to lend -->
+      <div class="charter-pick" data-part="toll">
+        <select class="dest-select" data-part="slots" aria-label="Refinery slot to lend"></select>
+        <button class="btn btn-primary" data-part="toll-go">Lend slot</button>
+      </div>
       <div class="contract-buttons">
-        <button class="btn btn-primary" data-part="deliver">Deliver</button>
+        <button class="btn btn-primary" data-part="handin">Hand in</button>
         <button class="btn btn-small" data-part="discard">Discard</button>
       </div>
       <p class="order-message" data-part="message" role="status"></p>
@@ -203,8 +210,14 @@ function addSlotCards(count) {
       <p class="contract-waiting" data-part="waiting"></p>
     `;
 
-    part(card, "deliver").addEventListener("click", () => {
-      const result = actions.deliverContract(slot);
+    // Every contract is handed in by hand once it's done (Dan, 30 Oct)
+    part(card, "handin").addEventListener("click", () => {
+      const result = actions.handInContract(slot);
+      part(card, "message").textContent = result.ok ? "" : result.reason;
+    });
+    // Toll smelting: lend the refinery slot picked in the dropdown
+    part(card, "toll-go").addEventListener("click", () => {
+      const result = actions.lendSlot(slot, Number(part(card, "slots").value));
       part(card, "message").textContent = result.ok ? "" : result.reason;
     });
     // Charter: lend the ship picked in the dropdown
@@ -232,8 +245,8 @@ function addSlotCards(count) {
 // renderContracts(state)
 // Updates every card, each faction's box, and reputation. Returns what the
 // Contracts tab's nav dot is about: contracts not seen yet, and
-// deliveries that can be handed over now, e.g.
-//   { "contract:12": 1, "deliver:12": 1 }
+// contracts that can be handed in now, e.g.
+//   { "contract:12": 1, "ready:12": 1 }
 // -------------------------------------------------------------
 export function renderContracts(state) {
   const ready = {};
@@ -292,9 +305,13 @@ export function renderContracts(state) {
     const picking = kind.kind === "charter" && !contract.shipId;
     part(card, "charter").hidden = !picking;
     if (picking) fillShipPicker(state, part(card, "ships"), part(card, "charter-go"));
+    // Toll smelting: the slot picker, until a slot is lent
+    const pickingSlot = kind.kind === "toll" && contract.refinerySlot === null;
+    part(card, "toll").hidden = !pickingSlot;
+    if (pickingSlot) fillSlotPicker(state, index, part(card, "slots"), part(card, "toll-go"));
 
-    // What it pays. A delivery compares with selling it at home;
-    // a work contract is a bonus on goods you keep anyway.
+    // What it pays. A delivery or charter compares with selling the
+    // same goods at home (a toll's ore isn't yours, so no comparison).
     let pay = formatNumber(contract.credits) + " cr";
     if (kind.kind === "deliver" || kind.kind === "charter") {
       // Compared with selling the same goods at home
@@ -303,19 +320,15 @@ export function renderContracts(state) {
     setText(part(card, "pay"), pay);
     setText(part(card, "rep"), "+" + contract.reputation);
 
-    // Deliver only shows on deliveries; work contracts finish by themselves.
-    const deliver = part(card, "deliver");
-    deliver.hidden = kind.kind !== "deliver";
-    if (kind.kind === "deliver") {
-      const check = canDeliver(state, index);
-      deliver.disabled = !check.ok;
-      card.classList.toggle("deliverable", check.ok);
-      if (check.ok) {
-        ready["deliver:" + contract.number] = 1;
-        counts[contract.faction].ready += 1;
-      }
-    } else {
-      card.classList.remove("deliverable");
+    // Hand in: lit once the contract can be handed in (a delivery's
+    // goods are in the hold, or the work is done).
+    const check = canHandIn(state, index);
+    const handIn = part(card, "handin");
+    handIn.disabled = !check.ok;
+    card.classList.toggle("deliverable", check.ok);
+    if (check.ok) {
+      ready["ready:" + contract.number] = 1;
+      counts[contract.faction].ready += 1;
     }
   });
 
@@ -374,6 +387,32 @@ function fillShipPicker(state, select, button) {
 }
 
 // -------------------------------------------------------------
+// fillSlotPicker(state, boardSlot, select, button)
+// The toll's dropdown: your open refinery slots not already lent,
+// each saying what it's making now ("Slot 2: iron bars"). Rebuilt
+// only when that changes.
+// -------------------------------------------------------------
+function fillSlotPicker(state, boardSlot, select, button) {
+  const options = [];
+  for (let slot = 0; slot < getRefinerySlotCount(state); slot++) {
+    if (!canLendSlot(state, boardSlot, slot).ok) continue;
+    const job = getRefineJob(state, slot);
+    const making = job ? ITEMS[RECIPES[job.recipeId].output].name.toLowerCase() : "idle";
+    options.push({ slot, label: `Refinery slot ${slot + 1} (${making})` });
+  }
+  const key = options.map((o) => o.label).join(",");
+  if (select.dataset.key !== key) {
+    select.dataset.key = key;
+    const chosen = select.value;
+    select.innerHTML = options.length === 0
+      ? `<option value="">No refinery slot free</option>`
+      : options.map((o) => `<option value="${o.slot}">${o.label}</option>`).join("");
+    if (options.some((o) => String(o.slot) === chosen)) select.value = chosen;
+  }
+  button.disabled = options.length === 0;
+}
+
+// -------------------------------------------------------------
 // progressText(state, kind, contract, progress)
 // How far along a contract is, in words, e.g.
 //   "In your hold: 120 t of 150 t"
@@ -381,6 +420,10 @@ function fillShipPicker(state, select, button) {
 // -------------------------------------------------------------
 function progressText(state, kind, contract, { have, need }) {
   if (kind === "deliver") return `In your hold: ${formatTonnes(have)} of ${formatTonnes(need)}`;
+  if (kind === "toll") {
+    if (contract.refinerySlot === null) return "Pick a refinery slot to lend. It goes back to its own recipe afterwards.";
+    return `Refinery slot ${contract.refinerySlot + 1}: ${formatTonnes(have)} of ${formatTonnes(need)} smelted for them`;
+  }
   if (kind === "charter") {
     if (!contract.shipId) return "Pick a mining ship to lend. It starts from its next departure.";
     const ship = state.ships.find((s) => s.id === contract.shipId);

@@ -37,7 +37,7 @@ import { getLevelPerk } from "./skills.js";
 import { startScoutJob, canScoutGo, chooseNextTarget, getTarget, getTargetUnlocksAtLevel, isExplorationOpen, DEEP_SCAN_ID } from "./exploration.js";
 import { describeFind } from "./exploration-screen.js";
 import { showSurveyReport } from "./report.js";
-import { deliverContract, discardContract, canDeliver, describeContract, charterShip, getCharter } from "./contracts.js";
+import { handInContract, discardContract, canHandIn, isReady, describeContract, charterShip, getCharter, lendSlot } from "./contracts.js";
 import { saveGame, loadGame, deleteSave, applyOfflineProgress, exportSave, importSave } from "./save.js";
 import { showLevelBanner } from "./banner.js";
 import { setupUI, buildFleetViews, render, addLog, formatNumber, formatXp, formatTonnes, formatDuration, formatPercent, showDevPanel } from "./ui.js";
@@ -303,16 +303,29 @@ const actions = {
     return result;
   },
 
-  // Hands a delivery contract over from the hold (contracts.js).
-  // Returns { ok } or { ok: false, reason } for the card.
-  deliverContract(slot) {
-    const check = canDeliver(state, slot);
+  // Hands a finished contract in (contracts.js): every kind is
+  // handed in by hand (Dan, 30 Oct); a delivery's goods leave the
+  // hold. Returns { ok } or { ok: false, reason } for the card.
+  handInContract(slot) {
+    const check = canHandIn(state, slot);
     if (!check.ok) return check;
-    const result = deliverContract(state, slot, gameNow(state));
+    const result = handInContract(state, slot, gameNow(state));
     logContract(result);
     logLevelUps(result.skillId, result.newLevels);   // Diplomacy
     refresh();
     return { ok: true };
+  },
+
+  // Lends a refinery slot to a toll smelting contract (contracts.js).
+  // Returns { ok } or { ok: false, reason } for the card.
+  lendSlot(slot, refinerySlot) {
+    const result = lendSlot(state, slot, refinerySlot, gameNow(state));
+    if (result.ok) {
+      const contract = state.contracts.slots[slot].contract;
+      addLog(`Refinery slot ${refinerySlot + 1} is smelting ${ITEMS[contract.itemId].name.toLowerCase()} for ${contract.client.toLowerCase()}, from their ore. It goes back to its own recipe when they have ${formatTonnes(contract.amount)}.`, "contract");
+    }
+    refresh();
+    return result;
   },
 
   // Lends a mining ship to a charter (contracts.js). Returns
@@ -583,7 +596,9 @@ function tick() {
     // Refinery batches have no ship.
     if (result.kind === "refine") {
       const batches = result.trips === 1 ? "" : ` in ${result.trips} batches`;
-      addLog(`Refinery slot ${result.slot + 1} made ${formatTonnes(result.amount)} of ${ITEMS[result.itemId].name.toLowerCase()}${batches} (+${formatXp(result.xpGained)} Refining XP).`, "refine");
+      // Toll smelting: say how much was the client's.
+      const forClient = result.tolled > 0 ? `, ${formatTonnes(result.tolled)} of it for a client` : "";
+      addLog(`Refinery slot ${result.slot + 1} made ${formatTonnes(result.amount)} of ${ITEMS[result.itemId].name.toLowerCase()}${batches}${forClient} (+${formatXp(result.xpGained)} Refining XP).`, "refine");
       logLevelUps(result.skillId, result.newLevels);
       continue;   // on to the next result
     }
@@ -631,7 +646,34 @@ function tick() {
     }
   }
 
+  announceReadyContracts();
   render(state, now);
+}
+
+// -------------------------------------------------------------
+// announceReadyContracts()
+// A banner drops down when a contract is ready to hand in (Dan,
+// 30 Oct), once per contract: "contract.announced" remembers it
+// (in the save, so a refresh doesn't announce it again). Several
+// at once share one banner.
+// -------------------------------------------------------------
+function announceReadyContracts() {
+  const ready = [];
+  state.contracts.slots.forEach((slot, index) => {
+    const contract = slot.contract;
+    if (contract && !contract.announced && isReady(state, index)) {
+      contract.announced = true;
+      ready.push(contract);
+    }
+  });
+  if (ready.length === 0) return;
+
+  const titles = ready.map((contract) => `${CONTRACT_KINDS[contract.kindId].title} for ${contract.client.toLowerCase()}`);
+  for (const title of titles) {
+    addLog(`Contract ready to hand in: ${title}. Find it on the Contracts tab.`, "contract");
+  }
+  showLevelBanner(ready.length === 1 ? "Contract ready" : `${ready.length} contracts ready`,
+    [...titles, "Hand in on the Contracts tab"], "Contracts");
 }
 
 // -------------------------------------------------------------
@@ -735,6 +777,7 @@ function surveyEntries(targetIds) {
 // refresh() - redraw straight away after a button press, and
 // save, so the action is never lost if the tab closes.
 function refresh() {
+  announceReadyContracts();
   render(state, gameNow(state));
   saveGame(state);
 }

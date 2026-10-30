@@ -42,7 +42,7 @@ import { UPGRADES } from "../data/content.js";
 import { getMaxSlots, getBatchOutput } from "../js/refinery.js";
 import { startScoutJob, getScoutPlan, getTargetStatus, chooseNextTarget, rollFor, isExplorationOpen, DEEP_SCAN_ID } from "../js/exploration.js";
 import { SURVEY_TARGETS, DEEP_SCAN, CONTRACT_KINDS, CONTRACTS, CONTRACT_FACTIONS, REPUTATION_TIERS } from "../data/content.js";
-import { isBoardOpen, getTier, getReputation, getSubjects, getProgress, canDeliver, deliverContract, discardContract, checkContracts, charterShip, canCharter, getCharter, getContractXp, getSlotCount as getBoardSlotCount } from "../js/contracts.js";
+import { isBoardOpen, getTier, getReputation, getSubjects, getProgress, canHandIn, handInContract, lendSlot, discardContract, checkContracts, charterShip, canCharter, getCharter, getContractXp, getSlotCount as getBoardSlotCount } from "../js/contracts.js";
 import { getMaxOrderBatches, addStandingOrder, removeStandingOrder, getStandingOrders } from "../js/workshop.js";
 import { XP_TABLE, getLevelForXp, getLevel, getLevelProgress, addXp, isShipTypeUnlocked, MAX_LEVEL } from "../js/skills.js";
 import { canBuyShip, buyShip, canSellShip, sellShip, getSellValue, renameShip, getShipPrice } from "../js/shipyard.js";
@@ -3587,11 +3587,11 @@ test("Contracts: with plenty to choose from, the board never shows the same cont
 test("Contracts: a delivery takes the goods and pays, and the slot refills 10 minutes later", () => {
   const state = gameWithBoard();
   const contract = forceContract(state, "ore_requisition", { itemId: "iron_ore", amount: 150, credits: 1130 });
-  assert.equal(canDeliver(state, 0).ok, false);
-  assert.match(canDeliver(state, 0).reason, /150 t more iron ore/);
+  assert.equal(canHandIn(state, 0).ok, false);
+  assert.match(canHandIn(state, 0).reason, /150 t more iron ore/);
   state.inventory.iron_ore = 200;
   const credits = state.credits;
-  const result = deliverContract(state, 0, START);
+  const result = handInContract(state, 0, START);
   assert.equal(result.kind, "contract");
   assert.equal(state.inventory.iron_ore, 50);
   assert.equal(state.credits, credits + 1130);
@@ -3610,7 +3610,7 @@ test("Contracts: deliveries leave bonded stock alone", () => {
   forceContract(state, "ore_requisition", { itemId: "iron_ore", amount: 150 });
   state.inventory.iron_ore = 200;
   setBond(state, "iron_ore", 100);
-  assert.equal(canDeliver(state, 0).ok, false);       // only 100 t above the bond
+  assert.equal(canHandIn(state, 0).ok, false);       // only 100 t above the bond
   assert.equal(getProgress(state, state.contracts.slots[0].contract).have, 100);
 });
 
@@ -3623,10 +3623,11 @@ function forceCharter(state, fieldId, amount) {
   });
 }
 
-test("Charter: a docked ship lent to a charter hands its hauls to the client, then the contract pays", () => {
+test("Charter: a docked ship lent to a charter hands its hauls to the client, then it's handed in", () => {
   // Why: the core rule. 200 t owed, a Prospector holds 120 t:
   // trip 1 gives 120 t, trip 2 gives the last 80 t and the other
-  // 40 t go into your hold. Then it pays and the ship is free.
+  // 40 t go into your hold. The ship is free at once; the contract
+  // waits on the board until it's handed in, then pays.
   const state = gameWithBoard();
   const contract = forceCharter(state, "inner_belt", 200);
   const credits = state.credits;
@@ -3638,11 +3639,12 @@ test("Charter: a docked ship lent to a charter hands its hauls to the client, th
   assert.equal(contract.delivered, 120);
   assert.equal(state.inventory.iron_ore, 0);            // none of it was yours
 
-  const results = processJobs(state, START + trip * 2);
-  assert.ok(results.some((r) => r.kind === "contract"), "the charter finished");
-  assert.equal(state.credits, credits + 900);
+  processJobs(state, START + trip * 2);
   assert.equal(state.inventory.iron_ore, 40);           // the extra 40 t is yours
   assert.equal(getCharter(state, "ship-1"), null);      // free again
+  assert.equal(state.credits, credits);                 // not paid until handed in
+  assert.ok(handInContract(state, 0, START + trip * 2), "handed in");
+  assert.equal(state.credits, credits + 900);
   assert.ok(state.skills.mining.xp > XP_TABLE[3], "Mining XP still earned");
 });
 
@@ -3703,13 +3705,98 @@ test("Charter: one jump gives the same result as playing it minute by minute", (
   assert.equal(jumped.credits, stepped.credits);
 });
 
+test("Contracts: finished work never pays by itself, however long you wait", () => {
+  // Why: Dan, 30 Oct: contracts are handed in by hand (a contract
+  // manager upgrade may do it later). A finished survey request
+  // must still be on the board, unpaid, an hour on.
+  const state = gameWithBoard();
+  forceContract(state, "survey_request", { targetId: "inner_belt_survey" });
+  state.exploration.surveyed.inner_belt_survey = true;
+  const credits = state.credits;
+  processJobs(state, START + 60 * MINUTE);
+  assert.equal(state.contracts.slots[0].contract.number, 999);   // still there
+  assert.equal(state.credits, credits);
+});
+
+// --- Toll smelting (30 Oct) ---
+
+// A game with the refinery open and a toll contract in slot 0.
+function gameWithToll(amount) {
+  const state = newGame();
+  state.skills.mining.xp = XP_TABLE[REFINERY.openAtMiningLevel];
+  processJobs(state, START);
+  forceContract(state, "toll_smelting", { itemId: "iron_bar", amount, credits: 700, refinerySlot: null, delivered: 0 });
+  return state;
+}
+
+test("Toll smelting: a lent slot smelts without your ore, and the metal goes to the client", () => {
+  // Why: the core rule. The hold has no ore at all, yet the slot
+  // works; 60 t owed = two 30 t batches; you get none of the bars.
+  const state = gameWithToll(60);
+  assert.equal(state.inventory.iron_ore, 0);
+  const xp = state.skills.refining.xp;
+  assert.equal(lendSlot(state, 0, 0, START).ok, true);
+  const batch = getRefineJob(state, 0).durationMs;
+  assert.equal(getRefineJob(state, 0).status, "working");
+  processJobs(state, START + batch * 2);
+  assert.equal(state.contracts.slots[0].contract.delivered, 60);
+  assert.equal(state.inventory.iron_bar, 0);
+  assert.ok(state.skills.refining.xp > xp, "Refining XP earned");
+  assert.equal(getRefineJob(state, 0), undefined);   // was idle before: idle again
+  assert.equal(canHandIn(state, 0).ok, true);
+});
+
+test("Toll smelting: the slot goes back to its own recipe afterwards, and your ore is returned when lent", () => {
+  const state = gameWithToll(30);
+  state.inventory.iron_ore = 60;
+  setRecipe(state, 0, "iron_bar", START);              // takes 60 t for a batch
+  assert.equal(state.inventory.iron_ore, 0);
+  lendSlot(state, 0, 0, START);
+  assert.equal(state.inventory.iron_ore, 60);          // your half-done batch's ore came back
+  assert.equal(setRecipe(state, 0, null, START), false);   // can't change a lent slot
+  processJobs(state, START + getRefineJob(state, 0).durationMs);
+  const job = getRefineJob(state, 0);
+  assert.equal(job.toll, undefined);
+  assert.equal(job.recipeId, "iron_bar");              // back to its own recipe
+});
+
+test("Toll smelting: discarding drops the client's batch; you keep nothing of theirs", () => {
+  const state = gameWithToll(90);
+  lendSlot(state, 0, 0, START);
+  const batch = getRefineJob(state, 0).durationMs;
+  discardContract(state, 0, START + batch / 2);        // mid-batch
+  processJobs(state, START + batch * 3);
+  assert.equal(state.inventory.iron_bar, 0);
+  assert.equal(getRefineJob(state, 0), undefined);
+});
+
+test("Toll smelting: one jump gives the same result as playing it minute by minute", () => {
+  // Why: the offline rule. A toll that ends mid-way hands the slot
+  // back to its own recipe, which then uses YOUR ore: the order of
+  // those steps must be the same however time is played.
+  const make = () => {
+    const state = gameWithToll(60);
+    state.inventory.iron_ore = 300;
+    setRecipe(state, 0, "iron_bar", START);
+    lendSlot(state, 0, 0, START);
+    return state;
+  };
+  const jumped = make();
+  processJobs(jumped, START + 30 * MINUTE);
+  const stepped = make();
+  for (let t = MINUTE; t <= 30 * MINUTE; t += MINUTE) processJobs(stepped, START + t);
+  assert.deepEqual(jumped.inventory, stepped.inventory);
+  assert.deepEqual(jumped.contracts, stepped.contracts);
+  assert.deepEqual(jumped.jobs, stepped.jobs);
+});
+
 // --- Diplomacy (30 Oct) ---
 
 test("Diplomacy: a finished contract earns Diplomacy XP, more at a higher tier", () => {
   const state = gameWithBoard();
   const contract = forceContract(state, "ore_requisition", { itemId: "iron_ore", amount: 10 });
   state.inventory.iron_ore = 10;
-  const result = deliverContract(state, 0, START);
+  const result = handInContract(state, 0, START);
   assert.equal(result.xpGained, CONTRACT_KINDS.ore_requisition.xp);
   assert.equal(state.skills.diplomacy.xp, CONTRACT_KINDS.ore_requisition.xp);
   state.contracts.reputation.independents = REPUTATION_TIERS[2].from;   // Trusted: x2 size
@@ -3747,8 +3834,12 @@ test("Contracts: a survey request pays when the target is surveyed", () => {
   processJobs(state, START);
   forceContract(state, "survey_request", { targetId: "inner_belt_survey", amount: 1 });
   const job = startScoutJob(state, "ship-2", "inner_belt_survey", START);
-  const results = processJobs(state, START + job.durationMs);
-  assert.ok(results.some((r) => r.kind === "contract" && r.contract.kindId === "survey_request"));
+  assert.equal(canHandIn(state, 0).ok, false);       // not surveyed yet
+  processJobs(state, START + job.durationMs);
+  assert.equal(canHandIn(state, 0).ok, true);        // done: waits to be handed in
+  const credits = state.credits;
+  const result = handInContract(state, 0, START + job.durationMs);
+  assert.equal(state.credits, credits + result.credits);
 });
 
 test("Contracts: discarding empties the slot and a new one comes after the wait", () => {
@@ -3833,7 +3924,7 @@ test("Factions: a finished contract's reputation goes to its own faction only", 
     const state = gameWithBoard();
     const contract = forceContract(state, "survey_request", { targetId: Object.keys(SURVEY_TARGETS)[0], faction: "test_rivals" });
     state.exploration.surveyed[contract.targetId] = true;   // the work is done
-    checkContracts(state, START);
+    handInContract(state, 0, START);
     assert.equal(getReputation(state, "test_rivals"), contract.reputation);
     assert.equal(getReputation(state, "independents"), 0);
   } finally {

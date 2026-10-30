@@ -34,6 +34,13 @@
 //     inputs: { iron_ore: 60 }, ore taken for this batch (so it
 //                               can be given back if stopped)
 //     repeat: true,
+//     toll: 14,                 TOLL SMELTING only (contracts.js):
+//                               the contract this slot is lent to.
+//                               Its batches use the client's ore
+//                               (none from the hold) and the metal
+//                               goes to them.
+//     afterToll: "iron_bar",    the slot's own recipe, to go back
+//                               to afterwards (null: stop)
 //   }
 // =============================================================
 
@@ -176,6 +183,9 @@ export function setRecipe(state, slot, recipeId, now) {
   }
 
   const current = getRefineJob(state, slot);
+  if (current && current.toll !== undefined) {
+    return false;   // lent to a client (toll smelting) until it's done
+  }
   if (current && current.recipeId === recipeId) {
     return false;   // already making that: nothing to do
   }
@@ -254,6 +264,15 @@ export function startWaitingBatches(state, time) {
     .sort((a, b) => a.slot - b.slot);
 
   for (const job of waiting) {
+    // A lent slot smelts the client's ore: nothing from the hold.
+    if (job.toll !== undefined) {
+      job.status = "working";
+      job.startedAt = time;
+      job.durationMs = getBatchMs(state, job.recipeId);
+      job.inputs = null;
+      continue;
+    }
+
     if (!hasInputs(state, job.recipeId)) {
       continue;   // not enough ore yet: keep waiting
     }
@@ -279,29 +298,83 @@ export function startWaitingBatches(state, time) {
 // Returns a result for the log, like the ships' results.
 // -------------------------------------------------------------
 export function finishBatch(state, job) {
-  const recipe = RECIPES[job.recipeId];
+  // Remembered now: a toll that ends below switches the slot back
+  // to its own recipe, but THIS batch was the toll's.
+  const recipeId = job.recipeId;
+  const recipe = RECIPES[recipeId];
+  let made;
+  let tolled = 0;     // tonnes that went to a toll client
 
-  // Whole tonnes into the hold now; any part-tonne waits for the
-  // next batch (Improved yield can make 49.5 t of steel).
-  const made = addItemWithCarry(state, recipe.output, getBatchOutput(state, job.recipeId));
-  // The running total smelting contracts count from (contracts.js)
+  if (job.toll !== undefined) {
+    // TOLL SMELTING: the metal is the client's, up to what they're
+    // owed; anything over (Improved yield) is yours. Whole tonnes.
+    made = Math.floor(getBatchOutput(state, recipeId));
+    const contract = findContract(state, job.toll);
+    if (contract) {
+      tolled = Math.min(made, contract.amount - contract.delivered);
+      contract.delivered += tolled;
+    }
+    if (made > tolled) addItem(state, recipe.output, made - tolled);
+    // All made? The slot goes back to its own recipe.
+    if (!contract || contract.delivered >= contract.amount) endTollJob(state, job);
+  } else {
+    // Whole tonnes into the hold now; any part-tonne waits for the
+    // next batch (Improved yield can make 49.5 t of steel).
+    made = addItemWithCarry(state, recipe.output, getBatchOutput(state, recipeId));
+  }
+  // The running total of metal made
   state.stats.refined[recipe.output] = (state.stats.refined[recipe.output] || 0) + made;
   const newLevels = addXp(state, "refining", recipe.xp);
 
-  job.status = "waiting";
-  job.inputs = null;
+  if (job.toll === undefined) {   // (a toll that just ended was reset by endTollJob)
+    job.status = "waiting";
+    job.inputs = null;
+  }
 
   return {
     kind: "refine",
     slot: job.slot,
-    recipeId: job.recipeId,
+    recipeId: recipeId,
     itemId: recipe.output,
     amount: made,
+    tolled: tolled,           // of which went to a toll client
     trips: 1,                 // (batches - called trips so results add up the same way)
     skillId: "refining",
     xpGained: recipe.xp,
     newLevels: newLevels,
   };
+}
+
+
+// -------------------------------------------------------------
+// findContract(state, number)
+// A contract on the board by its number, or null. (Looked up here
+// rather than in contracts.js, which already uses this file.)
+// -------------------------------------------------------------
+function findContract(state, number) {
+  for (const slot of state.contracts.slots) {
+    if (slot.contract && slot.contract.number === number) return slot.contract;
+  }
+  return null;
+}
+
+// -------------------------------------------------------------
+// endTollJob(state, job)
+// A lent slot's toll is over (all made, or the contract was
+// discarded): it goes back to the slot's own recipe, waiting for
+// ore as usual, or stops if it had none. A batch of the client's
+// ore still in the furnace is dropped (it was theirs).
+// -------------------------------------------------------------
+export function endTollJob(state, job) {
+  if (job.afterToll) {
+    job.recipeId = job.afterToll;
+    job.status = "waiting";
+    job.inputs = null;
+    delete job.toll;
+    delete job.afterToll;
+  } else {
+    state.jobs = state.jobs.filter((j) => j !== job);
+  }
 }
 
 
