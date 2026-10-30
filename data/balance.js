@@ -82,6 +82,12 @@ export const BALANCE = {
     courier_drive_2: { hull: 'courier', part: 'drive', grade: 2, skill: 'trade', level: 11, credits: 200000, costs: { wiring_coils: 40 }, bonus: 0.1 },
     courier_hold_3: { hull: 'courier', part: 'hold', grade: 3, skill: 'trade', level: 20, credits: 480000, costs: { cargo_pod: 60 }, bonus: 0.15 },
     courier_drive_3: { hull: 'courier', part: 'drive', grade: 3, skill: 'trade', level: 25, credits: 600000, costs: { thruster_assembly: 60 }, bonus: 0.1 },
+    pathfinder_sensors_1: { hull: 'pathfinder', part: 'sensors', grade: 1, skill: 'exploration', level: 2, credits: 2500, costs: {}, bonus: 0.15 },
+    pathfinder_drive_1: { hull: 'pathfinder', part: 'drive', grade: 1, skill: 'exploration', level: 4, credits: 3000, costs: {}, bonus: 0.1 },
+    pathfinder_sensors_2: { hull: 'pathfinder', part: 'sensors', grade: 2, skill: 'exploration', level: 8, credits: 9000, costs: { wiring_coils: 30 }, bonus: 0.15 },
+    pathfinder_drive_2: { hull: 'pathfinder', part: 'drive', grade: 2, skill: 'exploration', level: 11, credits: 12000, costs: { hull_plating: 30 }, bonus: 0.1 },
+    pathfinder_sensors_3: { hull: 'pathfinder', part: 'sensors', grade: 3, skill: 'exploration', level: 16, credits: 30000, costs: { thruster_assembly: 40 }, bonus: 0.15 },
+    pathfinder_drive_3: { hull: 'pathfinder', part: 'drive', grade: 3, skill: 'exploration', level: 20, credits: 40000, costs: { cargo_pod: 40 }, bonus: 0.1 },
   },
   surveyTargets: {
     inner_belt_survey: { unlockLevel: 1, requires: null, travelSeconds: 45, scanSeconds: 120, xp: 55, credits: 400, item: null, tonnes: 0 },
@@ -94,6 +100,22 @@ export const BALANCE = {
     system_edge: { unlockLevel: 12, requires: null, travelSeconds: 240, scanSeconds: 900, xp: 30, credits: 2000, item: null, tonnes: 0 },
     wreck_4: { unlockLevel: 15, requires: 'wreck_3', travelSeconds: 90, scanSeconds: 1500, xp: 40, credits: 0, item: 'wreck_alloy', tonnes: 8 },
   },
+  contractKinds: {
+    ore_requisition: { kind: 'deliver', goods: 'ore', weight: 4, amount: 150, pay: 1.5, reputation: 10 },
+    metal_requisition: { kind: 'deliver', goods: 'metal', weight: 3, amount: 60, pay: 1.5, reputation: 15 },
+    parts_order: { kind: 'deliver', goods: 'product', weight: 3, amount: 60, pay: 1.5, reputation: 20 },
+    mining_quota: { kind: 'mine', goods: 'ore', weight: 2, amount: 300, pay: 0.4, reputation: 10 },
+    smelting_quota: { kind: 'refine', goods: 'metal', weight: 2, amount: 90, pay: 0.5, reputation: 15 },
+    survey_request: { kind: 'survey', goods: 'none', weight: 2, amount: 1, pay: 120, reputation: 15 },
+    deep_scan_contract: { kind: 'deepScan', goods: 'none', weight: 1, amount: 3, pay: 150, reputation: 10 },
+  },
+  reputationTiers: [
+    { from: 0, size: 1 },
+    { from: 100, size: 1.5 },
+    { from: 300, size: 2 },
+    { from: 700, size: 3 },
+    { from: 1500, size: 4 },
+  ],
   hullSizes: {
     small: { commandPoints: 1, loadingRate: 20 },
     medium: { commandPoints: 2, loadingRate: 40 },
@@ -110,5 +132,6 @@ export const BALANCE = {
   refinery: { slotLevels: [1, 10, 25], speedPerLevel: 0.005, openAtMiningLevel: 8 },
   workshop: { openAtRefiningLevel: 8, slotLevels: [1, 12, 35], queueLevels: [8, 25], baseQueue: 3, maxOrderBatches: 20, speedPerLevel: 0.005, standingPerSlot: 2 },
   exploration: { scanSpeedPerLevel: 0.005, deepScan: { unlockLevel: 1, travelSeconds: 60, scanSeconds: 240, xp: 30, findChance: 0.2, alloyShare: 0.33, alloyTonnes: 1, creditsMin: 300, creditsMax: 900 } },
+  contracts: { openAtMiningLevel: 3, slots: 3, refillMinutes: 10, surveyLevelsAhead: 2 },
   rules: { offlineCapHours: 24 },
 };

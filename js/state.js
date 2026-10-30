@@ -10,6 +10,7 @@
 // =============================================================
 
 import { createClock } from "./clock.js";
+import { createContracts } from "./contracts.js";
 
 
 // The version number of the save format.
@@ -31,7 +32,8 @@ import { createClock } from "./clock.js";
 //   Version 13: the game clock (playtest speed) and the playtest mark
 //   Version 14: ship upgrades, and loading/unloading time on trips
 //   Version 15: the Exploration skill, survey records, milestones
-export const SAVE_VERSION = 15;
+//   Version 16: the contracts board, and running totals (stats)
+export const SAVE_VERSION = 16;
 
 
 // -------------------------------------------------------------
@@ -128,6 +130,16 @@ export function createNewGame() {
     // MILESTONES: one-off things the player has done, e.g.
     // { firstSale: true } (see MILESTONES in content.js).
     milestones: {},
+
+    // THE CONTRACTS BOARD (contracts.js): its slots, how many
+    // contracts have been posted and finished, and reputation
+    // with the belt independents.
+    contracts: createContracts(),
+
+    // RUNNING TOTALS that work contracts count from, e.g.
+    //   mined:   { outer_belt: 1200 }   tonnes brought home, by field
+    //   refined: { iron_bar: 300 }      tonnes made at the refinery
+    stats: { mined: {}, refined: {} },
 
     // Jobs that are currently running (empty at the start):
     // ships' trips (see jobs.js), refinery slots (refinery.js)

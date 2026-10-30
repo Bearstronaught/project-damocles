@@ -11,6 +11,7 @@
 
 import { RULES, SHIP_TYPES } from "../data/content.js";
 import { SAVE_VERSION, createExploration } from "./state.js";
+import { createContracts } from "./contracts.js";
 import { getTripPlan } from "./jobs.js";
 import { advanceTo } from "./simulation.js";
 import { createClock } from "./clock.js";
@@ -208,7 +209,10 @@ function looksLikeASave(state) {
     typeof state.shipUpgrades === "object" && state.shipUpgrades !== null &&
     typeof state.exploration === "object" && state.exploration !== null &&
     typeof state.exploration.surveyed === "object" && state.exploration.surveyed !== null &&
-    typeof state.milestones === "object" && state.milestones !== null
+    typeof state.milestones === "object" && state.milestones !== null &&
+    typeof state.contracts === "object" && state.contracts !== null &&
+    Array.isArray(state.contracts.slots) &&
+    typeof state.stats === "object" && state.stats !== null
   );
 }
 
@@ -419,7 +423,18 @@ function upgradeSave(state) {
     state.version = 15;
   }
 
-  // (Future: if (state.version === 15) { ...; state.version = 16; })
+  // --- Version 15 -> 16: the contracts board ---
+  // A fresh board: it posts its first contracts as soon as the
+  // player's Mining level allows (straight away for most players).
+  // The running totals start at 0: work contracts only count work
+  // done after they're posted anyway.
+  if (state.version === 15) {
+    state.contracts = createContracts();
+    state.stats = { mined: {}, refined: {} };
+    state.version = 16;
+  }
+
+  // (Future: if (state.version === 16) { ...; state.version = 17; })
 
   if (state.version > SAVE_VERSION) {
     // A save from a NEWER version of the game than this one.

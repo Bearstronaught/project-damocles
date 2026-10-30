@@ -24,13 +24,13 @@
 // The screens that exist. The first is the default. A new
 // screen needs its name here, a <section data-screen="..."> and
 // a button in index.html.
-const SCREENS = ["command", "fleet", "shipyard", "industry", "exploration", "skills", "save"];
+const SCREENS = ["command", "fleet", "shipyard", "industry", "exploration", "contracts", "skills", "save"];
 
 // Screens that aren't open YET, e.g. Exploration before the first
 // sale (see setScreenOpen). Their buttons are hidden, and asking
 // for one (an old bookmark) shows Command instead. Exploration
 // starts closed so a new game never flashes it on screen.
-const closedScreens = new Set(["exploration"]);
+const closedScreens = new Set(["exploration", "contracts"]);
 
 // The width (in CSS pixels) where the sidebar turns into the
 // phone bar. Must match the @media rules in style.css.

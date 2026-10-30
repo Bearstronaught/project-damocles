@@ -37,6 +37,7 @@ import { canBuyShipUpgrade, buyShipUpgrade } from "../js/ship-upgrades.js";
 import { setRecipe, getRefineJob, getSlotCount, isRecipeUnlocked } from "../js/refinery.js";
 import { getCommandFree } from "../js/command.js";
 import { startScoutJob, chooseNextTarget, getTarget } from "../js/exploration.js";
+import { canDeliver, deliverContract } from "../js/contracts.js";
 
 const MINUTE = 60 * 1000;
 const START = 1_000_000_000_000;
@@ -52,6 +53,9 @@ const START = 1_000_000_000_000;
 // -------------------------------------------------------------
 export function simulate(hours, untilMiningLevel, hourly = null, explore = true) {
   const state = createNewGame();
+  // A fixed seed, so deep scan finds and contracts come out the same
+  // every run and two runs can be compared (each real save has its own).
+  state.exploration.seed = 12345;
   state.clock = { realAt: START, gameAt: START, speed: 1 };
   state.simulatedUpTo = START;
   const events = [];
@@ -88,6 +92,21 @@ export function simulate(hours, untilMiningLevel, hourly = null, explore = true)
     }
     lastLevel = level;
     if (level >= untilMiningLevel) break;
+
+    // 0. Hand over any delivery contract it has the goods for
+    //    (before selling them), and note contracts that finished
+    for (let slot = 0; slot < state.contracts.slots.length; slot++) {
+      if (canDeliver(state, slot).ok) {
+        const done = deliverContract(state, slot, now);
+        earnedThisHour += done.credits;
+        events.push({ minute, text: `contract: delivered ${done.contract.kindId} (${done.credits.toLocaleString("en-GB")} cr)`, goal: true });
+      }
+    }
+    for (const result of report.results) {
+      if (result.kind === "contract") {
+        events.push({ minute, text: `contract: finished ${result.contract.kindId} (${result.credits.toLocaleString("en-GB")} cr)`, goal: true });
+      }
+    }
 
     // 1. Sell everything at home
     earnedThisHour += sellEverything(state).credits;
@@ -134,6 +153,13 @@ export function simulate(hours, untilMiningLevel, hourly = null, explore = true)
         options.push({ cost: getShipPrice(state, "prospector"), buy: () => buyShip(state, "prospector"), text: "Prospector #" + (state.ships.filter((s) => s.type === "prospector").length + 1) });
       } else if (canBuyShip(state, "prospector").reason === "Not enough command points" && canBuyUpgrade(state).ok) {
         options.push({ cost: getNextUpgradeCost(state), buy: () => buyUpgrade(state), text: "command upgrade" });
+      }
+      // Pathfinder components, once there's a Pathfinder
+      for (const id of Object.keys(SHIP_UPGRADES)) {
+        if (explore && SHIP_UPGRADES[id].hull === "pathfinder" && canBuyShipUpgrade(state, id).ok &&
+            state.ships.some((ship) => ship.type === "pathfinder")) {
+          options.push({ cost: SHIP_UPGRADES[id].credits, buy: () => buyShipUpgrade(state, id), text: "component " + id });
+        }
       }
       // One Pathfinder, as soon as it's for sale and affordable
       const hasScout = state.ships.some((ship) => ship.type === "pathfinder");

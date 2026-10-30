@@ -2844,3 +2844,131 @@ body.nav-collapsed .nav-version {
   line-height: 1.6;
   color: var(--steel);
 }
+
+
+/* =============================================================
+   CONTRACTS (the belt independents' board)
+   ============================================================= */
+
+/* One card per board slot, in the same raised style as ship cards */
+.contract-card {
+  display: flex;
+  flex-direction: column;
+  background: var(--panel-raised);
+  border: 1px solid var(--line);
+  padding: 12px;
+  min-width: 0;
+}
+
+/* A delivery you can hand over now: an amber edge, like "ready to buy" */
+.contract-card.deliverable {
+  border-color: var(--amber-dim);
+  box-shadow: inset 2px 0 0 var(--amber);
+}
+
+.contract-text {
+  margin: 8px 0 0;
+  font-size: 13px;
+  color: var(--steel);
+}
+
+/* Progress: amber, like the work it stands for */
+.contract-card .progress-fill {
+  background: var(--amber);
+  box-shadow: var(--glow-amber);
+}
+
+.contract-progress {
+  font-size: 12px;
+  color: var(--steel-dim);
+}
+
+.contract-pay {
+  margin: 8px 0;
+}
+
+.contract-buttons {
+  display: flex;
+  gap: 8px;
+  margin-top: auto;            /* buttons sit at the bottom of the card */
+}
+
+.contract-buttons .btn-primary {
+  flex: 1;
+}
+
+/* A waiting slot shows only its title and the wait */
+.contract-waiting {
+  display: none;
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--steel-dim);
+}
+
+.contract-card.empty .contract-waiting {
+  display: block;
+}
+
+.contract-card.empty .contract-text,
+.contract-card.empty .progress,
+.contract-card.empty .contract-progress,
+.contract-card.empty .contract-pay,
+.contract-card.empty .contract-buttons,
+.contract-card.empty .order-message {
+  display: none;
+}
+
+.contract-card.empty .card-name {
+  color: var(--steel-dim);
+}
+
+/* ----- Reputation ----- */
+.rep-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-top: 10px;
+}
+
+.rep-tier {
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--amber);
+}
+
+.rep-points {
+  font-size: 12px;
+  color: var(--steel);
+}
+
+/* Every tier, with the one you're in highlighted */
+.tier-list {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+}
+
+.tier-list li {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 4px 16px;
+  padding: 5px 8px;
+  font-size: 12px;
+  color: var(--steel-dim);
+  border-left: 2px solid transparent;
+}
+
+.tier-list li.reached {
+  color: var(--steel);
+}
+
+.tier-list li.current {
+  color: var(--amber);
+  border-left-color: var(--amber);
+  background: var(--amber-faint);
+}
+
+.log-contract .log-tag { color: var(--amber); }

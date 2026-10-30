@@ -602,6 +602,119 @@ export const EXPLORATION = {
 
 
 // -------------------------------------------------------------
+// CONTRACTS: jobs posted by the belt independents (contracts.js).
+// -------------------------------------------------------------
+// The board holds a few contracts at a time. They never fail or
+// expire; a finished or discarded one is replaced after a while.
+//
+// Each KIND is one way of earning a contract's pay. New kinds
+// (ship orders, escorts, ...) are added here, in the balance
+// sheet, and as one small rule in contracts.js.
+//
+// Written here:
+//   title        the card's heading
+//   text         what the client wants. {client}, {amount},
+//                {item}, {field} and {target} are filled in.
+//   doneText     how the finished contract reads in the log
+//
+// From the balance sheet (Contracts tab):
+//   kind       how it's done:
+//                deliver   hand goods over from the hold
+//                mine      bring home ore from one field (you keep it)
+//                refine    make metal at the refinery (you keep it)
+//                survey    survey one target
+//                deepScan  run some deep scans
+//   goods      what it can ask for: "ore" (from fields you can mine),
+//              "metal" (refinery recipes you have), "product"
+//              (workshop recipes you have), or "none"
+//   weight     how often it comes up, against the others (4 is
+//              twice as often as 2). Kinds the player can't do
+//              yet are never posted.
+//   amount     a typical size at the first reputation tier: tonnes,
+//              surveys or deep scans. Each contract is between 75%
+//              and 125% of it, times the tier's size.
+//   pay        deliver/mine/refine: times the goods' home price per
+//              tonne (1.5 = half as much again as selling it;
+//              0.4 = a bonus of 40% on ore you keep anyway).
+//              survey: credits per Exploration level of the target,
+//              plus 4 levels' worth. deepScan: credits per scan.
+//   reputation what it earns with the belt independents
+const CONTRACT_WORDS = {
+  ore_requisition: {
+    title: "Ore requisition",
+    text: "{client} needs {amount} of {item}. Hand it over from your hold.",
+  },
+  metal_requisition: {
+    title: "Metal requisition",
+    text: "{client} needs {amount} of {item} for repairs. Hand it over from your hold.",
+  },
+  parts_order: {
+    title: "Parts order",
+    text: "{client} is building something and needs {amount} of {item}.",
+  },
+  mining_quota: {
+    title: "Mining quota",
+    text: "{client} wants to know the {field} is worth working. Bring home {amount} of {item} from there; you keep the ore.",
+  },
+  smelting_quota: {
+    title: "Smelting quota",
+    text: "{client} is short of furnace time. Make {amount} of {item} at your refinery; you keep the metal.",
+  },
+  survey_request: {
+    title: "Survey request",
+    text: "{client} will pay for a survey of {target}. Your scouts will get to it; this pays when it's done.",
+  },
+  deep_scan_contract: {
+    title: "Deep scan contract",
+    text: "{client} wants fresh scan data: run {amount} deep scans.",
+  },
+};
+
+export const CONTRACT_KINDS = {};
+for (const [id, numbers] of Object.entries(BALANCE.contractKinds)) {
+  CONTRACT_KINDS[id] = { ...CONTRACT_WORDS[id], ...numbers };
+}
+
+// Who posts them: one picked for each contract. Placeholders for
+// Dan's lore; all belt independents for now.
+export const CONTRACT_CLIENTS = [
+  "A belt co-op",
+  "The Kessler hauling crew",
+  "A station repair gang",
+  "An ice-miner family",
+  "The Drift Market",
+  "A prospector's widow",
+  "The Lantern Dock collective",
+];
+
+// THE FACTION the board belongs to (Factions in the design doc).
+export const CONTRACT_FACTION = {
+  name: "Belt independents",
+  description: "Self-reliant miners and traders scattered through the belt. They don't trust outsiders, but they pay for work done.",
+};
+
+// REPUTATION TIERS with the belt independents. Earning reputation
+// moves you up; each tier makes their contracts bigger (size),
+// and pay grows with size. From the balance sheet: from (the
+// reputation it starts at) and size. Names written here.
+const TIER_NAMES = ["Unknown", "Known", "Trusted", "Valued", "Partner"];
+export const REPUTATION_TIERS = BALANCE.reputationTiers.map((tier, index) => ({
+  name: TIER_NAMES[index],
+  ...tier,
+}));
+
+// THE BOARD (balance sheet, Contracts tab):
+//   openAtMiningLevel   the belt independents start posting at
+//                       this Mining level
+//   slots               how many contracts are on the board at once
+//   refillMinutes       a finished or discarded contract is replaced
+//                       this long after
+//   surveyLevelsAhead   a survey request can be for a target up to
+//                       this many Exploration levels above yours
+export const CONTRACTS = BALANCE.contracts;
+
+
+// -------------------------------------------------------------
 // TRADE: how freighters earn Trade XP (Dan, 29 Oct).
 // -------------------------------------------------------------
 // Trade XP comes from hauling, measured like real freight:
@@ -644,12 +757,14 @@ export const HUB = {
 //   tradeHubPricePerLevel  every hub sale pays this much more
 export const LEVEL_PERKS = BALANCE.levelPerks;
 
-// SHIP PARTS: the three parts ship upgrades improve. "stat" is
+// SHIP PARTS: the parts ship upgrades improve. "stat" is
 // the ship stat the part's bonus adds to (see ship-upgrades.js).
 export const SHIP_PARTS = {
   drill: { name: "Drill",      stat: "miningRate",    says: "mining rate" },
   hold:  { name: "Cargo hold", stat: "cargoCapacity", says: "cargo" },
   drive: { name: "Drive",      stat: "speed",         says: "speed" },
+  // Scouts only: a better sensor array scans faster
+  sensors: { name: "Sensor array", stat: "scanRate",   says: "scan speed" },
 };
 
 // SHIP UPGRADES: grades Mk I to Mk III of each part, per hull

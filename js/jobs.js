@@ -75,6 +75,7 @@ import { startWaitingOrders, finishWorkshopBatch } from "./workshop.js";
 import { getSellable } from "./bonded.js";
 import { getShipStats, getHullGrades } from "./ship-upgrades.js";
 import { finishScoutTrip } from "./exploration.js";
+import { checkContracts, nextBoardEvent, boardEvent } from "./contracts.js";
 
 
 // =============================================================
@@ -771,6 +772,9 @@ export function processJobs(state, now) {
   const first = findNextEvent(state, now);
   const startTime = first ? Math.min(first.time, now) : now;
   startWaitingAll(state, startTime);
+  // The contracts board too: finished work pays out, a new board
+  // posts its first contracts (contracts.js).
+  results.push(...checkContracts(state, startTime));
 
   // Then replay every due event, earliest first.
   // (The safety limit stops a bug from freezing the browser.)
@@ -778,15 +782,19 @@ export function processJobs(state, now) {
     const next = findNextEvent(state, now);
     if (!next) break;   // nothing else is due yet
 
-    const result = runEvent(state, next.job, next.time);
+    // A board slot due a new contract, or a job's event
+    const result = next.board !== undefined
+      ? boardEvent(state, next.board)
+      : runEvent(state, next.job, next.time);
     if (result) {
       results.push(result);
     }
 
     // Ore may have just arrived, a batch just finished, or a
     // freighter just docked: anyone waiting gets a chance to
-    // start.
+    // start. And a contract's work may now be done.
     startWaitingAll(state, next.time);
+    results.push(...checkContracts(state, next.time));
   }
 
   return mergeResultsByShip(results);
@@ -849,6 +857,13 @@ function findNextEvent(state, now) {
       best = { job, time };
     }
   }
+
+  // A contracts board slot due a new contract (contracts.js). On a
+  // tie with a job, the job goes first (strictly earlier only).
+  const board = nextBoardEvent(state, now);
+  if (board && (best === null || board.time < best.time)) {
+    best = { board: board.slot, time: board.time };
+  }
   return best;
 }
 
@@ -891,6 +906,8 @@ function runEvent(state, job, time) {
     if (amount > 0) {
       addItem(state, field.yields, amount);
       newLevels = addXp(state, "mining", xp);
+      // The running total mining contracts count from (contracts.js)
+      state.stats.mined[job.fieldId] = (state.stats.mined[job.fieldId] || 0) + amount;
     }
 
     if (job.repeat) {
@@ -983,6 +1000,12 @@ function mergeResultsByShip(results) {
   const byShip = {};   // shipId -> its merged result
 
   for (const result of results) {
+    // Contracts are never added together: each one is its own line.
+    if (result.kind === "contract" || result.kind === "posted") {
+      merged.push(result);
+      continue;
+    }
+
     // Ships are grouped by ship; refinery batches by slot and
     // recipe ("??" means: use the right side if the left is missing).
     const who = result.shipId ?? ("slot-" + result.slot + "-" + result.recipeId);

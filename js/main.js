@@ -14,7 +14,7 @@
 //   5. Start autosaving.
 // =============================================================
 
-import { RULES, ITEMS, FIELDS, SHIP_TYPES, SKILLS, HUB, HOME, HAUL_MODES, RECIPES, REFINERY, WORKSHOP_RECIPES, WORKSHOP, UPGRADES, SHIP_UPGRADES, SHIP_PARTS } from "../data/content.js";
+import { RULES, ITEMS, FIELDS, SHIP_TYPES, SKILLS, HUB, HOME, HAUL_MODES, RECIPES, REFINERY, WORKSHOP_RECIPES, WORKSHOP, UPGRADES, SHIP_UPGRADES, SHIP_PARTS, CONTRACT_KINDS, CONTRACT_FACTION, CONTRACTS } from "../data/content.js";
 import { createNewGame, findShip } from "./state.js";
 import { startMiningJob, startHaulJob, recallJob, resumeJob, getJobForShip } from "./jobs.js";
 import { advanceTo } from "./simulation.js";
@@ -37,6 +37,7 @@ import { getLevelPerk } from "./skills.js";
 import { startScoutJob, canScoutGo, chooseNextTarget, getTarget, getTargetUnlocksAtLevel, isExplorationOpen, DEEP_SCAN_ID } from "./exploration.js";
 import { describeFind } from "./exploration-screen.js";
 import { showSurveyReport } from "./report.js";
+import { deliverContract, discardContract, canDeliver, describeContract } from "./contracts.js";
 import { saveGame, loadGame, deleteSave, applyOfflineProgress, exportSave, importSave } from "./save.js";
 import { showLevelBanner } from "./banner.js";
 import { setupUI, buildFleetViews, render, addLog, formatNumber, formatXp, formatTonnes, formatDuration, formatPercent, showDevPanel } from "./ui.js";
@@ -298,6 +299,26 @@ const actions = {
     return result;
   },
 
+  // Hands a delivery contract over from the hold (contracts.js).
+  // Returns { ok } or { ok: false, reason } for the card.
+  deliverContract(slot) {
+    const check = canDeliver(state, slot);
+    if (!check.ok) return check;
+    const result = deliverContract(state, slot, gameNow(state));
+    logContract(result);
+    refresh();
+    return { ok: true };
+  },
+
+  // Throws a contract away; a new one comes after the usual wait.
+  discardContract(slot) {
+    const contract = state.contracts.slots[slot]?.contract;
+    if (contract && discardContract(state, slot, gameNow(state))) {
+      addLog(`Contract discarded: ${CONTRACT_KINDS[contract.kindId].title.toLowerCase()} for ${contract.client.toLowerCase()}. A new one will be posted in ${CONTRACTS.refillMinutes} minutes.`, "contract");
+    }
+    refresh();
+  },
+
   sellItem(itemId) {
     const wasOpen = isExplorationOpen(state);
     // sale = { credits, xp, newLevels } (see trade.js)
@@ -553,6 +574,16 @@ function tick() {
       continue;
     }
 
+    // The contracts board: finished and newly posted contracts.
+    if (result.kind === "contract") {
+      logContract(result);
+      continue;
+    }
+    if (result.kind === "posted") {
+      logPosted(result);
+      continue;
+    }
+
     const ship = findShip(state, result.shipId);
     if (result.kind === "mining") {
       const itemName = ITEMS[result.itemId].name.toLowerCase();
@@ -620,6 +651,28 @@ function logScoutResult(result) {
   }
   showSurveyReport(surveyEntries(result.surveys));
   logLevelUps(result.skillId, result.newLevels);
+}
+
+// -------------------------------------------------------------
+// logContract(result) and logPosted(result)
+// Log lines for the contracts board, e.g.
+//   "Contract complete: ore requisition for a belt co-op. +1,130 cr, +10 reputation."
+//   "New contract: Mining quota. The Kessler hauling crew wants ..."
+// Reaching a new reputation tier also gets a banner.
+// -------------------------------------------------------------
+function logContract(result) {
+  const contract = result.contract;
+  const title = CONTRACT_KINDS[contract.kindId].title.toLowerCase();
+  addLog(`Contract complete: ${title} for ${contract.client.toLowerCase()}. +${formatNumber(result.credits)} cr, +${result.reputation} reputation.`, "contract");
+  if (result.tierAfter !== result.tierBefore) {
+    addLog(`The ${CONTRACT_FACTION.name.toLowerCase()} now count you as ${result.tierAfter}. Their contracts get bigger, and pay more.`, "level");
+    showLevelBanner(`${CONTRACT_FACTION.name}: ${result.tierAfter}`, ["Bigger contracts, better pay (Contracts tab)"], "Reputation");
+  }
+}
+
+function logPosted(result) {
+  const kind = CONTRACT_KINDS[result.contract.kindId];
+  addLog(`New contract: ${kind.title}. ${describeContract(result.contract, formatTonnes)}`, "contract");
 }
 
 // -------------------------------------------------------------
@@ -696,6 +749,9 @@ function getUnlockLines(skillId, level, withPerk = true) {
     if (level === REFINERY.openAtMiningLevel) {
       lines.push("New: the refinery (Industry tab)");
     }
+    if (level === CONTRACTS.openAtMiningLevel) {
+      lines.push("New: contracts from the belt independents (Contracts tab)");
+    }
   }
   if (skillId === "refining") {
     for (const recipeId of getRecipeUnlocksAtLevel(level)) {
@@ -768,6 +824,9 @@ function logLevelUps(skillId, levels, showBanners = true) {
       }
       if (level === REFINERY.openAtMiningLevel) {
         addLog(`The ${HOME.name} refinery is open. Find it on the Industry tab.`, "level");
+      }
+      if (level === CONTRACTS.openAtMiningLevel) {
+        addLog(`Word of your outfit has reached the ${CONTRACT_FACTION.name.toLowerCase()}: they're posting contracts. Find them on the Contracts tab.`, "level");
       }
     }
     if (skillId === "refining") {
@@ -849,6 +908,8 @@ function reportOfflineProgress(report, opening = null) {
   let deepScans = 0;
   const finds = [];      // everything scouts brought home
   let explorationXp = 0;
+  const contractsDone = [];  // contracts finished while away
+  let contractsPosted = 0;
 
   for (const result of report.results) {
     if (result.kind === "mining") {
@@ -867,6 +928,10 @@ function reportOfflineProgress(report, opening = null) {
       made[result.itemId] = (made[result.itemId] || 0) + result.amount;
       manufacturingXp += result.xpGained;
       if (result.slotIdle) idleSlots.push(result.slot + 1);
+    } else if (result.kind === "contract") {
+      contractsDone.push(result);
+    } else if (result.kind === "posted") {
+      contractsPosted += 1;
     } else if (result.kind === "scout") {
       surveys.push(...result.surveys);
       deepScans += result.deepScans;
@@ -894,6 +959,13 @@ function reportOfflineProgress(report, opening = null) {
     const found = finds.length > 0 ? `, bringing home ${finds.map(describeFind).join(", ")}` : "";
     message += ` Your scouts ${parts.join(" and ")}${found}, earning ${formatXp(explorationXp)} Exploration XP.`;
   }
+  if (contractsDone.length > 0) {
+    const paid = contractsDone.reduce((sum, r) => sum + r.credits, 0);
+    message += ` ${contractsDone.length === 1 ? "A contract was" : contractsDone.length + " contracts were"} finished, paying ${formatNumber(paid)} cr.`;
+  }
+  if (contractsPosted > 0) {
+    message += ` ${contractsPosted === 1 ? "A new contract is" : contractsPosted + " new contracts are"} on the board.`;
+  }
   if (idleSlots.length > 0) {
     message += ` Workshop ${idleSlots.length === 1 ? "slot " + idleSlots[0] + " ran out of orders and is" : "slots " + idleSlots.join(" and ") + " ran out of orders and are"} idle.`;
   }
@@ -905,6 +977,11 @@ function reportOfflineProgress(report, opening = null) {
     addLog(getTarget(targetId).lore, "lore");
   }
   showSurveyReport(surveyEntries(surveys));
+
+  // A reputation tier reached while away gets its line and banner.
+  for (const result of contractsDone) {
+    if (result.tierAfter !== result.tierBefore) logContract(result);
+  }
 
   // Any level-ups while away get their own log lines after it.
   // levelsGained collects them per skill, e.g. { mining: [4, 5, 6] }.

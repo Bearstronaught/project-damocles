@@ -17,7 +17,7 @@
 // flicker and sometimes swallow clicks.)
 // =============================================================
 
-import { ITEMS, SHIP_TYPES, FIELDS, SKILLS, HULL_SIZES, COMMAND, HUB, HOME, HAUL_MODES, RECIPES, REFINERY, WORKSHOP_RECIPES, WORKSHOP, UPGRADES, SHIP_UPGRADES, SHIP_PARTS, SURVEY_TARGETS } from "../data/content.js";
+import { ITEMS, SHIP_TYPES, FIELDS, SKILLS, HULL_SIZES, COMMAND, HUB, HOME, HAUL_MODES, RECIPES, REFINERY, WORKSHOP_RECIPES, WORKSHOP, UPGRADES, SHIP_UPGRADES, SHIP_PARTS, SURVEY_TARGETS, CONTRACTS } from "../data/content.js";
 import { isOwned, canBuyIndustryUpgrade, getUpgradeLines } from "./upgrades.js";
 import { gameNow, SPEEDS } from "./clock.js";
 import { getShipStats, getHullParts, getPartGrade, getPartBonus, getNextUpgrade, canBuyShipUpgrade, getUpgradeName, getHullShortName, findUpgrade, getBonusUpTo, getShipGrades, getPendingRefits } from "./ship-upgrades.js";
@@ -32,6 +32,8 @@ import { setupNavigation, navAlert, setScreenOpen } from "./nav.js";
 import { VERSION } from "./version.js";
 import { getTarget, getAllTargetIds, getTargetStatus, canScoutGo, getScoutPlan, getScanFactor, isExplorationOpen, DEEP_SCAN_ID } from "./exploration.js";
 import { buildExplorationScreen, renderExploration } from "./exploration-screen.js";
+import { buildContractsScreen, renderContracts } from "./contracts-screen.js";
+import { isBoardOpen } from "./contracts.js";
 import { getRoleGroups, describeGroup } from "./fleet-groups.js";
 import { isRefineryOpen, getRefineJob, getSlotCount, getSlotUnlockLevel, isRecipeUnlocked, getBatchMs, getBatchOutput, hasInputs, describeInputs, getMaxSlots } from "./refinery.js";
 import { isWorkshopOpen, getWorkshopSlotCount, getWorkshopSlotUnlockLevel, getQueueLimit, isWorkshopRecipeUnlocked, getWorkshopBatchMs, getWorkshopJob, hasWorkshopInputs, describeWorkshopInputs, getMaxOrderBatches, getRunningIndex, hasSmartQueue, hasControlCentre, getStandingOrders, standingNeedsWork } from "./workshop.js";
@@ -108,6 +110,7 @@ export function setupUI(state, actions) {
   buildStationHold(actions);
   buildComponents(actions);
   buildExplorationScreen();
+  buildContractsScreen(actions, makeTwoClick);
   buildDevPanel(actions);
   setupTips(actions);
 }
@@ -651,15 +654,19 @@ function scoutStats(state, typeId, grades) {
   // Every survey target's trip length, to show the range
   const trips = Object.keys(SURVEY_TARGETS).map((id) => getScoutPlan(state, typeId, id, grades).durationMs);
   const deep = getScoutPlan(state, typeId, DEEP_SCAN_ID, grades);
-  const scanBonus = 1 - getScanFactor(state);
+  const bonusOf = (partId) => grades
+    ? getBonusUpTo(typeId, partId, grades[partId] || 0)
+    : getPartBonus(state, typeId, partId);
+  const levelBonus = 1 - getScanFactor(state);
 
   return `
     <div class="stat-block">
       <dl class="stats">
         <dt>Hull</dt>         <dd>${HULL_SIZES[shipType.size].name} · ${getShipPoints(typeId)} cmd pt${getShipPoints(typeId) === 1 ? "" : "s"}</dd>
         <dt>Cargo hold</dt>   <dd>None (finds come home with it)</dd>
-        <dt>Drive speed</dt>  <dd>${stats.speed.toFixed(2)}×</dd>
-        <dt>Scan speed</dt>   <dd>${scanBonus > 0 ? bonusTag(scanBonus).trim() + " (Exploration level)" : "Base"}</dd>
+        <dt>Drive speed</dt>  <dd>${stats.speed.toFixed(2)}×${bonusTag(bonusOf("drive"))}</dd>
+        <dt>Sensor array</dt> <dd>${bonusOf("sensors") > 0 ? bonusTag(bonusOf("sensors")).trim() + " scan speed" : "Stock"}</dd>
+        <dt>Level perk</dt>   <dd>${levelBonus > 0 ? "Scans " + formatPercent(levelBonus) + " shorter" : "None yet"}</dd>
         <dt>Survey trips</dt> <dd>${formatDuration(Math.min(...trips))} to ${formatDuration(Math.max(...trips))}</dd>
         <dt>Deep scan</dt>    <dd>${formatDuration(deep.durationMs)} · ${formatXp(deep.xp)} XP</dd>
       </dl>
@@ -1521,6 +1528,7 @@ function buildSkillCards() {
         unlocks.push({ level: field.unlockLevel, name: field.name, kind: "Field", key: "field:" + fieldId });
       }
       unlocks.push({ level: REFINERY.openAtMiningLevel, name: "Refinery (Industry tab)", kind: "Station", key: "refinery:open" });
+      unlocks.push({ level: CONTRACTS.openAtMiningLevel, name: "Contracts board (belt independents)", kind: "Contracts", key: "contracts:open" });
     }
     if (skillId === "refining") {
       for (const [recipeId, recipe] of Object.entries(RECIPES)) {
@@ -1636,6 +1644,12 @@ export function render(state, now) {
   // Its dot: a survey target a scout could go to that you haven't
   // seen on the tab yet.
   screenAlert("exploration", explorationReady);
+
+  // The Contracts tab appears at Mining 3. Its dot: a contract you
+  // haven't seen, or a delivery you can now hand over.
+  const contractsReady = renderContracts(state);
+  setScreenOpen("contracts", isBoardOpen(state));
+  screenAlert("contracts", contractsReady);
 
   // Nav dots: something you can buy that you haven't seen yet on
   // that tab (see screenAlert - the same rule for every tab).
@@ -1960,8 +1974,9 @@ function renderSpecs(state, ship, card) {
   const stats = getShipStats(state, ship.type, getShipGrades(state, ship));
   // Scouts carry nothing: their line is drive and scan speed.
   if (SHIP_TYPES[ship.type].role === "scout") {
-    const scan = 1 - getScanFactor(state);
-    const scoutHtml = `Drive <b>${stats.speed.toFixed(2)}×</b> · Scan speed <b>${scan > 0 ? "+" + formatPercent(scan) : "base"}</b>`;
+    // Scan speed: the level perk plus the sensor array, as one number
+    const scan = stats.scanRate / getScanFactor(state) - 1;
+    const scoutHtml = `Drive <b>${stats.speed.toFixed(2)}×</b> · Scan speed <b>${scan > 0.0005 ? "+" + formatPercent(scan) : "base"}</b>`;
     const specs = part(card, "specs");
     if (specs.innerHTML !== scoutHtml) specs.innerHTML = scoutHtml;
     return;
@@ -2355,6 +2370,7 @@ function renderSkills(state) {
       else if (kind === "field") unlocked = isFieldUnlocked(state, id);
       else if (kind === "recipe") unlocked = isRecipeUnlocked(state, id);
       else if (kind === "refinery") unlocked = isRefineryOpen(state);
+      else if (kind === "contracts") unlocked = isBoardOpen(state);
       else if (kind === "workshop") unlocked = isWorkshopOpen(state);
       else if (kind === "wrecipe") unlocked = isWorkshopRecipeUnlocked(state, id);
       else if (kind === "wslot") unlocked = Number(id) < getWorkshopSlotCount(state);
@@ -2712,6 +2728,7 @@ const LOG_TAGS = {
   level: "LEVEL",
   fleet: "FLEET",
   explore: "SCAN",
+  contract: "CONTRACT",
   lore: "LORE",
   system: "SYS",
 };

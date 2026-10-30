@@ -1,0 +1,465 @@
+// =============================================================
+// js/contracts.js
+// -------------------------------------------------------------
+// THE CONTRACTS BOARD: jobs posted by the belt independents
+// (design doc, Contracts board - agreed 30 Oct).
+//
+// The board has a few SLOTS (3). Each slot holds one contract, or
+// is waiting for the next one to be posted. Contracts never fail
+// or expire. When one is finished or discarded, its slot gets a
+// new contract CONTRACTS.refillMinutes later.
+//
+// Kinds of contract (CONTRACT_KINDS in content.js):
+//   deliver   hand goods over from the hold (a button press)
+//   mine      bring home ore from one field  \
+//   refine    make metal at the refinery      |  these finish by
+//   survey    survey one target               |  themselves, as the
+//   deepScan  run some deep scans            /   work gets done
+//
+// Finishing one pays credits and REPUTATION with the belt
+// independents. Higher reputation tiers make contracts bigger and
+// better paid (REPUTATION_TIERS).
+//
+// HOW IT STAYS FAIR OFFLINE: contracts are posted and finished
+// inside the game's one timeline (jobs.js, processJobs), at the
+// moment they're due, and which contract gets posted comes from
+// a dice roll fixed for the save (like deep scan finds). So an
+// hour away gives exactly the same board as an hour played.
+//
+// A contract looks like this:
+//   {
+//     number: 12,                     the 12th contract this save
+//     kindId: "mining_quota",         a CONTRACT_KINDS key
+//     itemId: "nickel_ore",           what it's about (or null)
+//     fieldId: "outer_belt",          mining quotas only (or null)
+//     targetId: null,                 survey requests only
+//     amount: 280,                    tonnes, surveys or scans
+//     baseline: 1200,                 the counter when it was posted:
+//                                     progress = counter now - baseline
+//     credits: 1340,                  what it pays
+//     reputation: 10,                 and the reputation it earns
+//     client: "A belt co-op",
+//   }
+// =============================================================
+
+import { CONTRACT_KINDS, CONTRACT_CLIENTS, REPUTATION_TIERS, CONTRACTS, FIELDS, RECIPES, WORKSHOP_RECIPES, ITEMS, SURVEY_TARGETS, SHIP_TYPES } from "../data/content.js";
+import { getLevel, isFieldUnlocked } from "./skills.js";
+import { getSellable } from "./bonded.js";
+import { isRefineryOpen, isRecipeUnlocked } from "./refinery.js";
+import { isWorkshopOpen, isWorkshopRecipeUnlocked } from "./workshop.js";
+import { isSurveyed, isExplorationOpen, rollFor } from "./exploration.js";
+
+
+// -------------------------------------------------------------
+// createContracts()
+// A fresh board (new games, and old saves upgraded in save.js):
+// every slot empty and never posted (readyAt null = post as soon
+// as the board opens).
+// -------------------------------------------------------------
+export function createContracts() {
+  const slots = [];
+  for (let i = 0; i < CONTRACTS.slots; i++) {
+    slots.push({ contract: null, readyAt: null });
+  }
+  return { slots, posted: 0, completed: 0, reputation: 0 };
+}
+
+// -------------------------------------------------------------
+// isBoardOpen(state)
+// The belt independents start posting at a Mining level.
+// -------------------------------------------------------------
+export function isBoardOpen(state) {
+  return getLevel(state, "mining") >= CONTRACTS.openAtMiningLevel;
+}
+
+
+// =============================================================
+// REPUTATION
+// =============================================================
+
+// -------------------------------------------------------------
+// getTier(state, reputation)
+// The reputation tier the player is in, e.g.
+//   { index: 1, name: "Known", from: 100, size: 1.5,
+//     next: { name: "Trusted", from: 300, ... } }   (next: null at the top)
+// -------------------------------------------------------------
+export function getTier(state, reputation = state.contracts.reputation) {
+  let index = 0;
+  REPUTATION_TIERS.forEach((tier, i) => {
+    if (reputation >= tier.from) index = i;
+  });
+  return { index, ...REPUTATION_TIERS[index], next: REPUTATION_TIERS[index + 1] || null };
+}
+
+
+// =============================================================
+// WHAT A CONTRACT CAN ASK FOR
+// =============================================================
+
+// -------------------------------------------------------------
+// getSubjects(state, kindId)
+// Everything this kind of contract could be about RIGHT NOW, as a
+// list of { itemId, fieldId, targetId } (unused ones null). An
+// empty list means the player can't do this kind yet, so it isn't
+// posted. Things already on the board are left out (so the board
+// doesn't show the same contract twice) unless "allowRepeats" is
+// true: early on there may only be one or two things the player
+// can do, and an empty board would be worse than a repeat.
+// -------------------------------------------------------------
+export function getSubjects(state, kindId, allowRepeats = false) {
+  const kind = CONTRACT_KINDS[kindId];
+  let subjects = [];
+
+  if (kind.kind === "deliver" || kind.kind === "mine" || kind.kind === "refine") {
+    // Goods the player can get: ore from fields they can mine,
+    // metal from recipes they have, products likewise.
+    if (kind.goods === "ore") {
+      for (const [fieldId, field] of Object.entries(FIELDS)) {
+        if (isFieldUnlocked(state, fieldId)) {
+          // A mining quota is about one field; a delivery just the ore.
+          subjects.push({ itemId: field.yields, fieldId: kind.kind === "mine" ? fieldId : null, targetId: null });
+        }
+      }
+    }
+    if (kind.goods === "metal" && isRefineryOpen(state)) {
+      for (const recipeId of Object.keys(RECIPES)) {
+        if (isRecipeUnlocked(state, recipeId)) {
+          subjects.push({ itemId: RECIPES[recipeId].output, fieldId: null, targetId: null });
+        }
+      }
+    }
+    if (kind.goods === "product" && isWorkshopOpen(state)) {
+      for (const recipeId of Object.keys(WORKSHOP_RECIPES)) {
+        if (isWorkshopRecipeUnlocked(state, recipeId)) {
+          subjects.push({ itemId: WORKSHOP_RECIPES[recipeId].output, fieldId: null, targetId: null });
+        }
+      }
+    }
+  }
+
+  if (kind.kind === "survey" && isExplorationOpen(state)) {
+    // Targets not yet surveyed, at most a couple of levels above the
+    // player (something to work towards), whose earlier stage is done.
+    const reach = getLevel(state, "exploration") + CONTRACTS.surveyLevelsAhead;
+    for (const [targetId, target] of Object.entries(SURVEY_TARGETS)) {
+      if (!isSurveyed(state, targetId) && target.unlockLevel <= reach &&
+          (!target.requires || isSurveyed(state, target.requires))) {
+        subjects.push({ itemId: null, fieldId: null, targetId });
+      }
+    }
+  }
+
+  if (kind.kind === "deepScan") {
+    // Only with a scout to run them.
+    if (state.ships.some((ship) => SHIP_TYPES[ship.type].role === "scout")) {
+      subjects.push({ itemId: null, fieldId: null, targetId: null });
+    }
+  }
+
+  if (allowRepeats) return subjects;
+
+  // Leave out anything already on the board (same kind and subject).
+  const onBoard = state.contracts.slots.map((slot) => slot.contract).filter(Boolean);
+  subjects = subjects.filter((subject) => !onBoard.some((c) =>
+    c.kindId === kindId && c.itemId === subject.itemId && c.fieldId === subject.fieldId && c.targetId === subject.targetId));
+  return subjects;
+}
+
+
+// =============================================================
+// POSTING A CONTRACT
+// =============================================================
+
+// -------------------------------------------------------------
+// postContract(state, slotIndex)
+// Puts a new contract in a slot: a kind the player can do, picked
+// by its weight, then what it's about, how big, and who's asking.
+// Every choice is a dice roll fixed for this save and this
+// contract's number (rollFor, from exploration.js), so it always
+// comes out the same. Returns a result for the log, or null if
+// nothing can be posted yet (the slot then waits, see
+// checkContracts).
+// -------------------------------------------------------------
+export function postContract(state, slotIndex) {
+  const board = state.contracts;
+  const slot = board.slots[slotIndex];
+
+  // The kinds the player can do now, each with its subjects. New
+  // contracts first; if everything the player can do is already on
+  // the board, a repeat (it'll differ in size, pay and client).
+  let options = getOptions(state, false);
+  if (options.length === 0) options = getOptions(state, true);
+  if (options.length === 0) {
+    return null;
+  }
+  const totalWeight = options.reduce((sum, option) => sum + CONTRACT_KINDS[option.kindId].weight, 0);
+
+  // A separate stream of rolls from the deep scans' (seed + 7777),
+  // and a fresh number for each contract.
+  const seed = (state.exploration.seed + 7777) >>> 0;
+  const number = board.posted;
+  const roll = (which) => rollFor(seed, number, which);
+  board.posted += 1;
+
+  // 1. Which kind: walk along the weights until the roll lands
+  let pick = roll(0) * totalWeight;
+  let chosen = options[options.length - 1];
+  for (const option of options) {
+    pick -= CONTRACT_KINDS[option.kindId].weight;
+    if (pick < 0) { chosen = option; break; }
+  }
+  const kind = CONTRACT_KINDS[chosen.kindId];
+
+  // 2. What it's about
+  const subject = chosen.subjects[Math.floor(roll(1) * chosen.subjects.length)];
+
+  // 3. How big: 75% to 125% of the kind's amount, times the tier's size
+  const scale = getTier(state).size * (0.75 + 0.5 * roll(2));
+  let amount;
+  if (kind.kind === "survey") {
+    amount = 1;
+  } else if (kind.kind === "deepScan") {
+    amount = Math.max(1, Math.round(kind.amount * scale));
+  } else {
+    amount = Math.max(10, Math.round((kind.amount * scale) / 10) * 10);   // whole tens of tonnes
+  }
+
+  // 4. What it pays (rounded to 10 cr)
+  let credits;
+  if (kind.kind === "survey") {
+    credits = kind.pay * (SURVEY_TARGETS[subject.targetId].unlockLevel + 4);
+  } else if (kind.kind === "deepScan") {
+    credits = kind.pay * amount;
+  } else {
+    credits = amount * ITEMS[subject.itemId].sellPrice * kind.pay;
+  }
+  credits = Math.round(credits / 10) * 10;
+
+  const contract = {
+    number,
+    kindId: chosen.kindId,
+    itemId: subject.itemId,
+    fieldId: subject.fieldId,
+    targetId: subject.targetId,
+    amount,
+    baseline: getCounter(state, chosen.kindId, subject),
+    credits,
+    reputation: kind.reputation,
+    client: CONTRACT_CLIENTS[Math.floor(roll(3) * CONTRACT_CLIENTS.length)],
+  };
+  slot.contract = contract;
+  slot.readyAt = null;
+  return { kind: "posted", slot: slotIndex, contract, trips: 1, xpGained: 0, newLevels: [] };
+}
+
+// The kinds that could be posted, each with its subjects:
+//   [{ kindId: "ore_requisition", subjects: [...] }, ...]
+function getOptions(state, allowRepeats) {
+  const options = [];
+  for (const kindId of Object.keys(CONTRACT_KINDS)) {
+    const subjects = getSubjects(state, kindId, allowRepeats);
+    if (subjects.length > 0) options.push({ kindId, subjects });
+  }
+  return options;
+}
+
+// -------------------------------------------------------------
+// getCounter(state, kindId, subject)
+// The running total a work contract counts from, e.g. all the
+// nickel ore ever brought home from the Outer Belt. Progress is
+// this number now minus what it was when the contract was posted.
+// (Deliveries and surveys don't count anything: 0.)
+// -------------------------------------------------------------
+function getCounter(state, kindId, subject) {
+  const kind = CONTRACT_KINDS[kindId].kind;
+  if (kind === "mine") return state.stats.mined[subject.fieldId] || 0;
+  if (kind === "refine") return state.stats.refined[subject.itemId] || 0;
+  if (kind === "deepScan") return state.exploration.deepScans;
+  return 0;
+}
+
+
+// =============================================================
+// PROGRESS AND FINISHING
+// =============================================================
+
+// -------------------------------------------------------------
+// getProgress(state, contract)
+// How far along it is: { have, need }, e.g. { have: 120, need: 280 }.
+// For a delivery, "have" is what's in the hold to hand over
+// (bonded stock doesn't count: it's never sold).
+// -------------------------------------------------------------
+export function getProgress(state, contract) {
+  const kind = CONTRACT_KINDS[contract.kindId].kind;
+  let have;
+  if (kind === "deliver") have = getSellable(state, contract.itemId);
+  else if (kind === "survey") have = isSurveyed(state, contract.targetId) ? 1 : 0;
+  else have = getCounter(state, contract.kindId, contract) - contract.baseline;
+  return { have: Math.min(have, contract.amount), need: contract.amount };
+}
+
+// -------------------------------------------------------------
+// canDeliver(state, slotIndex)
+// Can the player hand this delivery over now? { ok, reason }
+// -------------------------------------------------------------
+export function canDeliver(state, slotIndex) {
+  const contract = state.contracts.slots[slotIndex]?.contract;
+  if (!contract) return { ok: false, reason: "No contract here." };
+  if (CONTRACT_KINDS[contract.kindId].kind !== "deliver") {
+    return { ok: false, reason: "This one finishes by itself when the work is done." };
+  }
+  const have = getSellable(state, contract.itemId);
+  if (have < contract.amount) {
+    return { ok: false, reason: `Need ${contract.amount - have} t more ${ITEMS[contract.itemId].name.toLowerCase()}.` };
+  }
+  return { ok: true };
+}
+
+// -------------------------------------------------------------
+// deliverContract(state, slotIndex, now)
+// The player hands a delivery over: the goods leave the hold and
+// the contract pays. Returns the result (see completeContract),
+// or null if it couldn't be delivered.
+// -------------------------------------------------------------
+export function deliverContract(state, slotIndex, now) {
+  if (!canDeliver(state, slotIndex).ok) return null;
+  const contract = state.contracts.slots[slotIndex].contract;
+  state.inventory[contract.itemId] -= contract.amount;
+  return completeContract(state, slotIndex, now);
+}
+
+// -------------------------------------------------------------
+// discardContract(state, slotIndex, now)
+// The player doesn't want it: it goes, and a new one is posted
+// after the usual wait. Returns true if one was discarded.
+// -------------------------------------------------------------
+export function discardContract(state, slotIndex, now) {
+  const slot = state.contracts.slots[slotIndex];
+  if (!slot || !slot.contract) return false;
+  slot.contract = null;
+  slot.readyAt = now + CONTRACTS.refillMinutes * 60 * 1000;
+  return true;
+}
+
+// -------------------------------------------------------------
+// completeContract(state, slotIndex, time)
+// Pays out a finished contract and starts the wait for the next.
+// Returns a result for the log:
+//   { kind: "contract", slot, contract, credits, reputation,
+//     tierBefore, tierAfter, ... }
+// -------------------------------------------------------------
+function completeContract(state, slotIndex, time) {
+  const board = state.contracts;
+  const slot = board.slots[slotIndex];
+  const contract = slot.contract;
+  const tierBefore = getTier(state).name;
+
+  state.credits += contract.credits;
+  board.reputation += contract.reputation;
+  board.completed += 1;
+
+  slot.contract = null;
+  slot.readyAt = time + CONTRACTS.refillMinutes * 60 * 1000;
+
+  return {
+    kind: "contract",
+    slot: slotIndex,
+    contract,
+    credits: contract.credits,
+    reputation: contract.reputation,
+    tierBefore,
+    tierAfter: getTier(state).name,
+    trips: 1,
+    xpGained: 0,
+    newLevels: [],
+  };
+}
+
+
+// =============================================================
+// THE BOARD ON THE TIMELINE (called by jobs.js, processJobs)
+// =============================================================
+
+// -------------------------------------------------------------
+// checkContracts(state, time)
+// Runs after every event in the timeline (and once at the start):
+//   - work contracts whose work is now done are paid out
+//   - slots never posted to (a new board) get a contract now
+// Returns a list of results (finished and posted contracts).
+// -------------------------------------------------------------
+export function checkContracts(state, time) {
+  const results = [];
+  if (!isBoardOpen(state)) return results;
+
+  state.contracts.slots.forEach((slot, index) => {
+    const contract = slot.contract;
+    if (contract && CONTRACT_KINDS[contract.kindId].kind !== "deliver") {
+      const progress = getProgress(state, contract);
+      if (progress.have >= progress.need) {
+        results.push(completeContract(state, index, time));
+      }
+    }
+  });
+
+  // Empty slots that have never had a contract (readyAt null) are
+  // filled at once. (Slots waiting after a finished or discarded
+  // contract are posted at their readyAt, by boardEvent below.)
+  state.contracts.slots.forEach((slot, index) => {
+    if (!slot.contract && slot.readyAt === null) {
+      const posted = postContract(state, index);
+      if (posted) results.push(posted);
+    }
+  });
+  return results;
+}
+
+// -------------------------------------------------------------
+// nextBoardEvent(state, now)
+// The earliest slot due a new contract at or before "now", as
+// { slot, time }, or null. jobs.js plays it at that exact time,
+// in order with ships docking and batches finishing.
+// -------------------------------------------------------------
+export function nextBoardEvent(state, now) {
+  if (!isBoardOpen(state)) return null;
+  let best = null;
+  state.contracts.slots.forEach((slot, index) => {
+    if (!slot.contract && slot.readyAt !== null && slot.readyAt <= now &&
+        (best === null || slot.readyAt < best.time)) {
+      best = { slot: index, time: slot.readyAt };
+    }
+  });
+  return best;
+}
+
+// -------------------------------------------------------------
+// boardEvent(state, slotIndex)
+// A slot's wait is over: post its new contract. If there's nothing
+// the player can do yet, the slot is left to post as soon as there
+// is (readyAt null, picked up by checkContracts).
+// -------------------------------------------------------------
+export function boardEvent(state, slotIndex) {
+  const posted = postContract(state, slotIndex);
+  if (!posted) {
+    state.contracts.slots[slotIndex].readyAt = null;
+  }
+  return posted;
+}
+
+// -------------------------------------------------------------
+// describeContract(contract)
+// The client's request in words, from the kind's text, e.g.
+// "A belt co-op needs 150 t of iron ore. Hand it over from your hold."
+// "formatTonnes" is passed in from ui.js (so this file has no
+// screen code in it).
+// -------------------------------------------------------------
+export function describeContract(contract, formatTonnes) {
+  const kind = CONTRACT_KINDS[contract.kindId];
+  const amount = kind.kind === "deepScan" ? String(contract.amount)
+    : kind.kind === "survey" ? "1" : formatTonnes(contract.amount);
+  return kind.text
+    .replace("{client}", contract.client)
+    .replace("{amount}", amount)
+    .replace("{item}", contract.itemId ? ITEMS[contract.itemId].name.toLowerCase() : "")
+    .replace("{field}", contract.fieldId ? FIELDS[contract.fieldId].name : "")
+    .replace("{target}", contract.targetId ? SURVEY_TARGETS[contract.targetId].name : "");
+}

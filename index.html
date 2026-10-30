@@ -26,45 +26,47 @@
        and new files after an update. tools/release.js writes this
        block; see that file for how it works. -->
   <!-- version:start (written by tools/release.js - don't edit by hand) -->
-  <meta name="game-version" content="0.2.1">
+  <meta name="game-version" content="0.2.2">
   <script type="importmap">
   {
     "imports": {
-      "./data/balance.js": "./data/balance.js?v=0.2.1",
-      "./data/content.js": "./data/content.js?v=0.2.1",
-      "./js/art.js": "./js/art.js?v=0.2.1",
-      "./js/banner.js": "./js/banner.js?v=0.2.1",
-      "./js/bonded.js": "./js/bonded.js?v=0.2.1",
-      "./js/clock.js": "./js/clock.js?v=0.2.1",
-      "./js/command.js": "./js/command.js?v=0.2.1",
-      "./js/dev-switch.js": "./js/dev-switch.js?v=0.2.1",
-      "./js/exploration-screen.js": "./js/exploration-screen.js?v=0.2.1",
-      "./js/exploration.js": "./js/exploration.js?v=0.2.1",
-      "./js/fleet-groups.js": "./js/fleet-groups.js?v=0.2.1",
-      "./js/jobs.js": "./js/jobs.js?v=0.2.1",
-      "./js/main.js": "./js/main.js?v=0.2.1",
-      "./js/nav.js": "./js/nav.js?v=0.2.1",
-      "./js/playtest.js": "./js/playtest.js?v=0.2.1",
-      "./js/refinery.js": "./js/refinery.js?v=0.2.1",
-      "./js/report.js": "./js/report.js?v=0.2.1",
-      "./js/save.js": "./js/save.js?v=0.2.1",
-      "./js/ship-upgrades.js": "./js/ship-upgrades.js?v=0.2.1",
-      "./js/shipyard.js": "./js/shipyard.js?v=0.2.1",
-      "./js/simulation.js": "./js/simulation.js?v=0.2.1",
-      "./js/skills.js": "./js/skills.js?v=0.2.1",
-      "./js/state.js": "./js/state.js?v=0.2.1",
-      "./js/trade.js": "./js/trade.js?v=0.2.1",
-      "./js/ui.js": "./js/ui.js?v=0.2.1",
-      "./js/upgrades.js": "./js/upgrades.js?v=0.2.1",
-      "./js/version.js": "./js/version.js?v=0.2.1",
-      "./js/workshop.js": "./js/workshop.js?v=0.2.1"
+      "./data/balance.js": "./data/balance.js?v=0.2.2",
+      "./data/content.js": "./data/content.js?v=0.2.2",
+      "./js/art.js": "./js/art.js?v=0.2.2",
+      "./js/banner.js": "./js/banner.js?v=0.2.2",
+      "./js/bonded.js": "./js/bonded.js?v=0.2.2",
+      "./js/clock.js": "./js/clock.js?v=0.2.2",
+      "./js/command.js": "./js/command.js?v=0.2.2",
+      "./js/contracts-screen.js": "./js/contracts-screen.js?v=0.2.2",
+      "./js/contracts.js": "./js/contracts.js?v=0.2.2",
+      "./js/dev-switch.js": "./js/dev-switch.js?v=0.2.2",
+      "./js/exploration-screen.js": "./js/exploration-screen.js?v=0.2.2",
+      "./js/exploration.js": "./js/exploration.js?v=0.2.2",
+      "./js/fleet-groups.js": "./js/fleet-groups.js?v=0.2.2",
+      "./js/jobs.js": "./js/jobs.js?v=0.2.2",
+      "./js/main.js": "./js/main.js?v=0.2.2",
+      "./js/nav.js": "./js/nav.js?v=0.2.2",
+      "./js/playtest.js": "./js/playtest.js?v=0.2.2",
+      "./js/refinery.js": "./js/refinery.js?v=0.2.2",
+      "./js/report.js": "./js/report.js?v=0.2.2",
+      "./js/save.js": "./js/save.js?v=0.2.2",
+      "./js/ship-upgrades.js": "./js/ship-upgrades.js?v=0.2.2",
+      "./js/shipyard.js": "./js/shipyard.js?v=0.2.2",
+      "./js/simulation.js": "./js/simulation.js?v=0.2.2",
+      "./js/skills.js": "./js/skills.js?v=0.2.2",
+      "./js/state.js": "./js/state.js?v=0.2.2",
+      "./js/trade.js": "./js/trade.js?v=0.2.2",
+      "./js/ui.js": "./js/ui.js?v=0.2.2",
+      "./js/upgrades.js": "./js/upgrades.js?v=0.2.2",
+      "./js/version.js": "./js/version.js?v=0.2.2",
+      "./js/workshop.js": "./js/workshop.js?v=0.2.2"
     }
   }
   </script>
   <!-- version:end -->
 
   <!-- Our own styles: the tactical display look -->
-  <link rel="stylesheet" href="css/style.css?v=0.2.1">
+  <link rel="stylesheet" href="css/style.css?v=0.2.2">
 </head>
 <body>
 
@@ -102,6 +104,11 @@
       <circle cx="12" cy="12" r="4"/>
       <path d="M12 12l6-6"/>
     </symbol>
+    <!-- Contracts: a clipboard with lines -->
+    <symbol id="icon-contracts" viewBox="0 0 24 24">
+      <path d="M6 4h12v17H6z"/>
+      <path d="M9 3h6v3H9zM9 10h6M9 14h6M9 18h4"/>
+    </symbol>
     <!-- Skills: three rising bars -->
     <symbol id="icon-skills" viewBox="0 0 24 24">
       <path d="M5 20v-6M12 20V9M19 20V4"/>
@@ -138,10 +145,10 @@
        opens. ui.js (setupNavigation) wires them all up, so a new
        screen only needs a new button here and a new <section>.
 
-       Items sit in groups with small headings (agreed 30 Oct). The
-       Factions group (Contracts) is added when that screen is built.
-       A screen that isn't open yet (Exploration, before the first
-       sale) has its buttons hidden by nav.js (setScreenOpen). -->
+       Items sit in groups with small headings (agreed 30 Oct).
+       A screen that isn't open yet (Exploration before the first
+       sale, Contracts before Mining 3) has its buttons hidden by
+       nav.js (setScreenOpen). -->
   <nav class="sidebar" id="sidebar" aria-label="Main menu">
     <div class="sidebar-head">
       <span class="sidebar-label">Menu</span>
@@ -183,6 +190,13 @@
       <div class="nav-heading">Expansion</div>
       <button class="nav-btn" data-screen="exploration" title="Exploration">
         <svg class="icon"><use href="#icon-exploration"/></svg><span class="nav-text">Exploration</span>
+      </button>
+    </div>
+
+    <div class="nav-group" data-group-for="contracts">
+      <div class="nav-heading">Factions</div>
+      <button class="nav-btn" data-screen="contracts" title="Contracts">
+        <svg class="icon"><use href="#icon-contracts"/></svg><span class="nav-text">Contracts</span>
       </button>
     </div>
 
@@ -568,6 +582,38 @@
       </div>
     </section>
 
+    <!-- ===================== CONTRACTS SCREEN ===================== -->
+    <!-- The belt independents' board (contracts-screen.js fills it
+         in) and your reputation with them. Opens at Mining 3. -->
+    <section class="screen layout layout-flow" data-screen="contracts" hidden>
+
+      <!-- The board: one card per slot -->
+      <div class="panel">
+        <div class="panel-head">
+          <h2 class="panel-title">Contracts board</h2>
+          <span class="panel-tag" id="faction-name"></span>
+        </div>
+        <p class="flow-note">Contracts never expire. Deliveries are handed over from your hold; work contracts pay as soon as the work is done. Finished or discarded, a new one is posted 10 minutes later.</p>
+        <div class="card-grid contract-grid" id="contract-list"></div>
+      </div>
+
+      <!-- Reputation with them, and what each tier brings -->
+      <div class="panel">
+        <div class="panel-head">
+          <h2 class="panel-title">Reputation</h2>
+          <span class="panel-tag" id="contracts-done"></span>
+        </div>
+        <p class="price-note" id="faction-desc"></p>
+        <div class="rep-head">
+          <span class="rep-tier" id="rep-tier"></span>
+          <span class="rep-points" id="rep-points"></span>
+        </div>
+        <div class="progress"><div class="progress-fill xp-fill" id="rep-bar"></div></div>
+        <p class="price-note" id="rep-next"></p>
+        <ul class="tier-list" id="tier-list"></ul>
+      </div>
+    </section>
+
     <!-- ===================== SKILLS SCREEN ===================== -->
     <section class="screen layout" data-screen="skills" hidden>
       <div class="panel panel-wide">
@@ -627,7 +673,7 @@
     to share code. (This is why the game needs a small web
     server to run - see README.md.)
   -->
-  <script type="module" src="js/main.js?v=0.2.1"></script>
+  <script type="module" src="js/main.js?v=0.2.2"></script>
   <!-- The tooltip for hardpoints on ship drawings (ui.js,
        setupHardpointTips): the part's name, then what's fitted. -->
   <div class="hardpoint-tip" id="hardpoint-tip" role="tooltip" hidden><b></b><span></span></div>

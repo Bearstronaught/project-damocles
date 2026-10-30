@@ -41,7 +41,8 @@ import { addItemWithCarry } from "../js/state.js";
 import { UPGRADES } from "../data/content.js";
 import { getMaxSlots, getBatchOutput } from "../js/refinery.js";
 import { startScoutJob, getScoutPlan, getTargetStatus, chooseNextTarget, rollFor, isExplorationOpen, DEEP_SCAN_ID } from "../js/exploration.js";
-import { SURVEY_TARGETS, DEEP_SCAN } from "../data/content.js";
+import { SURVEY_TARGETS, DEEP_SCAN, CONTRACT_KINDS, CONTRACTS, REPUTATION_TIERS } from "../data/content.js";
+import { isBoardOpen, getTier, getSubjects, getProgress, canDeliver, deliverContract, discardContract, checkContracts } from "../js/contracts.js";
 import { getMaxOrderBatches, addStandingOrder, removeStandingOrder, getStandingOrders } from "../js/workshop.js";
 import { XP_TABLE, getLevelForXp, getLevel, getLevelProgress, addXp, isShipTypeUnlocked, MAX_LEVEL } from "../js/skills.js";
 import { canBuyShip, buyShip, canSellShip, sellShip, getSellValue, renameShip, getShipPrice } from "../js/shipyard.js";
@@ -3356,6 +3357,28 @@ test("Exploration: deep scans needed per level start at 1 and rise with the leve
   assert.ok(scansFor[15] >= 3 * scansFor[3], "late levels should take several times the early ones");
 });
 
+test("Pathfinder components: a sensor array Mk I makes scans 15% faster", () => {
+  const state = gameWithScout();
+  const before = getScoutPlan(state, "pathfinder", "inner_belt_survey");
+  assert.equal(canBuyShipUpgrade(state, "pathfinder_sensors_1").ok, false);   // Exploration 2 needed
+  state.skills.exploration.xp = XP_TABLE[2];
+  assert.equal(buyShipUpgrade(state, "pathfinder_sensors_1").ok, true);
+  const after = getScoutPlan(state, "pathfinder", "inner_belt_survey");
+  // Level 2 shortens it 0.5%, the sensors divide it by 1.15
+  assert.equal(after.scanMs, Math.round(SURVEY_TARGETS.inner_belt_survey.scanSeconds * 1000 * 0.995 / 1.15));
+  assert.equal(after.outboundMs, before.outboundMs);    // the drive is untouched
+});
+
+test("Pathfinder components: the drive Mk I makes trips 10% faster, and only scouts have sensors", () => {
+  const state = gameWithScout();
+  state.skills.exploration.xp = XP_TABLE[4];
+  buyShipUpgrade(state, "pathfinder_drive_1");
+  const plan = getScoutPlan(state, "pathfinder", "inner_belt_survey");
+  assert.equal(plan.outboundMs, Math.round(SURVEY_TARGETS.inner_belt_survey.travelSeconds / (SHIP_TYPES.pathfinder.speed * 1.1) * 1000));
+  assert.deepEqual(getHullParts("pathfinder"), ["drive", "sensors"]);
+  assert.equal(getShipStats(state, "prospector").scanRate, undefined);
+});
+
 test("Exploration: locked targets and out-of-order wreck stages are refused", () => {
   const state = gameWithScout();
   assert.equal(getTargetStatus(state, "wreck_1"), "locked");               // Exploration 3 needed
@@ -3469,6 +3492,175 @@ test("Exploration: a version 14 save gains Exploration, and the first sale if it
 
   const b = parseSave(JSON.stringify(fresh));
   assert.equal(b.milestones.firstSale, undefined);        // hasn't sold anything yet
+});
+
+// =============================================================
+// CONTRACTS (the belt independents' board)
+// =============================================================
+
+// A game with the board open (Mining 3) and the first contracts posted.
+function gameWithBoard() {
+  const state = newGame();
+  state.skills.mining.xp = XP_TABLE[CONTRACTS.openAtMiningLevel];
+  processJobs(state, START);
+  return state;
+}
+
+// Puts a contract of one kind in slot 0 (instead of whatever was rolled).
+function forceContract(state, kindId, fields) {
+  const kind = CONTRACT_KINDS[kindId];
+  state.contracts.slots[0].contract = {
+    number: 999, kindId, itemId: null, fieldId: null, targetId: null,
+    amount: kind.amount, baseline: 0, credits: 1000, reputation: kind.reputation,
+    client: "Test client", ...fields,
+  };
+  return state.contracts.slots[0].contract;
+}
+
+test("Contracts: the board opens at Mining 3 with three contracts", () => {
+  const state = newGame();
+  processJobs(state, START);
+  assert.equal(isBoardOpen(state), false);
+  assert.ok(state.contracts.slots.every((slot) => slot.contract === null));
+  const open = gameWithBoard();
+  assert.equal(open.contracts.slots.length, CONTRACTS.slots);
+  assert.ok(open.contracts.slots.every((slot) => slot.contract !== null));
+});
+
+test("Contracts: only kinds the player can do are posted (no metal before the refinery)", () => {
+  const state = gameWithBoard();
+  assert.equal(getSubjects(state, "metal_requisition").length, 0);
+  assert.equal(getSubjects(state, "survey_request").length, 0);     // Exploration not open
+  assert.equal(getSubjects(state, "deep_scan_contract").length, 0); // no scout
+  for (const slot of state.contracts.slots) {
+    assert.ok(["ore_requisition", "mining_quota"].includes(slot.contract.kindId), slot.contract.kindId);
+  }
+  // Only two different contracts exist this early (iron ore, Inner
+  // Belt quota), so the third is a repeat of one: board still full.
+  const keys = state.contracts.slots.map((s) => s.contract.kindId + s.contract.itemId + s.contract.fieldId);
+  assert.equal(new Set(keys).size, 2);
+});
+
+test("Contracts: with plenty to choose from, the board never shows the same contract twice", () => {
+  const state = newGame();
+  state.skills.mining.xp = XP_TABLE[12];               // both fields, refinery open
+  state.skills.refining.xp = XP_TABLE[15];             // every metal recipe
+  for (let round = 0; round < 20; round++) {
+    for (let slot = 0; slot < CONTRACTS.slots; slot++) discardContract(state, slot, START);
+    for (const slot of state.contracts.slots) slot.readyAt = null;
+    checkContracts(state, START);
+    const keys = state.contracts.slots.map((s) => s.contract.kindId + s.contract.itemId + s.contract.fieldId);
+    assert.equal(new Set(keys).size, keys.length, keys.join(" / "));
+  }
+});
+
+test("Contracts: a delivery takes the goods and pays, and the slot refills 10 minutes later", () => {
+  const state = gameWithBoard();
+  const contract = forceContract(state, "ore_requisition", { itemId: "iron_ore", amount: 150, credits: 1130 });
+  assert.equal(canDeliver(state, 0).ok, false);
+  assert.match(canDeliver(state, 0).reason, /150 t more iron ore/);
+  state.inventory.iron_ore = 200;
+  const credits = state.credits;
+  const result = deliverContract(state, 0, START);
+  assert.equal(result.kind, "contract");
+  assert.equal(state.inventory.iron_ore, 50);
+  assert.equal(state.credits, credits + 1130);
+  assert.equal(state.contracts.reputation, contract.reputation);
+  assert.equal(state.contracts.slots[0].contract, null);
+
+  // A new contract arrives exactly 10 minutes later, not before
+  processJobs(state, START + CONTRACTS.refillMinutes * MINUTE - 1);
+  assert.equal(state.contracts.slots[0].contract, null);
+  processJobs(state, START + CONTRACTS.refillMinutes * MINUTE);
+  assert.ok(state.contracts.slots[0].contract);
+});
+
+test("Contracts: deliveries leave bonded stock alone", () => {
+  const state = gameWithBoard();
+  forceContract(state, "ore_requisition", { itemId: "iron_ore", amount: 150 });
+  state.inventory.iron_ore = 200;
+  setBond(state, "iron_ore", 100);
+  assert.equal(canDeliver(state, 0).ok, false);       // only 100 t above the bond
+  assert.equal(getProgress(state, state.contracts.slots[0].contract).have, 100);
+});
+
+test("Contracts: a mining quota counts ore brought home from its field after posting, then pays itself", () => {
+  const state = gameWithBoard();
+  state.stats.mined.inner_belt = 500;                 // mined before: doesn't count
+  forceContract(state, "mining_quota", { itemId: "iron_ore", fieldId: "inner_belt", amount: 240, baseline: 500, credits: 480 });
+  const credits = state.credits;
+  startMiningJob(state, "ship-1", "inner_belt", START);
+  const trip = state.jobs[0].durationMs;
+  processJobs(state, START + trip);                   // 120 t
+  assert.equal(getProgress(state, state.contracts.slots[0].contract).have, 120);
+  const results = processJobs(state, START + trip * 2);   // 240 t: done
+  assert.ok(results.some((r) => r.kind === "contract"));
+  assert.equal(state.credits, credits + 480);
+  assert.equal(state.inventory.iron_ore, 240);       // the ore is still yours
+});
+
+test("Contracts: a survey request pays when the target is surveyed", () => {
+  const state = gameWithScout();
+  state.skills.mining.xp = XP_TABLE[3];
+  processJobs(state, START);
+  forceContract(state, "survey_request", { targetId: "inner_belt_survey", amount: 1 });
+  const job = startScoutJob(state, "ship-2", "inner_belt_survey", START);
+  const results = processJobs(state, START + job.durationMs);
+  assert.ok(results.some((r) => r.kind === "contract" && r.contract.kindId === "survey_request"));
+});
+
+test("Contracts: discarding empties the slot and a new one comes after the wait", () => {
+  const state = gameWithBoard();
+  assert.equal(discardContract(state, 1, START), true);
+  assert.equal(state.contracts.slots[1].contract, null);
+  processJobs(state, START + CONTRACTS.refillMinutes * MINUTE);
+  assert.ok(state.contracts.slots[1].contract);
+  assert.equal(state.contracts.reputation, 0);        // discarding earns nothing
+});
+
+test("Contracts: reputation tiers make contracts bigger", () => {
+  const state = gameWithBoard();
+  assert.equal(getTier(state).name, "Unknown");
+  state.contracts.reputation = REPUTATION_TIERS[2].from;
+  assert.equal(getTier(state).name, REPUTATION_TIERS[2].name);
+  // Post 60 contracts at each tier: the higher tier's are bigger on average
+  const average = (reputation) => {
+    const s = gameWithBoard();
+    s.contracts.reputation = reputation;
+    let total = 0, count = 0;
+    for (let i = 0; i < 60; i++) {
+      discardContract(s, 0, START);
+      processJobs(s, START + 0);   // (posts nothing yet: the wait)
+      s.contracts.slots[0].readyAt = null;
+      checkContracts(s, START);
+      // Each contract's size against its kind's usual size
+      const c = s.contracts.slots[0].contract;
+      total += c.amount / CONTRACT_KINDS[c.kindId].amount; count++;
+    }
+    return total / count;
+  };
+  assert.ok(average(REPUTATION_TIERS[2].from) > 1.6 * average(0));
+});
+
+test("Contracts: the same save posts the same contracts, however it's played", () => {
+  const a = gameWithBoard();
+  const b = gameWithBoard();
+  assert.deepEqual(a.contracts, b.contracts);
+  const c = newGame();
+  c.exploration.seed = 999;                          // a different save
+  c.skills.mining.xp = XP_TABLE[3];
+  processJobs(c, START);
+  assert.notDeepEqual(c.contracts.slots, a.contracts.slots);
+});
+
+test("Contracts: a version 15 save gets an empty board and running totals", () => {
+  const old = newGame();
+  old.version = 15;
+  delete old.contracts; delete old.stats;
+  const state = parseSave(JSON.stringify(old));
+  assert.equal(state.version, SAVE_VERSION);
+  assert.equal(state.contracts.slots.length, CONTRACTS.slots);
+  assert.deepEqual(state.stats, { mined: {}, refined: {} });
 });
 
 // =============================================================

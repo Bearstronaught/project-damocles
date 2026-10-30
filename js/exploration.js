@@ -174,7 +174,9 @@ export function getScoutPlan(state, shipTypeId, targetId, grades) {
   const target = getTarget(targetId);
 
   const travelMs = Math.round((target.travelSeconds / stats.speed) * 1000);
-  const scanMs = Math.round(target.scanSeconds * 1000 * getScanFactor(state));
+  // The level perk shortens the scan, and the sensor array (scanRate)
+  // speeds it up: +15% sensors = 1 / 1.15 of the time.
+  const scanMs = Math.round(target.scanSeconds * 1000 * getScanFactor(state) / stats.scanRate);
 
   return {
     outboundMs: travelMs,

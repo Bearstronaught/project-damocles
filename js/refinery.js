@@ -284,6 +284,8 @@ export function finishBatch(state, job) {
   // Whole tonnes into the hold now; any part-tonne waits for the
   // next batch (Improved yield can make 49.5 t of steel).
   const made = addItemWithCarry(state, recipe.output, getBatchOutput(state, job.recipeId));
+  // The running total smelting contracts count from (contracts.js)
+  state.stats.refined[recipe.output] = (state.stats.refined[recipe.output] || 0) + made;
   const newLevels = addXp(state, "refining", recipe.xp);
 
   job.status = "waiting";

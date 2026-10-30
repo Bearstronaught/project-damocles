@@ -149,6 +149,10 @@ const HARDPOINTS = {
     drive: [23, 40],      // the engine block
     hold:  [67, 40],      // the spine, between the pods
   },
+  hull_pathfinder: {
+    drive:   [25, 40],    // the engine block
+    sensors: [62, 40],    // the sensor dome
+  },
 };
 
 // Roman numerals for the grade inside a marker.

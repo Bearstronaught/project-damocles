@@ -291,5 +291,12 @@ export function getShipStats(state, hullId, grades = getHullGrades(state, hullId
     const drillBonus = getBonusUpTo(hullId, "drill", grades.drill || 0) + getMiningDrillPerk(state);
     stats.miningRate = base.miningRate * (1 + drillBonus);
   }
+
+  // Only scouts have a sensor array: scanRate 1.15 = scans take
+  // 1 / 1.15 as long (exploration.js, getScoutPlan). The Exploration
+  // level perk is separate (getScanFactor), like the refinery's.
+  if (base.role === "scout") {
+    stats.scanRate = 1 + getBonusUpTo(hullId, "sensors", grades.sensors || 0);
+  }
   return stats;
 }
