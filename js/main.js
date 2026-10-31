@@ -34,7 +34,8 @@ import { addOrder, cancelOrder, getWorkshopJob, getWorkshopRecipeUnlocksAtLevel,
 import { buyIndustryUpgrade, getUpgradeUnlocksAtLevel } from "./upgrades.js";
 import { buyShipUpgrade, getShipUpgradeUnlocksAtLevel, getUpgradeName, getPendingRefits } from "./ship-upgrades.js";
 import { getLevelPerk } from "./skills.js";
-import { startScoutJob, canScoutGo, chooseNextTarget, getTarget, getTargetUnlocksAtLevel, isExplorationOpen, DEEP_SCAN_ID } from "./exploration.js";
+import { startScoutJob, canScoutGo, chooseNextTarget, getTarget, getTargetUnlocksAtLevel, isExplorationOpen, DEEP_SCAN_ID,
+  getTargetStatus, launchSurvey, cancelLaunch, getReadySurveys } from "./exploration.js";
 import { describeFind } from "./exploration-screen.js";
 import { showSurveyReport } from "./report.js";
 import { handInContract, discardContract, canHandIn, isReady, describeContract, charterShip, getCharter, lendSlot } from "./contracts.js";
@@ -137,9 +138,11 @@ const actions = {
 
     // Scouts survey; freighters go on hub runs; barges go mining.
     if (SHIP_TYPES[ship.type].role === "scout") {
-      // The chosen target, or the next one it can do if that's
-      // gone (surveyed by now, or taken by another scout).
-      const targetId = canScoutGo(state, shipId, ship.destination) ? ship.destination : chooseNextTarget(state, shipId);
+      // A survey picked on its card goes first (still open and not
+      // taken by another scout). Otherwise it's the player's next
+      // launched survey, or deep scans when none is launched.
+      const picked = ship.destination !== DEEP_SCAN_ID && canScoutGo(state, shipId, ship.destination);
+      const targetId = picked ? ship.destination : chooseNextTarget(state, shipId);
       const job = startScoutJob(state, shipId, targetId, gameNow(state));
       if (job) {
         addLog(targetId === DEEP_SCAN_ID
@@ -158,6 +161,38 @@ const actions = {
       if (job) {
         addLog(`${ship.name} departs for ${FIELDS[ship.destination].name}.`, "fleet");
       }
+    }
+    refresh();
+  },
+
+  // -----------------------------------------------------------
+  // launchSurvey(targetId) - the Launch survey button on the
+  // Exploration tab (Dan, 31 Oct: surveys are the player's call).
+  // A docked scout sets off straight away. Otherwise the next
+  // scout to finish its current deep scan goes, so pressing the
+  // button never throws away a scan already under way.
+  // -----------------------------------------------------------
+  launchSurvey(targetId) {
+    const result = launchSurvey(state, targetId);
+    if (!result.ok) return;
+    const target = getTarget(targetId);
+
+    // Is a scout sitting at the dock with nothing to do?
+    const idleScout = state.ships.find((ship) =>
+      SHIP_TYPES[ship.type].role === "scout" && !getJobForShip(state, ship.id) && canScoutGo(state, ship.id, targetId));
+    if (idleScout) {
+      startScoutJob(state, idleScout.id, targetId, gameNow(state));
+      addLog(`Survey launched: ${idleScout.name} departs to survey ${target.name}.`, "explore");
+    } else {
+      addLog(`Survey launched: ${target.name}. A scout will head there as soon as its current scan ends.`, "explore");
+    }
+    refresh();
+  },
+
+  // Takes a launched survey back, as long as no scout has left for it.
+  cancelSurvey(targetId) {
+    if (cancelLaunch(state, targetId)) {
+      addLog(`Survey of ${getTarget(targetId).name} cancelled. Your scouts will keep deep scanning.`, "explore");
     }
     refresh();
   },
@@ -647,6 +682,7 @@ function tick() {
   }
 
   announceReadyContracts();
+  announceReadySurveys();
   render(state, now);
 }
 
@@ -674,6 +710,49 @@ function announceReadyContracts() {
   }
   showLevelBanner(ready.length === 1 ? "Contract ready" : `${ready.length} contracts ready`,
     [...titles, "Hand in on the Contracts tab"], "Contracts");
+}
+
+// -------------------------------------------------------------
+// announceReadySurveys()
+// A banner drops down when a survey is ready to launch (Dan,
+// 31 Oct), once per target: "announced" remembers it (in the save,
+// so a refresh doesn't say it again). A survey usually opens with
+// an Exploration level, and the level-up banner already lists it
+// (logLevelUps marks those as announced), so this one catches the
+// rest: a wreck stage that opens when the stage before it is done.
+// Several at once share one banner.
+// -------------------------------------------------------------
+function announceReadySurveys() {
+  const announced = state.exploration.announced;
+  const fresh = getReadySurveys(state).filter((targetId) => !announced[targetId]);
+  if (fresh.length === 0) return;
+
+  const names = fresh.map((targetId) => getTarget(targetId).name);
+  for (const targetId of fresh) {
+    announced[targetId] = true;
+  }
+  for (const name of names) {
+    addLog(`Survey ready to launch: ${name}. Launch it from the Exploration tab when you're ready to read what's there.`, "explore");
+  }
+  showLevelBanner(fresh.length === 1 ? "Survey ready" : `${fresh.length} surveys ready`,
+    [...names, "Launch on the Exploration tab"], "Exploration");
+}
+
+// -------------------------------------------------------------
+// surveyUnlockLine(targetId)
+// What a level-up says about a survey target that opens at that
+// level: ready to launch now, or still waiting for the target
+// before it (a wreck stage whose earlier stage isn't done).
+// Ready ones are marked as announced, so the "Survey ready"
+// banner doesn't say it a second time.
+// -------------------------------------------------------------
+function surveyUnlockLine(targetId) {
+  const target = getTarget(targetId);
+  if (getTargetStatus(state, targetId) === "available") {
+    state.exploration.announced[targetId] = true;
+    return `Survey ready to launch: ${target.name} (Exploration tab)`;
+  }
+  return `New survey target: ${target.name} (after ${getTarget(target.requires).name})`;
 }
 
 // -------------------------------------------------------------
@@ -778,6 +857,7 @@ function surveyEntries(targetIds) {
 // save, so the action is never lost if the tab closes.
 function refresh() {
   announceReadyContracts();
+  announceReadySurveys();
   render(state, gameNow(state));
   saveGame(state);
 }
@@ -857,7 +937,7 @@ function getUnlockLines(skillId, level, withPerk = true) {
   }
   if (skillId === "exploration") {
     for (const targetId of getTargetUnlocksAtLevel(level)) {
-      lines.push("New survey target: " + getTarget(targetId).name);
+      lines.push(surveyUnlockLine(targetId));
     }
   }
   if (skillId === "diplomacy" && CONTRACTS.slotLevels.includes(level)) {
@@ -942,7 +1022,10 @@ function logLevelUps(skillId, levels, showBanners = true) {
     }
     if (skillId === "exploration") {
       for (const targetId of getTargetUnlocksAtLevel(level)) {
-        addLog(`New survey target: ${getTarget(targetId).name}. Your scouts will head there after their current trip.`, "level");
+        const target = getTarget(targetId);
+        addLog(getTargetStatus(state, targetId) === "available"
+          ? `New survey target: ${target.name}. Launch it from the Exploration tab when you're ready; until then your scouts keep deep scanning.`
+          : `New survey target: ${target.name}. It opens once ${getTarget(target.requires).name} is surveyed.`, "level");
       }
     }
     if (skillId === "diplomacy" && CONTRACTS.slotLevels.includes(level)) {
@@ -1066,10 +1149,18 @@ function reportOfflineProgress(report, opening = null) {
   if (idleSlots.length > 0) {
     message += ` Workshop ${idleSlots.length === 1 ? "slot " + idleSlots[0] + " ran out of orders and is" : "slots " + idleSlots.join(" and ") + " ran out of orders and are"} idle.`;
   }
+  // The catch-up line for surveys (Dan, 31 Oct): scouts don't
+  // survey by themselves any more, so say which are waiting for
+  // the player, whether they opened while away or before.
+  const readySurveys = getReadySurveys(state).map((targetId) => getTarget(targetId).name);
+  if (readySurveys.length > 0) {
+    message += ` ${readySurveys.length === 1 ? "A survey is" : readySurveys.length + " surveys are"} ready to launch: ` +
+      `${readySurveys.join(", ")}. Launch ${readySurveys.length === 1 ? "it" : "them"} from the Exploration tab.`;
+  }
   addLog(message, "system");
 
-  // Each survey finished while away gets its line of lore, and
-  // they all come together in one survey report pop-up.
+  // Each survey finished while away gets its line of lore, and its
+  // own survey report (they show one after another, never merged).
   for (const targetId of surveys) {
     addLog(getTarget(targetId).lore, "lore");
   }
@@ -1102,6 +1193,10 @@ function reportOfflineProgress(report, opening = null) {
     unlocks.push(perkLine(skillId, highest));
     showLevelBanner(`${SKILLS[skillId].name} level ${highest}`, unlocks);
   }
+
+  // Any survey that opened while away and wasn't in a level-up
+  // banner (a wreck stage after the one before it) gets its banner.
+  announceReadySurveys();
 }
 
 

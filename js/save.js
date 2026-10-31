@@ -209,6 +209,7 @@ function looksLikeASave(state) {
     typeof state.shipUpgrades === "object" && state.shipUpgrades !== null &&
     typeof state.exploration === "object" && state.exploration !== null &&
     typeof state.exploration.surveyed === "object" && state.exploration.surveyed !== null &&
+    typeof state.exploration.launched === "object" && state.exploration.launched !== null &&
     typeof state.milestones === "object" && state.milestones !== null &&
     typeof state.contracts === "object" && state.contracts !== null &&
     Array.isArray(state.contracts.slots) &&
@@ -466,7 +467,19 @@ function upgradeSave(state) {
     state.version = 18;
   }
 
-  // (Future: if (state.version === 18) { ...; state.version = 19; })
+  // --- Version 18 -> 19: surveys are launched by hand ---
+  // Scouts used to pick the next survey by themselves. Now the
+  // player launches each one (Dan, 31 Oct), so start with nothing
+  // launched and nothing announced: every survey that's open now
+  // gets its "ready to launch" banner on the first tick. A scout
+  // already on its way to a survey carries on and finishes it.
+  if (state.version === 18) {
+    state.exploration.launched = {};
+    state.exploration.announced = {};
+    state.version = 19;
+  }
+
+  // (Future: if (state.version === 19) { ...; state.version = 20; })
 
   if (state.version > SAVE_VERSION) {
     // A save from a NEWER version of the game than this one.

@@ -21,6 +21,10 @@
 // With "explore" on (the default), it buys one Pathfinder as soon
 // as it can and keeps it scouting (design doc, Early exploration);
 // every finished survey and Exploration level is printed too.
+// Surveys are launched by hand (Dan, 31 Oct): the pretend player
+// launches each one "surveyDelay" minutes after it opens, to show
+// what noticing late costs. Run with --survey-delay=15 to change it
+// (the default, 0, is a player who launches the moment it opens).
 // Run with "--no-explore" to see the game without it.
 // It's simpler than a real player, so treat its times as a guide.
 // =============================================================
@@ -37,7 +41,7 @@ import { buyUpgrade, getNextUpgradeCost, canBuyUpgrade } from "../js/command.js"
 import { canBuyShipUpgrade, buyShipUpgrade } from "../js/ship-upgrades.js";
 import { setRecipe, getRefineJob, getSlotCount, isRecipeUnlocked } from "../js/refinery.js";
 import { getCommandFree } from "../js/command.js";
-import { startScoutJob, chooseNextTarget, getTarget } from "../js/exploration.js";
+import { startScoutJob, chooseNextTarget, getTarget, getReadySurveys, launchSurvey } from "../js/exploration.js";
 import { canHandIn, handInContract, canCharter, charterShip, getCharter, canLendSlot, lendSlot } from "../js/contracts.js";
 const getCharterField = (state, shipId) => getCharter(state, shipId)?.fieldId;
 import { CONTRACT_KINDS } from "../data/content.js";
@@ -54,7 +58,7 @@ const START = 1_000_000_000_000;
 // "hourly" (optional) is called once an hour with a report:
 //   { hour, earned, nextShipPrice, freePoints, blockedBy }
 // -------------------------------------------------------------
-export function simulate(hours, untilMiningLevel, hourly = null, explore = true) {
+export function simulate(hours, untilMiningLevel, hourly = null, explore = true, surveyDelay = 0) {
   const state = createNewGame();
   // A fixed seed, so deep scan finds and contracts come out the same
   // every run and two runs can be compared (each real save has its own).
@@ -67,6 +71,7 @@ export function simulate(hours, untilMiningLevel, hourly = null, explore = true)
   let lastExploreLevel = 1;
   let scansAtLastLevel = 0;   // deep scans done when the last level came
   let earnedThisHour = 0;   // credits from selling, for the hourly report
+  const readySince = {};    // survey -> the minute it was first ready to launch
 
   for (let minute = 0; minute <= hours * 60; minute++) {
     const now = START + minute * MINUTE;
@@ -221,6 +226,17 @@ export function simulate(hours, untilMiningLevel, hourly = null, explore = true)
       events.push({ minute, text: `bought ${options[0].text} (${options[0].cost.toLocaleString("en-GB")} cr)`, goal: true });
     }
 
+    // 2b. Launch surveys that have been ready for surveyDelay minutes
+    //     (a docked scout picks one up in step 3; one out deep
+    //     scanning picks it up when its current scan ends).
+    for (const targetId of getReadySurveys(state)) {
+      if (readySince[targetId] === undefined) readySince[targetId] = minute;
+      if (minute - readySince[targetId] >= surveyDelay) {
+        launchSurvey(state, targetId);
+        events.push({ minute, text: `launched survey: ${getTarget(targetId).name}` });
+      }
+    }
+
     // 3. Send docked ships to the best field for Mining XP per hour
     for (const ship of state.ships) {
       if (getJobForShip(state, ship.id)) continue;
@@ -249,7 +265,10 @@ export function simulate(hours, untilMiningLevel, hourly = null, explore = true)
 // in the first hour, and roughly every hour in the first day.
 if (import.meta.url === `file://${process.argv[1]}`) {
   const explore = !process.argv.includes("--no-explore");
-  const events = simulate(4, REFINERY.openAtMiningLevel, null, explore);
+  // e.g. --survey-delay=15: launch each survey 15 minutes after it opens
+  const delayArg = process.argv.find((arg) => arg.startsWith("--survey-delay="));
+  const surveyDelay = delayArg ? Number(delayArg.split("=")[1]) : 0;
+  const events = simulate(4, REFINERY.openAtMiningLevel, null, explore, surveyDelay);
   const time = (minute) => `${Math.floor(minute / 60)}h${String(minute % 60).padStart(2, "0")}`;
   for (const e of events) {
     console.log(`${time(e.minute)}  ${e.text}`);

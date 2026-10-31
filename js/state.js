@@ -35,7 +35,7 @@ import { createContracts } from "./contracts.js";
 //   Version 16: the contracts board, and running totals (stats)
 //   Version 17: reputation kept per faction, contracts name theirs
 //   Version 18: Diplomacy skill, ice, charters replace quotas
-export const SAVE_VERSION = 18;
+export const SAVE_VERSION = 19;
 
 
 // -------------------------------------------------------------
@@ -182,6 +182,12 @@ export function createNewGame() {
 export function createExploration() {
   return {
     surveyed: {},
+    // Surveys the player has launched but not finished (Dan, 31 Oct),
+    // e.g. { ice_moon: true }. Scouts deep scan unless one is here.
+    launched: {},
+    // Surveys whose "ready to launch" banner has been shown, so it
+    // only drops down once each (kept in the save, like contracts).
+    announced: {},
     deepScans: 0,
     deepFinds: 0,
     // Math.random() gives 0 to 1; times 2^32, rounded down, gives a

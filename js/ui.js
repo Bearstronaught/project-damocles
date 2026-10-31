@@ -109,7 +109,7 @@ export function setupUI(state, actions) {
   buildUpgrades(actions);
   buildStationHold(actions);
   buildComponents(actions);
-  buildExplorationScreen();
+  buildExplorationScreen(actions);
   buildContractsScreen(actions, makeTwoClick);
   buildDevPanel(actions);
   setupTips(actions);
@@ -882,7 +882,8 @@ function destinationPicker() {
 // -------------------------------------------------------------
 // targetPicker()
 // A dropdown of survey targets (and the deep scan), to choose
-// where a scout goes first. After that it moves on by itself.
+// where a scout goes first. After that it runs the player's
+// launched surveys, or deep scans (exploration.js).
 // render() greys out targets it can't go to, with the reason.
 // -------------------------------------------------------------
 function targetPicker() {

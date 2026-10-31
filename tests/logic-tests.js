@@ -40,7 +40,8 @@ import { isOwned, getEffect, canBuyIndustryUpgrade, buyIndustryUpgrade, getUpgra
 import { addItemWithCarry } from "../js/state.js";
 import { UPGRADES } from "../data/content.js";
 import { getMaxSlots, getBatchOutput } from "../js/refinery.js";
-import { startScoutJob, getScoutPlan, getTargetStatus, chooseNextTarget, rollFor, isExplorationOpen, DEEP_SCAN_ID } from "../js/exploration.js";
+import { startScoutJob, getScoutPlan, getTargetStatus, chooseNextTarget, rollFor, isExplorationOpen, DEEP_SCAN_ID,
+  launchSurvey, cancelLaunch, isLaunched, getReadySurveys } from "../js/exploration.js";
 import { SURVEY_TARGETS, DEEP_SCAN, CONTRACT_KINDS, CONTRACTS, CONTRACT_FACTIONS, REPUTATION_TIERS } from "../data/content.js";
 import { isBoardOpen, getTier, getReputation, getSubjects, getProgress, canHandIn, handInContract, lendSlot, discardContract, checkContracts, charterShip, canCharter, getCharter, getContractXp, getSlotCount as getBoardSlotCount } from "../js/contracts.js";
 import { getMaxOrderBatches, addStandingOrder, removeStandingOrder, getStandingOrders } from "../js/workshop.js";
@@ -1907,7 +1908,10 @@ function busyEmpire() {
   setRecipe(state, 1, "nickel_bar", START);
   // Two scouts: they share out the survey targets, then run deep
   // scans (whose dice rolls must also match however it's played).
+  // Surveys are launched by hand since 31 Oct, so this player has
+  // launched every one up front: each is picked up once it opens.
   state.milestones.firstSale = true;
+  for (const targetId of Object.keys(SURVEY_TARGETS)) state.exploration.launched[targetId] = true;
   buyShip(state, "pathfinder");                  // ship-6
   buyShip(state, "pathfinder");                  // ship-7
   startScoutJob(state, "ship-6", "inner_belt_survey", START);
@@ -3965,6 +3969,112 @@ test("Release: index.html is stamped with the version in js/version.js, on every
     }
   }
   assert.match(VERSION, /^0\.\d+\.\d+$/);   // 0.phase.build, until 1.0
+});
+
+// =============================================================
+// MANUAL SURVEYS (Dan, 31 Oct)
+// Scouts deep scan unless the player launches a survey, so the
+// lore lands when the player chooses. These check the rules in
+// exploration.js; the buttons and banners are in main.js and
+// exploration-screen.js.
+// =============================================================
+
+test("Manual surveys: an open survey is NOT taken by itself; the scout keeps deep scanning", () => {
+  const state = gameWithScout();
+  assert.equal(getTargetStatus(state, "inner_belt_survey"), "available");   // open at Exploration 1
+  assert.equal(chooseNextTarget(state, "ship-2"), DEEP_SCAN_ID);
+  const job = startScoutJob(state, "ship-2", DEEP_SCAN_ID, START);
+  processJobs(state, START + job.durationMs * 3);                           // three scans later...
+  assert.equal(getTargetStatus(state, "inner_belt_survey"), "available");   // ...still not surveyed
+  assert.equal(job.targetId, DEEP_SCAN_ID);
+  // Both waiting for the player (the scans reached Exploration 2,
+  // which opens the Outer Belt survey too, and it isn't taken either)
+  assert.deepEqual(getReadySurveys(state), ["inner_belt_survey", "outer_belt_survey"]);
+});
+
+test("Manual surveys: a launched survey waits for the current scan to end, then the scout goes back to deep scans", () => {
+  const state = gameWithScout();
+  const job = startScoutJob(state, "ship-2", DEEP_SCAN_ID, START);
+  const scanTrip = job.durationMs;
+
+  // Launch half way through a deep scan: the scan isn't thrown away
+  processJobs(state, START + scanTrip / 2);
+  assert.equal(launchSurvey(state, "inner_belt_survey").ok, true);
+  assert.equal(job.targetId, DEEP_SCAN_ID, "the scan under way carries on");
+  assert.deepEqual(getReadySurveys(state), [], "launched, so no longer waiting for the player");
+
+  // When that scan ends, the scout heads for the survey...
+  processJobs(state, START + scanTrip);
+  assert.equal(state.exploration.deepScans, 1, "the scan in progress was finished and counted");
+  assert.equal(job.targetId, "inner_belt_survey");
+
+  // ...and after the survey, back to deep scanning, with the
+  // survey off the launch list
+  processJobs(state, job.startedAt + job.durationMs);
+  assert.equal(getTargetStatus(state, "inner_belt_survey"), "surveyed");
+  assert.equal(isLaunched(state, "inner_belt_survey"), false);
+  assert.equal(job.targetId, DEEP_SCAN_ID);
+});
+
+test("Manual surveys: locked, unfinished-chain and already-launched surveys can't be launched", () => {
+  const state = gameWithScout();
+  assert.equal(launchSurvey(state, "wreck_1").ok, false);           // Exploration 3 needed
+  assert.equal(launchSurvey(state, "no_such_place").ok, false);
+  assert.equal(launchSurvey(state, "inner_belt_survey").ok, true);
+  assert.equal(launchSurvey(state, "inner_belt_survey").ok, false); // already launched
+  // A scout already heading there counts as launched too
+  state.skills.exploration.xp = XP_TABLE[2];
+  startScoutJob(state, "ship-2", "outer_belt_survey", START);       // picked on its card
+  assert.equal(launchSurvey(state, "outer_belt_survey").ok, false);
+});
+
+test("Manual surveys: Cancel works only until a scout sets off", () => {
+  const state = gameWithScout();
+  launchSurvey(state, "inner_belt_survey");
+  assert.equal(cancelLaunch(state, "inner_belt_survey"), true);
+  assert.equal(isLaunched(state, "inner_belt_survey"), false);
+  assert.equal(chooseNextTarget(state, "ship-2"), DEEP_SCAN_ID);
+
+  // Launched again, and a docked scout takes it: too late to cancel
+  launchSurvey(state, "inner_belt_survey");
+  startScoutJob(state, "ship-2", chooseNextTarget(state, "ship-2"), START);
+  assert.equal(cancelLaunch(state, "inner_belt_survey"), false);
+});
+
+test("Manual surveys: a launched survey that isn't open yet is picked up once it opens", () => {
+  // (Not possible through the button, which only launches open
+  // surveys, but the save could hold one; it must never jump the
+  // queue or be taken early.)
+  const state = gameWithScout();
+  state.exploration.launched.wreck_1 = true;                        // needs Exploration 3
+  assert.equal(chooseNextTarget(state, "ship-2"), DEEP_SCAN_ID);
+  state.skills.exploration.xp = XP_TABLE[3];
+  state.exploration.surveyed.outer_belt_survey = true;
+  assert.equal(chooseNextTarget(state, "ship-2"), "wreck_1");
+});
+
+test("Manual surveys: two scouts never take the same launched survey", () => {
+  const state = gameWithScout();
+  buyShip(state, "pathfinder");                                     // ship-3
+  launchSurvey(state, "inner_belt_survey");
+  startScoutJob(state, "ship-2", chooseNextTarget(state, "ship-2"), START);
+  assert.equal(chooseNextTarget(state, "ship-3"), DEEP_SCAN_ID);
+});
+
+test("Save: a version 18 save starts with nothing launched or announced; a survey under way carries on", () => {
+  const old = gameWithScout();
+  startScoutJob(old, "ship-2", "inner_belt_survey", START);         // the old auto-pick, mid-trip
+  old.version = 18;
+  delete old.exploration.launched;
+  delete old.exploration.announced;
+  const state = parseSave(JSON.stringify(old));
+  assert.equal(state.version, SAVE_VERSION);
+  assert.deepEqual(state.exploration.launched, {});
+  assert.deepEqual(state.exploration.announced, {});
+  const job = state.jobs.find((j) => j.type === "scout");
+  processJobs(state, START + job.durationMs);
+  assert.equal(getTargetStatus(state, "inner_belt_survey"), "surveyed");
+  assert.equal(job.targetId, DEEP_SCAN_ID);                         // then deep scans
 });
 
 test("Lore: no early-game text names the Aashar", () => {

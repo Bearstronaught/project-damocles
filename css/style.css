@@ -2689,6 +2689,16 @@ main {
   background: var(--teal-faint);
 }
 
+/* The Launch survey / Cancel button under a target's words */
+.target-launch {
+  margin-top: 8px;
+}
+
+/* Launched, waiting for a scout: a dashed teal bar down the left */
+.target-row.launched {
+  border-left: 2px dashed var(--teal);
+}
+
 /* Done: quieter, with a tick before the name */
 .target-row.surveyed .target-name {
   color: var(--steel);

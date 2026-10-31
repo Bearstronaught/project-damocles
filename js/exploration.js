@@ -12,10 +12,14 @@
 //   RETURNING fly home; the find and the XP arrive on docking
 //
 // Each SURVEY TARGET (content.js) is a one-off: once surveyed it's
-// done, and its find and its line of lore are kept. When a trip
-// ends, the scout moves straight on to the next target it can do,
-// so it keeps working while the player is away. With no targets
-// left it runs DEEP SCANS, which never run out.
+// done, and its find and its line of lore are kept.
+//
+// Surveys are LAUNCHED BY THE PLAYER (Dan, 31 Oct), so each bit of
+// lore lands when they choose, not while they're away. Left alone,
+// a scout runs DEEP SCANS, which never run out and keep earning
+// Exploration XP offline. When the player launches a survey, the
+// next scout to finish its current scan heads there (a docked
+// scout goes straight away), then goes back to deep scanning.
 //
 // A scout job looks like this (it lives in state.jobs with the
 // ships' other jobs, and jobs.js plays it out on the same
@@ -116,16 +120,81 @@ export function canScoutGo(state, shipId, targetId) {
 
 // -------------------------------------------------------------
 // chooseNextTarget(state, shipId)
-// Where a scout should go next: the first target in the list it
-// can do, or the deep scan when there are none.
+// Where a scout should go next: the first survey the PLAYER has
+// launched that it can do, or the deep scan when there are none.
+// (Before 31 Oct this took any open target by itself.)
 // -------------------------------------------------------------
 export function chooseNextTarget(state, shipId) {
   for (const targetId of Object.keys(SURVEY_TARGETS)) {
-    if (canScoutGo(state, shipId, targetId)) {
+    if (isLaunched(state, targetId) && canScoutGo(state, shipId, targetId)) {
       return targetId;
     }
   }
   return DEEP_SCAN_ID;
+}
+
+
+// =============================================================
+// LAUNCHING SURVEYS (the player's choice, Dan 31 Oct)
+// =============================================================
+// state.exploration.launched remembers which surveys the player
+// has launched but not yet finished, e.g. { ice_moon: true }.
+// A launched target stays launched until it's surveyed, so a
+// scout recalled half way through comes back to it later.
+
+// True if the player has launched this survey (and it isn't done).
+export function isLaunched(state, targetId) {
+  return Boolean(state.exploration.launched[targetId]);
+}
+
+// -------------------------------------------------------------
+// getScoutOnTarget(state, targetId)
+// The scout heading for (or scanning) this target right now, or
+// null. Used to show "Wayfarer on the way".
+// -------------------------------------------------------------
+export function getScoutOnTarget(state, targetId) {
+  const job = state.jobs.find((j) => j.type === "scout" && j.targetId === targetId);
+  return job ? findShip(state, job.shipId) : null;
+}
+
+// -------------------------------------------------------------
+// getReadySurveys(state)
+// Surveys the player could launch right now: open, not launched
+// yet, and no scout already on the way. In list order, e.g.
+//   ["ice_moon", "wreck_2"]
+// These light the Exploration tab's dot and the "ready" banner.
+// -------------------------------------------------------------
+export function getReadySurveys(state) {
+  return Object.keys(SURVEY_TARGETS).filter((targetId) =>
+    getTargetStatus(state, targetId) === "available"
+    && !isLaunched(state, targetId)
+    && !getScoutOnTarget(state, targetId));
+}
+
+// -------------------------------------------------------------
+// launchSurvey(state, targetId)
+// The player launches a survey. Returns { ok, reason }.
+// Nothing moves here: main.js sends a docked scout straight away,
+// and a scout already out picks it up when its current scan ends
+// (so pressing the button never wastes a scan in progress).
+// -------------------------------------------------------------
+export function launchSurvey(state, targetId) {
+  if (!SURVEY_TARGETS[targetId]) return { ok: false, reason: "No such target" };
+  if (getTargetStatus(state, targetId) !== "available") return { ok: false, reason: "Not open yet" };
+  if (isLaunched(state, targetId) || getScoutOnTarget(state, targetId)) return { ok: false, reason: "Already launched" };
+  state.exploration.launched[targetId] = true;
+  return { ok: true };
+}
+
+// -------------------------------------------------------------
+// cancelLaunch(state, targetId)
+// Takes a launched survey back off the list, but only while no
+// scout has set off for it yet. Returns true if it was cancelled.
+// -------------------------------------------------------------
+export function cancelLaunch(state, targetId) {
+  if (!isLaunched(state, targetId) || getScoutOnTarget(state, targetId)) return false;
+  delete state.exploration.launched[targetId];
+  return true;
 }
 
 // -------------------------------------------------------------
@@ -252,8 +321,9 @@ export function getScoutXpShare(state) {
 // -------------------------------------------------------------
 // finishScoutTrip(state, job)
 // A scout has docked. If its scan was finished, it hands over its
-// find and earns Exploration XP. Then it either sets off for the
-// next target (repeat) or stays docked (recalled).
+// find and earns Exploration XP. Then it either sets off again
+// (repeat): to a survey the player has launched, or another deep
+// scan; or it stays docked (recalled).
 //
 // Returns a result for the log:
 //   { kind: "scout", shipId, trips: 1, surveys: ["wreck_1"],
@@ -320,6 +390,7 @@ export function finishScoutTrip(state, job) {
 function collectSurvey(state, targetId) {
   const target = SURVEY_TARGETS[targetId];
   state.exploration.surveyed[targetId] = true;
+  delete state.exploration.launched[targetId];   // done: off the launch list
 
   if (target.credits > 0) {
     state.credits += target.credits;

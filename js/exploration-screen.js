@@ -9,12 +9,13 @@
 // only where something changed. The rules themselves live in
 // exploration.js; this file only shows them.
 //
-// The scouts themselves are sent out from their cards on the
-// Command screen, like every other ship.
+// Surveys are LAUNCHED here, one button per target (Dan, 31 Oct):
+// left alone, scouts deep scan. Scouts can still be sent out from
+// their cards on the Command screen, like every other ship.
 // =============================================================
 
 import { SURVEY_TARGETS, DEEP_SCAN, ITEMS, SHIP_TYPES } from "../data/content.js";
-import { getTargetStatus, getScoutPlan, getSurveyCount, DEEP_SCAN_ID, isExplorationOpen } from "./exploration.js";
+import { getTargetStatus, getScoutPlan, getSurveyCount, DEEP_SCAN_ID, isExplorationOpen, isLaunched, getScoutOnTarget } from "./exploration.js";
 import { getLevel } from "./skills.js";
 import { formatNumber, formatTonnes, formatDuration, formatXp, formatPercent } from "./ui.js";
 
@@ -60,11 +61,13 @@ export function describeFind(find) {
 // =============================================================
 
 // -------------------------------------------------------------
-// buildExplorationScreen()
+// buildExplorationScreen(actions)
 // One row per survey target, one line per wreck stage. Their
-// words are filled in by renderExploration.
+// words are filled in by renderExploration. Each target row has
+// a button: Launch survey, or Cancel while it waits for a scout
+// (renderExploration says which, and hides it when neither fits).
 // -------------------------------------------------------------
-export function buildExplorationScreen() {
+export function buildExplorationScreen(actions) {
   const list = byId("target-list");
   list.innerHTML = "";
   for (const targetId of Object.keys(SURVEY_TARGETS)) {
@@ -78,7 +81,20 @@ export function buildExplorationScreen() {
       </div>
       <div class="target-meta" data-part="meta"></div>
       <p class="target-text" data-part="text"></p>
+      <button class="btn btn-small target-launch" data-part="launch" hidden></button>
     `;
+    // The button's job is written on it as data-mode ("launch" or
+    // "cancel") each time the screen is drawn, so one click handler
+    // does whichever it currently says.
+    const button = row.querySelector("[data-part=launch]");
+    button.addEventListener("click", () => {
+      // Read the mode ONCE, before acting: launching redraws the
+      // screen straight away, which turns this same button into
+      // Cancel, and a second check would then cancel it again.
+      const mode = button.dataset.mode;
+      if (mode === "launch") actions.launchSurvey(targetId);
+      else if (mode === "cancel") actions.cancelSurvey(targetId);
+    });
     list.appendChild(row);
   }
 
@@ -104,7 +120,7 @@ export function buildExplorationScreen() {
 // -------------------------------------------------------------
 // renderExploration(state)
 // Updates the whole screen. Returns what the Exploration tab's
-// nav dot is about: targets a scout could go to now, e.g.
+// nav dot is about: surveys ready to launch, e.g.
 //   { "target:ice_moon": 1 }
 // (ui.js's screenAlert lights the dot until the tab is visited.)
 // -------------------------------------------------------------
@@ -118,29 +134,34 @@ export function renderExploration(state) {
   // Trip times are worked out for a Pathfinder (the only scout so far).
   const scoutType = "pathfinder";
 
-  // Which target each scout is heading for, e.g. { wreck_1: "Wayfarer" }
-  const activeBy = {};
-  for (const job of state.jobs) {
-    if (job.type === "scout") {
-      const ship = state.ships.find((s) => s.id === job.shipId);
-      activeBy[job.targetId] = ship.name;
-    }
-  }
-
   // --- The survey targets ---
   for (const [targetId, target] of Object.entries(SURVEY_TARGETS)) {
     const row = byId("target-" + targetId);
     const status = getTargetStatus(state, targetId);
     const plan = getScoutPlan(state, scoutType, targetId);
+    const scout = getScoutOnTarget(state, targetId);   // a scout on its way, or null
+    const launched = isLaunched(state, targetId);
 
     // The state on the right of the name
     let stateText;
     if (status === "surveyed") stateText = "Surveyed";
-    else if (activeBy[targetId]) stateText = `${activeBy[targetId]} on the way`;
+    else if (scout) stateText = `${scout.name} on the way`;
+    else if (launched) stateText = "Launched: next scout";
     else if (status === "locked") stateText = `Exploration ${target.unlockLevel}`;
     else if (status === "needs") stateText = `After ${SURVEY_TARGETS[target.requires].name}`;
-    else stateText = "Available";
+    else stateText = "Ready to launch";
     setText(row.querySelector("[data-part=state]"), stateText);
+
+    // The button: Launch survey when it's ready, Cancel while it
+    // waits for a scout, hidden otherwise. Without a scout yet,
+    // launching still works: the first one bought will go there.
+    const button = row.querySelector("[data-part=launch]");
+    let mode = "";
+    if (status === "available" && !scout) mode = launched ? "cancel" : "launch";
+    button.hidden = mode === "";
+    button.dataset.mode = mode;
+    setText(button, mode === "cancel" ? "Cancel" : "Launch survey");
+    button.classList.toggle("btn-primary", mode === "launch");
 
     // Trip length, XP and what it pays (the pay shows once it's
     // been found; before that, only that something's there).
@@ -158,9 +179,12 @@ export function renderExploration(state) {
     // Classes for the look: surveyed (done), locked, active
     row.classList.toggle("surveyed", status === "surveyed");
     row.classList.toggle("locked", status === "locked" || status === "needs");
-    row.classList.toggle("active", Boolean(activeBy[targetId]));
+    row.classList.toggle("active", Boolean(scout));
+    row.classList.toggle("launched", launched && !scout);
 
-    if (status === "available") {
+    // The tab's dot: a survey ready to launch that hasn't been
+    // launched yet.
+    if (status === "available" && !launched && !scout) {
       ready["target:" + targetId] = 1;
     }
   }

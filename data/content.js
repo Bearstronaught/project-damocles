@@ -141,7 +141,7 @@ export const SKILLS = {
   },
   exploration: {
     name: "Exploration",
-    description: "Send scouts to survey the home system. Each survey target is a one-off trip that brings back a find: credits, goods, or another piece of the alien wreck's story. When the targets run out, scouts run deep scans for XP and the odd find. Your first scout, the Pathfinder, goes on sale once you've sold your first ore. Levels unlock new targets, and every level makes scans a little faster.",
+    description: "Send scouts to survey the home system. Each survey target is a one-off trip that brings back a find: credits, goods, or another piece of the alien wreck's story. You launch each survey yourself from the Exploration tab; the rest of the time, scouts run deep scans for XP and the odd find. Your first scout, the Pathfinder, goes on sale once you've sold your first ore. Levels unlock new targets, and every level makes scans a little faster.",
     perk: "scan speed",
   },
   diplomacy: {
@@ -526,8 +526,8 @@ export const UPGRADES = {
 // SURVEY TARGETS: places in the home system a scout can survey.
 // -------------------------------------------------------------
 // Each target is surveyed ONCE: the scout flies out, scans it,
-// flies home, and brings back its find. They show (and scouts
-// work through them) in the order listed here.
+// flies home, and brings back its find. They show (and launched
+// surveys are picked up) in the order listed here.
 //
 // Written here. The lore lines follow Dan's lore (agreed 30 Oct):
 // the old syndicate, Bellwright Inc, held this contract before you
@@ -698,7 +698,7 @@ const CONTRACT_WORDS = {
   },
   survey_request: {
     title: "Survey request",
-    text: "{client} will pay for a survey of {target}. Your scouts will get to it; this pays when it's done.",
+    text: "{client} will pay for a survey of {target}. Launch it from the Exploration tab; this pays when it's done.",
   },
   deep_scan_contract: {
     title: "Deep scan contract",
