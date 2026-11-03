@@ -26,47 +26,48 @@
        and new files after an update. tools/release.js writes this
        block; see that file for how it works. -->
   <!-- version:start (written by tools/release.js - don't edit by hand) -->
-  <meta name="game-version" content="0.2.8">
+  <meta name="game-version" content="0.2.9">
   <script type="importmap">
   {
     "imports": {
-      "./data/balance.js": "./data/balance.js?v=0.2.8",
-      "./data/content.js": "./data/content.js?v=0.2.8",
-      "./js/art.js": "./js/art.js?v=0.2.8",
-      "./js/banner.js": "./js/banner.js?v=0.2.8",
-      "./js/bonded.js": "./js/bonded.js?v=0.2.8",
-      "./js/clock.js": "./js/clock.js?v=0.2.8",
-      "./js/command.js": "./js/command.js?v=0.2.8",
-      "./js/contracts-screen.js": "./js/contracts-screen.js?v=0.2.8",
-      "./js/contracts.js": "./js/contracts.js?v=0.2.8",
-      "./js/dev-switch.js": "./js/dev-switch.js?v=0.2.8",
-      "./js/exploration-screen.js": "./js/exploration-screen.js?v=0.2.8",
-      "./js/exploration.js": "./js/exploration.js?v=0.2.8",
-      "./js/fleet-groups.js": "./js/fleet-groups.js?v=0.2.8",
-      "./js/jobs.js": "./js/jobs.js?v=0.2.8",
-      "./js/main.js": "./js/main.js?v=0.2.8",
-      "./js/nav.js": "./js/nav.js?v=0.2.8",
-      "./js/playtest.js": "./js/playtest.js?v=0.2.8",
-      "./js/refinery.js": "./js/refinery.js?v=0.2.8",
-      "./js/report.js": "./js/report.js?v=0.2.8",
-      "./js/save.js": "./js/save.js?v=0.2.8",
-      "./js/ship-upgrades.js": "./js/ship-upgrades.js?v=0.2.8",
-      "./js/shipyard.js": "./js/shipyard.js?v=0.2.8",
-      "./js/simulation.js": "./js/simulation.js?v=0.2.8",
-      "./js/skills.js": "./js/skills.js?v=0.2.8",
-      "./js/state.js": "./js/state.js?v=0.2.8",
-      "./js/trade.js": "./js/trade.js?v=0.2.8",
-      "./js/ui.js": "./js/ui.js?v=0.2.8",
-      "./js/upgrades.js": "./js/upgrades.js?v=0.2.8",
-      "./js/version.js": "./js/version.js?v=0.2.8",
-      "./js/workshop.js": "./js/workshop.js?v=0.2.8"
+      "./data/balance.js": "./data/balance.js?v=0.2.9",
+      "./data/content.js": "./data/content.js?v=0.2.9",
+      "./js/art.js": "./js/art.js?v=0.2.9",
+      "./js/banner.js": "./js/banner.js?v=0.2.9",
+      "./js/bonded.js": "./js/bonded.js?v=0.2.9",
+      "./js/clock.js": "./js/clock.js?v=0.2.9",
+      "./js/command.js": "./js/command.js?v=0.2.9",
+      "./js/contracts-screen.js": "./js/contracts-screen.js?v=0.2.9",
+      "./js/contracts.js": "./js/contracts.js?v=0.2.9",
+      "./js/dev-switch.js": "./js/dev-switch.js?v=0.2.9",
+      "./js/exploration-screen.js": "./js/exploration-screen.js?v=0.2.9",
+      "./js/exploration.js": "./js/exploration.js?v=0.2.9",
+      "./js/fleet-groups.js": "./js/fleet-groups.js?v=0.2.9",
+      "./js/jobs.js": "./js/jobs.js?v=0.2.9",
+      "./js/main.js": "./js/main.js?v=0.2.9",
+      "./js/nav.js": "./js/nav.js?v=0.2.9",
+      "./js/playtest.js": "./js/playtest.js?v=0.2.9",
+      "./js/refinery.js": "./js/refinery.js?v=0.2.9",
+      "./js/report.js": "./js/report.js?v=0.2.9",
+      "./js/save.js": "./js/save.js?v=0.2.9",
+      "./js/ship-upgrades.js": "./js/ship-upgrades.js?v=0.2.9",
+      "./js/shipyard.js": "./js/shipyard.js?v=0.2.9",
+      "./js/simulation.js": "./js/simulation.js?v=0.2.9",
+      "./js/skills.js": "./js/skills.js?v=0.2.9",
+      "./js/state.js": "./js/state.js?v=0.2.9",
+      "./js/system-map.js": "./js/system-map.js?v=0.2.9",
+      "./js/trade.js": "./js/trade.js?v=0.2.9",
+      "./js/ui.js": "./js/ui.js?v=0.2.9",
+      "./js/upgrades.js": "./js/upgrades.js?v=0.2.9",
+      "./js/version.js": "./js/version.js?v=0.2.9",
+      "./js/workshop.js": "./js/workshop.js?v=0.2.9"
     }
   }
   </script>
   <!-- version:end -->
 
   <!-- Our own styles: the tactical display look -->
-  <link rel="stylesheet" href="css/style.css?v=0.2.8">
+  <link rel="stylesheet" href="css/style.css?v=0.2.9">
 </head>
 <body>
 
@@ -172,7 +173,9 @@
       </button>
     </div>
 
-    <div class="nav-group">
+    <!-- data-group gives each group its own colour (Dan, 1 Nov):
+         see "MENU GROUP COLOURS" in style.css. No data-group = amber. -->
+    <div class="nav-group" data-group="ships">
       <div class="nav-heading">Ships</div>
       <button class="nav-btn" data-screen="fleet" title="Fleet">
         <svg class="icon"><use href="#icon-fleet"/></svg><span class="nav-text">Fleet</span>
@@ -182,21 +185,21 @@
       </button>
     </div>
 
-    <div class="nav-group">
+    <div class="nav-group" data-group="production">
       <div class="nav-heading">Production</div>
       <button class="nav-btn" data-screen="industry" title="Industry">
         <svg class="icon"><use href="#icon-industry"/></svg><span class="nav-text">Industry</span>
       </button>
     </div>
 
-    <div class="nav-group" data-group-for="exploration">
+    <div class="nav-group" data-group-for="exploration" data-group="expansion">
       <div class="nav-heading">Expansion</div>
       <button class="nav-btn" data-screen="exploration" title="Exploration">
         <svg class="icon"><use href="#icon-exploration"/></svg><span class="nav-text">Exploration</span>
       </button>
     </div>
 
-    <div class="nav-group" data-group-for="contracts">
+    <div class="nav-group" data-group-for="contracts" data-group="factions">
       <div class="nav-heading">Factions</div>
       <button class="nav-btn" data-screen="contracts" title="Contracts">
         <svg class="icon"><use href="#icon-contracts"/></svg><span class="nav-text">Contracts</span>
@@ -225,13 +228,13 @@
     <button class="nav-btn" data-screen="command">
       <svg class="icon"><use href="#icon-command"/></svg><span class="nav-text">Command</span>
     </button>
-    <button class="nav-btn" data-screen="fleet">
+    <button class="nav-btn" data-screen="fleet" data-group="ships">
       <svg class="icon"><use href="#icon-fleet"/></svg><span class="nav-text">Fleet</span>
     </button>
-    <button class="nav-btn" data-screen="industry">
+    <button class="nav-btn" data-screen="industry" data-group="production">
       <svg class="icon"><use href="#icon-industry"/></svg><span class="nav-text">Industry</span>
     </button>
-    <button class="nav-btn" data-screen="exploration">
+    <button class="nav-btn" data-screen="exploration" data-group="expansion">
       <svg class="icon"><use href="#icon-exploration"/></svg><span class="nav-text">Explore</span>
     </button>
     <!-- Not a screen: opens the drawer. Gets a dot when a screen
@@ -338,72 +341,112 @@
     </details>
   </div>
 
+  <!-- ===== Page header (Dan, 1 Nov) =====
+       The open screen's name in its group's colour, and where you
+       are. nav.js (showScreen) copies them in from the screen's
+       data-title and data-subtitle, so each screen's words live
+       on its own <section> below. -->
+  <div class="page-head">
+    <h1 class="page-title" id="page-title">Command</h1>
+    <span class="page-subtitle" id="page-subtitle"></span>
+  </div>
+  <div class="page-rule"></div>
+
   <main>
 
     <!-- ===================== COMMAND SCREEN ===================== -->
-    <section class="screen layout" data-screen="command">
+    <!-- data-group: which menu group's colour the page uses.
+         data-title / data-subtitle: the page header's words.
+         "layout-rail": the main work on the left (main-col), a
+         column of readouts down the right (rail). -->
+    <section class="screen layout layout-rail" data-screen="command"
+             data-group="command" data-title="Command" data-subtitle="Anvil Station // Home system">
 
-      <!-- Fleet: one card per ship (built by ui.js) -->
-      <div class="panel panel-fleet">
-        <div class="panel-head">
-          <h2 class="panel-title">Fleet</h2>
-          <span class="panel-tag" id="fleet-tag">1 ship</span>
+      <div class="main-col">
+        <!-- The viewscreen (Dan, 1 Nov): a live map of the home
+             system. Everything inside the <svg> is drawn by
+             system-map.js; ships move along their trips in real
+             time. -->
+        <div class="panel viewscreen">
+          <div class="viewscreen-head">
+            <span class="viewscreen-title">Viewscreen // Home system</span>
+            <span class="viewscreen-count" id="map-count"></span>
+          </div>
+          <svg class="system-map" id="system-map" viewBox="0 0 1000 440"
+               role="group" aria-label="Map of the home system, with your ships on their routes"></svg>
+          <div class="viewscreen-key" aria-hidden="true">
+            <span class="key-mining">Mining</span>
+            <span class="key-freight">Freight</span>
+            <span class="key-scout">Scouting</span>
+          </div>
         </div>
-        <div id="fleet-list"></div>
+
+        <!-- Fleet: one card per ship (built by ui.js) -->
+        <div class="panel panel-fleet">
+          <div class="panel-head">
+            <h2 class="panel-title">Fleet</h2>
+            <span class="panel-tag" id="fleet-tag">1 ship</span>
+          </div>
+          <div id="fleet-list"></div>
+        </div>
       </div>
 
-      <!-- Cargo: what's in storage, and selling -->
-      <div class="panel">
-        <div class="panel-head">
-          <h2 class="panel-title">Cargo hold</h2>
-          <span class="panel-tag" id="home-name-tag"></span>
+      <!-- The readout column: the hold and the log -->
+      <div class="rail">
+        <!-- Cargo: what's in storage, and selling -->
+        <div class="panel">
+          <div class="panel-head">
+            <h2 class="panel-title">Cargo hold</h2>
+            <span class="panel-tag" id="home-name-tag"></span>
+          </div>
+          <!-- One row per item (built by ui.js from content.js) -->
+          <!-- If the table ever can't fit, it scrolls sideways inside
+               the panel instead of spilling over the border -->
+          <div class="table-scroll">
+            <table class="cargo-table">
+              <thead>
+                <tr>
+                  <th>Item</th>
+                  <th>Stock</th>
+                  <!-- Prices are per tonne: the unit sits in the header so
+                       each price cell stays short enough for a phone. -->
+                  <th>Home <small>cr/t</small></th>
+                  <th>Hub <small>cr/t</small></th>
+                  <th>Value</th>
+                  <th><span class="visually-hidden">Sell</span></th>
+                </tr>
+              </thead>
+              <tbody id="cargo-body"></tbody>
+              <tfoot>
+                <tr>
+                  <td colspan="4">Total</td>
+                  <td id="cargo-total">0 cr</td>
+                  <td></td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+          <!-- Explains the two prices (text written by ui.js) -->
+          <p class="price-note" id="hub-note"></p>
+          <!-- ui.js adds the station's name; "Sell all" shows if it can't -->
+          <button id="sell-all" class="btn btn-primary">Sell all</button>
         </div>
-        <!-- One row per item (built by ui.js from content.js) -->
-        <!-- If the table ever can't fit, it scrolls sideways inside
-             the panel instead of spilling over the border -->
-        <div class="table-scroll">
-          <table class="cargo-table">
-            <thead>
-              <tr>
-                <th>Item</th>
-                <th>Stock</th>
-                <!-- Prices are per tonne: the unit sits in the header so
-                     each price cell stays short enough for a phone. -->
-                <th>Home <small>cr/t</small></th>
-                <th>Hub <small>cr/t</small></th>
-                <th>Value</th>
-                <th><span class="visually-hidden">Sell</span></th>
-              </tr>
-            </thead>
-            <tbody id="cargo-body"></tbody>
-            <tfoot>
-              <tr>
-                <td colspan="4">Total</td>
-                <td id="cargo-total">0 cr</td>
-                <td></td>
-              </tr>
-            </tfoot>
-          </table>
-        </div>
-        <!-- Explains the two prices (text written by ui.js) -->
-        <p class="price-note" id="hub-note"></p>
-        <!-- ui.js adds the station's name; "Sell all" shows if it can't -->
-        <button id="sell-all" class="btn btn-primary">Sell all</button>
-      </div>
 
-      <!-- Log: messages about what happened -->
-      <div class="panel panel-wide">
-        <div class="panel-head">
-          <h2 class="panel-title">Ship's log</h2>
-          <span class="panel-tag"><i class="pulse-dot"></i> Live</span>
+        <!-- Log: messages about what happened -->
+        <div class="panel">
+          <div class="panel-head">
+            <h2 class="panel-title">Ship's log</h2>
+            <span class="panel-tag"><i class="pulse-dot"></i> Live</span>
+          </div>
+          <ul id="log" class="log"></ul>
         </div>
-        <ul id="log" class="log"></ul>
       </div>
     </section>
 
     <!-- ===================== FLEET SCREEN ===================== -->
     <!-- The ships you own, and how many you can command. -->
-    <section class="screen layout" data-screen="fleet" hidden>
+    <section class="screen layout" data-screen="fleet" hidden
+             data-group="ships" data-title="Fleet" data-subtitle="Ships // Your fleet">
 
       <!-- Command capacity: points used, and the upgrade -->
       <div class="panel panel-wide">
@@ -439,7 +482,8 @@
 
     <!-- ===================== SHIPYARD SCREEN ===================== -->
     <!-- Ships you can buy. Only unlocked ships are shown. -->
-    <section class="screen layout" data-screen="shipyard" hidden>
+    <section class="screen layout" data-screen="shipyard" hidden
+             data-group="ships" data-title="Shipyard" data-subtitle="Ships // Anvil Station yard">
       <div class="panel panel-wide">
         <div class="panel-head">
           <h2 class="panel-title">Shipyard</h2>
@@ -474,71 +518,77 @@
            2. Workshop      metal -> products
            3. Station hold  what you have, and your bonds
            4. Upgrades      spend products to improve 1 and 2
-         ("layout-flow" makes it one column, each panel full width.) -->
-    <section class="screen layout layout-flow" data-screen="industry" hidden>
+         Since 3 Nov the hold and upgrades sit in the readout column
+         down the right (on a phone they still follow, in order). -->
+    <section class="screen layout layout-rail" data-screen="industry" hidden
+             data-group="production" data-title="Industry" data-subtitle="Production // Anvil Station">
 
-      <!-- 1. Refinery: turns ore from the hold into metal. One box
-           per slot (built by ui.js); locked slots show when they open. -->
-      <div class="panel">
-        <div class="panel-head">
-          <h2 class="panel-title"><span class="flow-step">1</span>Refinery</h2>
-          <span class="panel-tag" id="refinery-tag"></span>
+      <div class="main-col">
+        <!-- 1. Refinery: turns ore from the hold into metal. One box
+             per slot (built by ui.js); locked slots show when they open. -->
+        <div class="panel">
+          <div class="panel-head">
+            <h2 class="panel-title"><span class="flow-step">1</span>Refinery</h2>
+            <span class="panel-tag" id="refinery-tag"></span>
+          </div>
+          <p class="flow-note">Ore from the hold → metal</p>
+          <!-- While the refinery is closed, this says when it opens -->
+          <p class="price-note" id="refinery-note"></p>
+          <div id="refinery-slots" class="slot-grid"></div>
         </div>
-        <p class="flow-note">Ore from the hold → metal</p>
-        <!-- While the refinery is closed, this says when it opens -->
-        <p class="price-note" id="refinery-note"></p>
-        <div id="refinery-slots" class="slot-grid"></div>
-      </div>
 
-      <!-- 2. Workshop: turns metal into products through WORK ORDERS.
-           Each slot works through a short queue, then goes idle.
-           One box per slot (built by ui.js). -->
-      <div class="panel">
-        <div class="panel-head">
-          <h2 class="panel-title"><span class="flow-step">2</span>Workshop</h2>
-          <span class="panel-tag" id="workshop-tag"></span>
-        </div>
-        <p class="flow-note">Metal → components and assemblies</p>
-        <!-- While the workshop is closed, this says when it opens -->
-        <p class="price-note" id="workshop-note"></p>
-        <div id="workshop-slots" class="slot-grid"></div>
-      </div>
-
-      <!-- 3. What's in the station's hold, and BONDED stock: an amount
-           of each item set aside so it's never sold (bonded.js).
-           Selling itself is on the Command screen. -->
-      <div class="panel">
-        <div class="panel-head">
-          <h2 class="panel-title"><span class="flow-step">3</span>Station hold</h2>
-          <span class="panel-tag" id="hold-name-tag"></span>
-        </div>
-        <p class="flow-note">What you have, and what's bonded</p>
-        <p class="price-note">Bonded stock is never sold, by freighters or the Sell buttons. The refinery, workshop and upgrades can still use it.</p>
-        <!-- If the table ever can't fit, it scrolls sideways inside
-             the panel instead of spilling over the border -->
-        <div class="table-scroll">
-          <table class="cargo-table hold-table">
-            <thead>
-              <tr><th>Item</th><th>Stock</th><th>Bond <small>t</small></th></tr>
-            </thead>
-            <tbody id="hold-body"></tbody>
-          </table>
+        <!-- 2. Workshop: turns metal into products through WORK ORDERS.
+             Each slot works through a short queue, then goes idle.
+             One box per slot (built by ui.js). -->
+        <div class="panel">
+          <div class="panel-head">
+            <h2 class="panel-title"><span class="flow-step">2</span>Workshop</h2>
+            <span class="panel-tag" id="workshop-tag"></span>
+          </div>
+          <p class="flow-note">Metal → components and assemblies</p>
+          <!-- While the workshop is closed, this says when it opens -->
+          <p class="price-note" id="workshop-note"></p>
+          <div id="workshop-slots" class="slot-grid"></div>
         </div>
       </div>
 
-      <!-- 4. Upgrades for the refinery and workshop, paid in products
-           and credits. A <details> box opens and closes on a click.
-           Only owned upgrades and the next tier of each line are
-           listed (built by ui.js). -->
-      <details class="panel upgrades-panel" id="upgrades-panel" open>
-        <summary class="panel-head">
-          <h2 class="panel-title"><span class="flow-step">4</span>Upgrades</h2>
-          <span class="panel-tag" id="upgrades-tag"></span>
-        </summary>
-        <p class="flow-note">Products and credits → a faster refinery and workshop</p>
-        <p class="order-message" id="upgrade-message" role="status"></p>
-        <div id="upgrades-list"></div>
-      </details>
+      <div class="rail">
+        <!-- 3. What's in the station's hold, and BONDED stock: an amount
+             of each item set aside so it's never sold (bonded.js).
+             Selling itself is on the Command screen. -->
+        <div class="panel">
+          <div class="panel-head">
+            <h2 class="panel-title"><span class="flow-step">3</span>Station hold</h2>
+            <span class="panel-tag" id="hold-name-tag"></span>
+          </div>
+          <p class="flow-note">What you have, and what's bonded</p>
+          <p class="price-note">Bonded stock is never sold, by freighters or the Sell buttons. The refinery, workshop and upgrades can still use it.</p>
+          <!-- If the table ever can't fit, it scrolls sideways inside
+               the panel instead of spilling over the border -->
+          <div class="table-scroll">
+            <table class="cargo-table hold-table">
+              <thead>
+                <tr><th>Item</th><th>Stock</th><th>Bond <small>t</small></th></tr>
+              </thead>
+              <tbody id="hold-body"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- 4. Upgrades for the refinery and workshop, paid in products
+             and credits. A <details> box opens and closes on a click.
+             Only owned upgrades and the next tier of each line are
+             listed (built by ui.js). -->
+        <details class="panel upgrades-panel" id="upgrades-panel" open>
+          <summary class="panel-head">
+            <h2 class="panel-title"><span class="flow-step">4</span>Upgrades</h2>
+            <span class="panel-tag" id="upgrades-tag"></span>
+          </summary>
+          <p class="flow-note">Products and credits → a faster refinery and workshop</p>
+          <p class="order-message" id="upgrade-message" role="status"></p>
+          <div id="upgrades-list"></div>
+        </details>
+      </div>
     </section>
 
     <!-- ===================== EXPLORATION SCREEN ===================== -->
@@ -546,67 +596,78 @@
          deep scans (exploration-screen.js fills it in). Scouts are
          sent out from their cards on the Command screen. Opens with
          the first sale of ore (design doc, Early exploration). -->
-    <section class="screen layout layout-flow" data-screen="exploration" hidden>
+    <section class="screen layout layout-rail" data-screen="exploration" hidden
+             data-group="expansion" data-title="Exploration" data-subtitle="Expansion // Home system">
 
-      <!-- Survey targets: one row each (built by exploration-screen.js) -->
-      <div class="panel">
-        <div class="panel-head">
-          <h2 class="panel-title">Survey targets</h2>
-          <span class="panel-tag" id="explore-tag"></span>
+      <div class="main-col">
+        <!-- Survey targets: one row each (built by exploration-screen.js) -->
+        <div class="panel">
+          <div class="panel-head">
+            <h2 class="panel-title">Survey targets</h2>
+            <span class="panel-tag" id="explore-tag"></span>
+          </div>
+          <p class="flow-note">One-off trips around the home system. Launch each survey when you're ready to read what's found; until then, scouts run deep scans.</p>
+          <p class="price-note" id="explore-note">Buy a Pathfinder in the Shipyard to start surveying.</p>
+          <ul class="target-list" id="target-list"></ul>
         </div>
-        <p class="flow-note">One-off trips around the home system. Launch each survey when you're ready to read what's found; until then, scouts run deep scans.</p>
-        <p class="price-note" id="explore-note">Buy a Pathfinder in the Shipyard to start surveying.</p>
-        <ul class="target-list" id="target-list"></ul>
       </div>
 
-      <!-- The wreck: its story, one stage at a time -->
-      <div class="panel">
-        <div class="panel-head">
-          <h2 class="panel-title">The wreck</h2>
-          <span class="panel-tag" id="wreck-tag"></span>
+      <div class="rail">
+        <!-- The wreck: its story, one stage at a time -->
+        <div class="panel">
+          <div class="panel-head">
+            <h2 class="panel-title">The wreck</h2>
+            <span class="panel-tag" id="wreck-tag"></span>
+          </div>
+          <ol class="wreck-list" id="wreck-list"></ol>
         </div>
-        <ol class="wreck-list" id="wreck-list"></ol>
-      </div>
 
-      <!-- Deep scans: what scouts do when there's nothing left to survey -->
-      <div class="panel">
-        <div class="panel-head">
-          <h2 class="panel-title">Deep scans</h2>
-          <span class="panel-tag" id="explore-level"></span>
+        <!-- Deep scans: what scouts do when there's nothing left to survey -->
+        <div class="panel">
+          <div class="panel-head">
+            <h2 class="panel-title">Deep scans</h2>
+            <span class="panel-tag" id="explore-level"></span>
+          </div>
+          <p class="price-note">When every target they can reach is done, scouts scan the whole system from its edge. It never runs out, earns steady XP, and now and then turns up credits or wreck alloy.</p>
+          <dl class="stats" id="deep-stats"></dl>
         </div>
-        <p class="price-note">When every target they can reach is done, scouts scan the whole system from its edge. It never runs out, earns steady XP, and now and then turns up credits or wreck alloy.</p>
-        <dl class="stats" id="deep-stats"></dl>
       </div>
     </section>
 
     <!-- ===================== CONTRACTS SCREEN ===================== -->
     <!-- The belt independents' board (contracts-screen.js fills it
          in) and your reputation with them. Opens at Mining 3. -->
-    <section class="screen layout layout-flow" data-screen="contracts" hidden>
+    <section class="screen layout layout-rail" data-screen="contracts" hidden
+             data-group="factions" data-title="Contracts" data-subtitle="Factions // The board">
 
-      <!-- The board: one collapsible box per faction (built by
-           contracts-screen.js), each holding that faction's contracts -->
-      <div class="panel">
-        <div class="panel-head">
-          <h2 class="panel-title">Contracts board</h2>
+      <div class="main-col">
+        <!-- The board: one collapsible box per faction (built by
+             contracts-screen.js), each holding that faction's contracts -->
+        <div class="panel">
+          <div class="panel-head">
+            <h2 class="panel-title">Contracts board</h2>
+          </div>
+          <p class="flow-note">Contracts never expire. When one is done, hand it in to be paid: deliveries are handed over from your hold. Finished or discarded, a new one is posted 10 minutes later.</p>
+          <div id="contract-groups"></div>
         </div>
-        <p class="flow-note">Contracts never expire. When one is done, hand it in to be paid: deliveries are handed over from your hold. Finished or discarded, a new one is posted 10 minutes later.</p>
-        <div id="contract-groups"></div>
       </div>
 
-      <!-- Reputation: one collapsible box per faction, with what
-           each tier brings -->
-      <div class="panel">
-        <div class="panel-head">
-          <h2 class="panel-title">Reputation</h2>
-          <span class="panel-tag" id="contracts-done"></span>
+      <div class="rail">
+        <!-- Reputation: one collapsible box per faction, with what
+             each tier brings -->
+        <div class="panel">
+          <div class="panel-head">
+            <h2 class="panel-title">Reputation</h2>
+            <span class="panel-tag" id="contracts-done"></span>
+          </div>
+          <div id="rep-groups"></div>
         </div>
-        <div id="rep-groups"></div>
       </div>
     </section>
 
     <!-- ===================== SKILLS SCREEN ===================== -->
-    <section class="screen layout" data-screen="skills" hidden>
+    <section class="screen layout" data-screen="skills" hidden
+             data-group="command" data-title="Skills" data-subtitle="Command // Crew experience">
       <div class="panel panel-wide">
         <div class="panel-head">
           <h2 class="panel-title">Skills</h2>
@@ -621,7 +682,8 @@
     <!-- Backups and the reset button. These used to sit in a footer
          under every screen; now they have their own screen, pinned
          to the bottom of the menu (agreed 30 Oct). -->
-    <section class="screen layout layout-flow" data-screen="save" hidden>
+    <section class="screen layout layout-flow" data-screen="save" hidden
+             data-group="command" data-title="Save" data-subtitle="Backups and reset">
 
       <!-- Save backup: export to text or a file, import it back -->
       <div class="panel backup">
@@ -664,7 +726,7 @@
     to share code. (This is why the game needs a small web
     server to run - see README.md.)
   -->
-  <script type="module" src="js/main.js?v=0.2.8"></script>
+  <script type="module" src="js/main.js?v=0.2.9"></script>
   <!-- The tooltip for hardpoints on ship drawings (ui.js,
        setupHardpointTips): the part's name, then what's fitted. -->
   <div class="hardpoint-tip" id="hardpoint-tip" role="tooltip" hidden><b></b><span></span></div>

@@ -17,7 +17,7 @@
 // flicker and sometimes swallow clicks.)
 // =============================================================
 
-import { ITEMS, SHIP_TYPES, FIELDS, SKILLS, HULL_SIZES, COMMAND, HUB, HOME, HAUL_MODES, RECIPES, REFINERY, WORKSHOP_RECIPES, WORKSHOP, UPGRADES, SHIP_UPGRADES, SHIP_PARTS, SURVEY_TARGETS, CONTRACTS, KM_PER_SECOND_AT_SPEED_1 } from "../data/content.js";
+import { ITEMS, ITEM_GROUPS, SHIP_TYPES, FIELDS, SKILLS, HULL_SIZES, COMMAND, HUB, HOME, HAUL_MODES, RECIPES, REFINERY, WORKSHOP_RECIPES, WORKSHOP, UPGRADES, SHIP_UPGRADES, SHIP_PARTS, SURVEY_TARGETS, CONTRACTS, KM_PER_SECOND_AT_SPEED_1 } from "../data/content.js";
 import { isOwned, canBuyIndustryUpgrade, getUpgradeLines } from "./upgrades.js";
 import { gameNow, SPEEDS } from "./clock.js";
 import { getShipStats, getHullParts, getPartGrade, getPartBonus, getNextUpgrade, canBuyShipUpgrade, getUpgradeName, getHullShortName, findUpgrade, getBonusUpTo, getShipGrades, getPendingRefits } from "./ship-upgrades.js";
@@ -918,31 +918,78 @@ function haulModePicker() {
 
 
 // -------------------------------------------------------------
+// itemsByGroup()
+// The hold's sections (Dan, 3 Nov): Ores, Bars, Parts, Salvage,
+// in the order ITEM_GROUPS lists them. Gives back a list like
+//   [ { groupId: "ore", group: { name: "Ores" },
+//       items: [ ["iron_ore", {...}], ["nickel_ore", {...}] ] }, ... ]
+// so both hold tables can loop section by section.
+// -------------------------------------------------------------
+function itemsByGroup() {
+  return Object.entries(ITEM_GROUPS).map(([groupId, group]) => ({
+    groupId,
+    group,
+    // Object.entries gives [id, item] pairs; keep this group's ones
+    items: Object.entries(ITEMS).filter(([, item]) => item.group === groupId),
+  }));
+}
+
+// -------------------------------------------------------------
+// addGroupRow(body, idPrefix, groupId, group, columns)
+// The header row at the top of one section, e.g. "ORES  2,140 t".
+// "columns" is how many columns the table has. The section's
+// total tonnes sit in the Stock column (the second), and on the
+// Command table its total value sits in the Value column, so the
+// totals line up with the numbers under them. render() fills
+// them in (renderCargo).
+// -------------------------------------------------------------
+function addGroupRow(body, idPrefix, groupId, group, columns) {
+  const row = document.createElement("tr");
+  row.className = "cargo-group";
+  row.id = idPrefix + "-group-" + groupId;
+  // <th scope="rowgroup"> tells screen readers this names the rows below
+  let cells = `<th scope="rowgroup">${group.name}</th><td data-part="tonnes">0 t</td>`;
+  if (columns === 6) {
+    // Command table: Item, Stock, Home, Hub, Value, Sell
+    cells += `<td></td><td></td><td data-part="value">0 cr</td><td></td>`;
+  } else {
+    // Station hold: Item, Stock, Bond
+    cells += `<td></td>`;
+  }
+  row.innerHTML = cells;
+  body.appendChild(row);
+}
+
+// -------------------------------------------------------------
 // buildCargoTable(actions)
-// One row per item, each with its own small Sell button.
+// One row per item, each with its own small Sell button, in
+// sections (Ores, Bars, Parts, Salvage).
 // -------------------------------------------------------------
 function buildCargoTable(actions) {
   const body = byId("cargo-body");
   body.innerHTML = "";
 
-  for (const [itemId, item] of Object.entries(ITEMS)) {
-    const row = document.createElement("tr");
-    row.id = "cargo-" + itemId;
-    row.innerHTML = `
-      <td><span class="tip-item" data-tip-item="${itemId}">${item.name}</span></td>
-      <td>
-        <!-- The stock, with the bonded amount on its own small line
-             underneath (when there is one), so the column stays narrow -->
-        <span data-part="stock">0 t</span>
-        <span class="bonded-note" data-part="bonded" hidden></span>
-      </td>
-      <td class="cargo-price">${item.sellPrice}</td>
-      <td class="cargo-price cargo-hub">${item.hubPrice}</td>
-      <td data-part="value">0 cr</td>
-      <td><button class="btn btn-small" data-part="sell">Sell</button></td>
-    `;
-    part(row, "sell").addEventListener("click", () => actions.sellItem(itemId));
-    body.appendChild(row);
+  for (const { groupId, group, items } of itemsByGroup()) {
+    addGroupRow(body, "cargo", groupId, group, 6);
+    for (const [itemId, item] of items) {
+      const row = document.createElement("tr");
+      row.id = "cargo-" + itemId;
+      row.innerHTML = `
+        <td><span class="tip-item" data-tip-item="${itemId}">${item.name}</span></td>
+        <td>
+          <!-- The stock, with the bonded amount on its own small line
+               underneath (when there is one), so the column stays narrow -->
+          <span data-part="stock">0 t</span>
+          <span class="bonded-note" data-part="bonded" hidden></span>
+        </td>
+        <td class="cargo-price">${item.sellPrice}</td>
+        <td class="cargo-price cargo-hub">${item.hubPrice}</td>
+        <td data-part="value">0 cr</td>
+        <td><button class="btn btn-small" data-part="sell">Sell</button></td>
+      `;
+      part(row, "sell").addEventListener("click", () => actions.sellItem(itemId));
+      body.appendChild(row);
+    }
   }
 
   // The station's name, from content.js, on the panel and button.
@@ -1554,47 +1601,50 @@ function renderUpgrades(state) {
 function buildStationHold(actions) {
   const body = byId("hold-body");
   body.innerHTML = "";
-  for (const [itemId, item] of Object.entries(ITEMS)) {
-    const row = document.createElement("tr");
-    row.id = "hold-" + itemId;
-    row.innerHTML = `
-      <td><span class="tip-item" data-tip-item="${itemId}">${item.name}</span></td>
-      <td>
-        <span data-part="stock">0 t</span>
-        <span class="bonded-note" data-part="bonded" hidden></span>
-      </td>
-      <td class="bond-cell">
-        <!-- A wrapping box: on a narrow screen the buttons drop
-             below the number instead of spilling out of the panel -->
-        <div class="bond-controls">
-          <input class="batch-input bond-input" type="number" min="0" step="1"
-                 aria-label="Tonnes of ${item.name.toLowerCase()} to bond" data-part="bond">
-          <button class="btn btn-small" data-part="bond-button">Bond</button>
-          <button class="btn btn-small" data-part="release">Release</button>
-        </div>
-      </td>
-    `;
-    const input = part(row, "bond");
+  for (const { groupId, group, items } of itemsByGroup()) {
+    addGroupRow(body, "hold", groupId, group, 3);
+    for (const [itemId, item] of items) {
+      const row = document.createElement("tr");
+      row.id = "hold-" + itemId;
+      row.innerHTML = `
+        <td><span class="tip-item" data-tip-item="${itemId}">${item.name}</span></td>
+        <td>
+          <span data-part="stock">0 t</span>
+          <span class="bonded-note" data-part="bonded" hidden></span>
+        </td>
+        <td class="bond-cell">
+          <!-- A wrapping box: on a narrow screen the buttons drop
+               below the number instead of spilling out of the panel -->
+          <div class="bond-controls">
+            <input class="batch-input bond-input" type="number" min="0" step="1"
+                   aria-label="Tonnes of ${item.name.toLowerCase()} to bond" data-part="bond">
+            <button class="btn btn-small" data-part="bond-button">Bond</button>
+            <button class="btn btn-small" data-part="release">Release</button>
+          </div>
+        </td>
+      `;
+      const input = part(row, "bond");
 
-    // Bond: set the bond to the number in the box. A refused
-    // number (like -5) puts the box back to the current bond.
-    part(row, "bond-button").addEventListener("click", () => {
-      actions.setBond(itemId, Number(input.value));
-      input.dataset.editing = "";
-    });
-    // Release: no bond at all.
-    part(row, "release").addEventListener("click", () => {
-      actions.setBond(itemId, 0);
-      input.dataset.editing = "";
-    });
-    // While the player is typing, the 4-times-a-second redraw
-    // mustn't overwrite the box. "editing" marks that.
-    input.addEventListener("input", () => { input.dataset.editing = "yes"; });
-    // Pressing Enter in the box works like the Bond button.
-    input.addEventListener("keydown", (event) => {
-      if (event.key === "Enter") part(row, "bond-button").click();
-    });
-    body.appendChild(row);
+      // Bond: set the bond to the number in the box. A refused
+      // number (like -5) puts the box back to the current bond.
+      part(row, "bond-button").addEventListener("click", () => {
+        actions.setBond(itemId, Number(input.value));
+        input.dataset.editing = "";
+      });
+      // Release: no bond at all.
+      part(row, "release").addEventListener("click", () => {
+        actions.setBond(itemId, 0);
+        input.dataset.editing = "";
+      });
+      // While the player is typing, the 4-times-a-second redraw
+      // mustn't overwrite the box. "editing" marks that.
+      input.addEventListener("input", () => { input.dataset.editing = "yes"; });
+      // Pressing Enter in the box works like the Bond button.
+      input.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") part(row, "bond-button").click();
+      });
+      body.appendChild(row);
+    }
   }
   byId("hold-name-tag").textContent = HOME.name;
 }
@@ -1941,6 +1991,25 @@ function renderCargo(state) {
     (perk > 0 ? ` (+${formatPercent(perk)} from your Trade level)` : "") +
     `, but needs a freighter to haul the goods there. Only freighters earn Trade XP.`;
   if (byId("hub-note").textContent !== note) byId("hub-note").textContent = note;
+
+  // Each section's header: its total tonnes, and on the Command
+  // table the value of what can be sold. A section you have
+  // nothing in is dimmed, like an empty item row.
+  for (const { groupId, items } of itemsByGroup()) {
+    let tonnes = 0;
+    let value = 0;
+    for (const [itemId, item] of items) {
+      tonnes += state.inventory[itemId] || 0;
+      value += getSellable(state, itemId) * item.sellPrice;
+    }
+    const cargoRow = byId("cargo-group-" + groupId);
+    setText(part(cargoRow, "tonnes"), formatTonnes(tonnes));
+    setText(part(cargoRow, "value"), formatCreditsShort(value));
+    cargoRow.classList.toggle("empty", tonnes === 0);
+    const holdRow = byId("hold-group-" + groupId);
+    setText(part(holdRow, "tonnes"), formatTonnes(tonnes));
+    holdRow.classList.toggle("empty", tonnes === 0);
+  }
 
   const total = getCargoValue(state);
   byId("cargo-total").textContent = formatCreditsShort(total);

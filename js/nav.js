@@ -158,6 +158,19 @@ export function showScreen(name) {
     screen.hidden = screen.dataset.screen !== name;
   }
 
+  // The page takes on this screen's group colour and header words
+  // (Dan, 1 Nov). Each <section> in index.html carries its own:
+  //   data-group="production"  which menu group's colour to use
+  //   data-title="Industry"    the big name in the page header
+  //   data-subtitle="..."      the small line beside it
+  // Putting data-group on <body> recolours everything that uses
+  // var(--group) in style.css: the header, panel brackets, the
+  // More button on a phone.
+  const open = document.querySelector(`section.screen[data-screen="${name}"]`);
+  document.body.dataset.group = open.dataset.group || "command";
+  byId("page-title").textContent = open.dataset.title || "";
+  byId("page-subtitle").textContent = open.dataset.subtitle || "";
+
   // Highlight the matching menu buttons (both copies).
   for (const button of document.querySelectorAll(".nav-btn[data-screen]")) {
     const isCurrent = button.dataset.screen === name;

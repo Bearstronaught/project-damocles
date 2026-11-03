@@ -30,31 +30,53 @@ import { BALANCE } from "./balance.js";
 // amounts as kilotonnes (kt) and megatonnes (Mt) automatically.
 // Each item is listed under a short ID (like "iron_ore").
 // The code always uses the ID; the "name" is only for display.
-// Items show in the cargo hold in the order they're listed here.
+// Items show in the cargo hold under their GROUP (see ITEM_GROUPS
+// below), and inside a group in the order they're listed here.
 // From the balance sheet (Items tab):
 //   sellPrice  what the HOME dock pays per tonne (instant sale)
 //   hubPrice   what the MERCHANT HUB pays per tonne (more, but a
 //              freighter has to fly it there)
+// -------------------------------------------------------------
+// ITEM GROUPS: the sections of the cargo hold (Dan, 3 Nov).
+// The hold is split the same way goods move through Anvil
+// Station: ore comes in, the refinery makes bars, the workshop
+// makes parts. Salvage is what scouts find, not what's made
+// (wreck alloy now; the Salvage skill will add more later).
+// Each item names its group with "group" below. The order here
+// is the order the sections appear on screen.
+// -------------------------------------------------------------
+export const ITEM_GROUPS = {
+  ore: { name: "Ores" },
+  bar: { name: "Bars" },
+  part: { name: "Parts" },
+  salvage: { name: "Salvage" },
+};
+
 export const ITEMS = {
   iron_ore: {
     name: "Iron ore",         // what the player sees
+    group: "ore",
     ...BALANCE.items.iron_ore,
   },
   nickel_ore: {
     name: "Nickel ore",
+    group: "ore",
     ...BALANCE.items.nickel_ore,
   },
   // Refined metals, made at the refinery (see RECIPES below)
   iron_bar: {
     name: "Iron bars",
+    group: "bar",
     ...BALANCE.items.iron_bar,
   },
   nickel_bar: {
     name: "Nickel bars",
+    group: "bar",
     ...BALANCE.items.nickel_bar,
   },
   steel: {
     name: "Steel",
+    group: "bar",
     ...BALANCE.items.steel,
   },
   // Manufactured products, made at the workshop (see
@@ -62,22 +84,27 @@ export const ITEMS = {
   // that went into it, and later ones feed ship building.
   hull_plating: {
     name: "Hull plating",
+    group: "part",
     ...BALANCE.items.hull_plating,
   },
   wiring_coils: {
     name: "Wiring coils",
+    group: "part",
     ...BALANCE.items.wiring_coils,
   },
   structural_frames: {
     name: "Structural frames",
+    group: "part",
     ...BALANCE.items.structural_frames,
   },
   cargo_pod: {
     name: "Cargo pods",
+    group: "part",
     ...BALANCE.items.cargo_pod,
   },
   thruster_assembly: {
     name: "Thruster assemblies",
+    group: "part",
     ...BALANCE.items.thruster_assembly,
   },
   // Found, not made: your Pathfinder brings it back from the
@@ -88,10 +115,12 @@ export const ITEMS = {
   // for more than nickel ore, less than hull plating (Dan, 30 Oct).
   ice: {
     name: "Ice",
+    group: "ore",
     ...BALANCE.items.ice,
   },
   wreck_alloy: {
     name: "Wreck alloy",
+    group: "salvage",
     ...BALANCE.items.wreck_alloy,
   },
 };

@@ -43,6 +43,7 @@ import { saveGame, loadGame, deleteSave, applyOfflineProgress, exportSave, impor
 import { showLevelBanner } from "./banner.js";
 import { setupUI, buildFleetViews, render, addLog, formatNumber, formatXp, formatTonnes, formatDuration, formatPercent, showDevPanel } from "./ui.js";
 import { VERSION } from "./version.js";
+import { setupSystemMap } from "./system-map.js";
 
 
 // -------------------------------------------------------------
@@ -1204,6 +1205,22 @@ function reportOfflineProgress(report, opening = null) {
 // 2. Set up the screen.
 // -------------------------------------------------------------
 setupUI(state, actions);
+
+// The live system map on the Command screen (system-map.js).
+// It's given a function rather than the game itself, because an
+// import or reset swaps in a new game and the map must follow.
+// Tapping a ship on the map scrolls to that ship's card, and
+// opens its role group if the player had closed it.
+setupSystemMap(() => state, (shipId) => {
+  const card = document.getElementById("ship-" + shipId);
+  if (!card) return;
+  const group = card.closest("details");
+  if (group) group.open = true;
+  card.scrollIntoView({ behavior: "smooth", block: "center" });
+  // A brief highlight, so the eye finds it
+  card.classList.add("flash");
+  setTimeout(() => card.classList.remove("flash"), 1200);
+});
 
 if (isNewGame) {
   addLog("Contract signed. One barge, one belt, no prospects. Time to dig.", "system");

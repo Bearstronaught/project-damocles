@@ -49,7 +49,8 @@ js/playtest.js      the dev panel's tools (set levels, add goods or credits, jum
 js/dev-switch.js    the hidden dev mode switch (type "damocles", or tap the title 7 times)
 js/save.js          save, load, version upgrades, offline progress
 js/ui.js            drawing the screens and handling button clicks
-js/nav.js           the main menu: sidebar on a computer, bottom bar and drawer on a phone, nav dots
+js/nav.js           the main menu: sidebar on a computer, bottom bar and drawer on a phone, nav dots, each screen's colour and header
+js/system-map.js    the viewscreen on Command: a live map of the home system, ships moving along their trips
 js/exploration.js   scouts, survey targets, deep scans and their finds, the first-sale milestone
 js/exploration-screen.js  the Exploration tab: targets, the wreck's story, deep scans
 js/report.js        the survey report pop-up (a scout's find and lore; needs closing)
