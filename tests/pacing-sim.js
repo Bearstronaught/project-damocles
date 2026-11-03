@@ -38,7 +38,8 @@ import { ITEMS } from "../data/content.js";
 import { getLevel, isFieldUnlocked } from "../js/skills.js";
 import { buyShip, getShipPrice, canBuyShip } from "../js/shipyard.js";
 import { buyUpgrade, getNextUpgradeCost, canBuyUpgrade } from "../js/command.js";
-import { canBuyShipUpgrade, buyShipUpgrade } from "../js/ship-upgrades.js";
+import { canBuyShipUpgrade, buyShipUpgrade, getPartGrade } from "../js/ship-upgrades.js";
+import { setBond } from "../js/bonded.js";
 import { setRecipe, getRefineJob, getSlotCount, isRecipeUnlocked } from "../js/refinery.js";
 import { getCommandFree } from "../js/command.js";
 import { startScoutJob, chooseNextTarget, getTarget, getReadySurveys, launchSurvey } from "../js/exploration.js";
@@ -161,17 +162,42 @@ export function simulate(hours, untilMiningLevel, hourly = null, explore = true,
       const c = slot.contract;
       if (c && CONTRACT_KINDS[c.kindId].kind === "deliver") wanted.add(c.itemId);
     }
+    //    ...and the metal its next Prospector component costs
+    //    (Mk II is paid in bars since 1 Nov). It BONDS that much,
+    //    the game's own way to keep stock from being sold, starting
+    //    one Mining level before the part unlocks so the bars are
+    //    ready on time. Everything above the bond still sells.
+    const keep = {};                 // item -> tonnes to hold back
+    for (const part of ["drill", "hold", "drive"]) {
+      const next = SHIP_UPGRADES[`prospector_${part}_${getPartGrade(state, "prospector", part) + 1}`];
+      if (!next || getLevel(state, "mining") < next.level - 1) continue;
+      for (const [item, tonnes] of Object.entries(next.costs)) {
+        keep[item] = (keep[item] || 0) + tonnes;
+      }
+    }
+    for (const itemId of Object.keys(RECIPES)) {   // the metal bars
+      setBond(state, itemId, keep[itemId] || 0);
+    }
     for (const itemId of Object.keys(ITEMS)) {
       if (!wanted.has(itemId)) earnedThisHour += sellAll(state, itemId).credits;
     }
 
-    // 1b. Keep every refinery slot smelting (once it's open)
+    // 1b. Keep every refinery slot smelting (once it's open).
+    //     Normally slot 1 makes iron bars and slot 2 nickel. But
+    //     while the next component needs nickel bars the player
+    //     hasn't got (Prospector hold Mk II, since 1 Nov), slot 1
+    //     switches to nickel until there's enough, then back.
+    const needNickel = (keep.nickel_bar || 0) > (state.inventory.nickel_bar || 0) &&
+      isRecipeUnlocked(state, "nickel_bar") && isFieldUnlocked(state, "outer_belt");
     for (let slot = 0; slot < getSlotCount(state); slot++) {
-      if (getRefineJob(state, slot)) continue;
-      const recipe = isRecipeUnlocked(state, "nickel_bar") && isFieldUnlocked(state, "outer_belt") && slot % 2 === 1
+      const current = getRefineJob(state, slot);
+      let recipe = isRecipeUnlocked(state, "nickel_bar") && isFieldUnlocked(state, "outer_belt") && slot % 2 === 1
         ? "nickel_bar" : "iron_bar";
-      setRecipe(state, slot, recipe, now);
-      events.push({ minute, text: `refinery slot ${slot + 1} set to ${RECIPES[recipe].name.toLowerCase()}` });
+      if (slot === 0 && needNickel) recipe = "nickel_bar";
+      if (current && (current.recipeId === recipe || current.toll !== undefined)) continue;
+      if (setRecipe(state, slot, recipe, now)) {
+        events.push({ minute, text: `refinery slot ${slot + 1} set to ${RECIPES[recipe].name.toLowerCase()}` });
+      }
     }
 
     // Once an hour: what the player earned, and what's holding up

@@ -42,10 +42,7 @@ import { getJobForShip, getJobPhase } from "./jobs.js";
 import { gameNow } from "./clock.js";
 import { getTarget, getTargetStatus, DEEP_SCAN_ID } from "./exploration.js";
 import { isFieldUnlocked } from "./skills.js";
-
-// SVG elements need this "namespace" when made from JavaScript,
-// or the browser treats them as unknown HTML and draws nothing.
-const SVG = "http://www.w3.org/2000/svg";
+import { make } from "./svg.js";
 
 
 // -------------------------------------------------------------
@@ -187,21 +184,6 @@ function whereIs(state, ship, now, places) {
   const target = moving ? to : STATION;
   const heading = Math.atan2(target.y - y, target.x - x) * 180 / Math.PI;
   return { x, y, heading, moving, destination: there, placeId, destinationName: place.name, phase: phase.phase };
-}
-
-
-// -------------------------------------------------------------
-// make(tag, attributes, parent)
-// Makes one SVG element with its attributes and adds it to
-// parent. A small helper so the drawing code below stays short.
-// -------------------------------------------------------------
-function make(tag, attributes, parent) {
-  const element = document.createElementNS(SVG, tag);
-  for (const [name, value] of Object.entries(attributes)) {
-    element.setAttribute(name, value);
-  }
-  if (parent) parent.appendChild(element);
-  return element;
 }
 
 

@@ -51,6 +51,9 @@ js/save.js          save, load, version upgrades, offline progress
 js/ui.js            drawing the screens and handling button clicks
 js/nav.js           the main menu: sidebar on a computer, bottom bar and drawer on a phone, nav dots, each screen's colour and header
 js/system-map.js    the viewscreen on Command: a live map of the home system, ships moving along their trips
+js/industry-view.js the viewscreen on Industry: a live cutaway of Anvil Station (furnaces, workshop, hold)
+js/exploration-view.js  the viewscreen on Exploration: a sensor sweep of the survey targets, with a launch card
+js/svg.js           a small helper the three viewscreens share for drawing
 js/exploration.js   scouts, survey targets, deep scans and their finds, the first-sale milestone
 js/exploration-screen.js  the Exploration tab: targets, the wreck's story, deep scans
 js/report.js        the survey report pop-up (a scout's find and lore; needs closing)

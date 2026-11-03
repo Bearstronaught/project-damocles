@@ -44,6 +44,8 @@ import { showLevelBanner } from "./banner.js";
 import { setupUI, buildFleetViews, render, addLog, formatNumber, formatXp, formatTonnes, formatDuration, formatPercent, showDevPanel } from "./ui.js";
 import { VERSION } from "./version.js";
 import { setupSystemMap } from "./system-map.js";
+import { setupIndustryView } from "./industry-view.js";
+import { setupExplorationView } from "./exploration-view.js";
 
 
 // -------------------------------------------------------------
@@ -1221,6 +1223,12 @@ setupSystemMap(() => state, (shipId) => {
   card.classList.add("flash");
   setTimeout(() => card.classList.remove("flash"), 1200);
 });
+
+// The viewscreens on Industry and Exploration (3 Nov). The
+// Exploration one's Launch survey button uses the same action
+// as the buttons in the target list.
+setupIndustryView(() => state);
+setupExplorationView(() => state, actions);
 
 if (isNewGame) {
   addLog("Contract signed. One barge, one belt, no prospects. Time to dig.", "system");

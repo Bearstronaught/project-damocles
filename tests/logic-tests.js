@@ -96,11 +96,16 @@ function test(name, testFunction) {
   }
 }
 
-// A game at Mining level 10 (Excavator unlocked) with some money,
-// for shipyard tests.
-function gameAtLevel10(credits) {
+// The Mining level that unlocks the Excavator, read from the
+// game data (balance sheet) rather than typed in, because it has
+// moved before: 2, then 10, then 15 (Dan, 1 Nov).
+const EXCAVATOR_LEVEL = SHIP_TYPES.excavator.unlockLevel;
+
+// A game with the Excavator just unlocked, and some money, for
+// shipyard tests.
+function gameWithExcavator(credits) {
   const state = newGame();
-  state.skills.mining.xp = XP_TABLE[10];
+  state.skills.mining.xp = XP_TABLE[EXCAVATOR_LEVEL];
   state.credits = credits;
   return state;
 }
@@ -465,9 +470,9 @@ test("At level 99 the XP bar is full and says so", () => {
 // SHIPYARD
 // =============================================================
 
-test("The Excavator is locked at Mining level 9", () => {
+test("The Excavator is locked one XP short of its Mining level", () => {
   const state = newGame();
-  state.skills.mining.xp = XP_TABLE[10] - 1;   // 1 XP short of level 10
+  state.skills.mining.xp = XP_TABLE[EXCAVATOR_LEVEL] - 1;   // 1 XP short
   state.credits = 1_000_000;
   assert.equal(isShipTypeUnlocked(state, "excavator"), false);
   assert.deepEqual(canBuyShip(state, "excavator"), { ok: false, reason: "Locked" });
@@ -476,13 +481,13 @@ test("The Excavator is locked at Mining level 9", () => {
 });
 
 test("Unlocked but 1 cr short: can't buy, and the reason says why", () => {
-  const state = gameAtLevel10(SHIP_TYPES.excavator.cost - 1);
+  const state = gameWithExcavator(SHIP_TYPES.excavator.cost - 1);
   assert.deepEqual(canBuyShip(state, "excavator"), { ok: false, reason: "Not enough credits" });
 });
 
 test("Buying an Excavator takes its price and adds 'Second Wind' as ship-2", () => {
   const cost = SHIP_TYPES.excavator.cost;
-  const state = gameAtLevel10(cost + 2500);
+  const state = gameWithExcavator(cost + 2500);
   const ship = buyShip(state, "excavator");
   assert.equal(state.credits, 2500);
   assert.equal(state.ships.length, 2);
@@ -524,7 +529,7 @@ test("A second Prospector takes about half an hour of mining to afford", () => {
 });
 
 test("Two ships with different trip lengths each pay out on their own timer", () => {
-  const state = gameAtLevel10(SHIP_TYPES.excavator.cost);
+  const state = gameWithExcavator(SHIP_TYPES.excavator.cost);
   buyShip(state, "excavator");
   startMiningJob(state, "ship-1", "inner_belt", START);
   startMiningJob(state, "ship-2", "inner_belt", START);
@@ -598,7 +603,7 @@ test("A new game has 6 command points, 1 used by the Prospector", () => {
 });
 
 test("An Excavator uses 2 points: Prospector + 1 Excavator = 3 of 4", () => {
-  const state = gameAtLevel10(SHIP_TYPES.excavator.cost);
+  const state = gameWithExcavator(SHIP_TYPES.excavator.cost);
   buyShip(state, "excavator");
   assert.equal(getCommandUsed(state), 3);
 });
@@ -606,7 +611,7 @@ test("An Excavator uses 2 points: Prospector + 1 Excavator = 3 of 4", () => {
 test("A third Excavator is blocked by command, even with the money", () => {
   // Prospector 1 + Excavator 2 + Excavator 2 = 5 of 6 points: a third
   // (2 more) doesn't fit. Excavators cost 60,000 then 96,000.
-  const state = gameAtLevel10(60000 + 96000 + 500000);
+  const state = gameWithExcavator(60000 + 96000 + 500000);
   assert.ok(buyShip(state, "excavator"));
   assert.ok(buyShip(state, "excavator"));
   assert.deepEqual(canBuyShip(state, "excavator"), { ok: false, reason: "Not enough command points" });
@@ -647,7 +652,7 @@ test("After the last upgrade there are no more to buy", () => {
 test("Expanding command makes room for the third Excavator", () => {
   // Excavators 60,000 + 96,000, upgrade 80,000, third Excavator
   // 153,600 (60,000 x 1.6 x 1.6)
-  const state = gameAtLevel10(60000 + 96000 + 80000 + 153600);
+  const state = gameWithExcavator(60000 + 96000 + 80000 + 153600);
   buyShip(state, "excavator");
   buyShip(state, "excavator");
   buyUpgrade(state);
@@ -675,7 +680,7 @@ test("Each Prospector costs 60% more than the last: 8,000, 12,800, 20,480", () =
 });
 
 test("Each ship type has its own price ladder", () => {
-  const state = gameAtLevel10(1_000_000);
+  const state = gameWithExcavator(1_000_000);
   buyShip(state, "prospector");
   buyShip(state, "prospector");
   // Owning 3 Prospectors doesn't make the first Excavator dearer
@@ -693,7 +698,7 @@ test("Selling a ship makes the next one of that type cheaper again", () => {
 });
 
 test("Buying a ship and selling it straight back loses half the price", () => {
-  const state = gameAtLevel10(1_000_000);
+  const state = gameWithExcavator(1_000_000);
   buyShip(state, "excavator");                       // pays 60,000
   const price = getShipPrice(state, "excavator");    // the 2nd costs 96,000
   buyUpgrade(state);                                 // room for the 2nd
@@ -767,7 +772,7 @@ test("Fleet XP: ticking for 2 hours equals one 2-hour jump", () => {
 // =============================================================
 
 test("A ship sells for half of what it would cost to buy back", () => {
-  const state = gameAtLevel10(1_000_000);
+  const state = gameWithExcavator(1_000_000);
   // Only the starter Prospector: buying it back (owning 0) costs 5,000
   assert.equal(getSellValue(state, "prospector"), 2500);
   buyShip(state, "prospector");
@@ -779,7 +784,7 @@ test("A ship sells for half of what it would cost to buy back", () => {
 });
 
 test("Selling a docked ship pays out and frees its command points", () => {
-  const state = gameAtLevel10(SHIP_TYPES.excavator.cost);
+  const state = gameWithExcavator(SHIP_TYPES.excavator.cost);
   buyShip(state, "excavator");
   const earned = sellShip(state, "ship-2");
   assert.equal(earned, SHIP_TYPES.excavator.cost / 2);
@@ -789,7 +794,7 @@ test("Selling a docked ship pays out and frees its command points", () => {
 });
 
 test("A ship can't be sold mid-trip", () => {
-  const state = gameAtLevel10(SHIP_TYPES.excavator.cost);
+  const state = gameWithExcavator(SHIP_TYPES.excavator.cost);
   buyShip(state, "excavator");
   startMiningJob(state, "ship-2", "inner_belt", START);
   assert.deepEqual(canSellShip(state, "ship-2"), { ok: false, reason: "Ship is busy" });
@@ -804,7 +809,7 @@ test("Your last ship can't be sold", () => {
 });
 
 test("Ship IDs are never reused after a sale", () => {
-  const state = gameAtLevel10(SHIP_TYPES.excavator.cost * 2);
+  const state = gameWithExcavator(SHIP_TYPES.excavator.cost * 2);
   buyShip(state, "excavator");             // ship-2
   sellShip(state, "ship-2");
   const next = buyShip(state, "excavator");
@@ -1891,7 +1896,9 @@ function busyEmpire() {
   state.simulatedUpTo = START;
   state.clock = createClock(START);              // game clock starts at START too
   state.lastSavedAt = 0;                         // (differs per run, so ignored)
-  state.skills.mining.xp = XP_TABLE[12];         // both fields and the refinery open
+  // Both fields, the refinery and the Excavator open (the
+  // Excavator's level is the highest of the three, so it decides)
+  state.skills.mining.xp = XP_TABLE[EXCAVATOR_LEVEL];
   state.skills.refining.xp = XP_TABLE[14];       // reaches 15 during the run
   state.credits = 10_000_000;
   state.commandUpgrades = 5;
@@ -3060,6 +3067,27 @@ test("Components: no two components unlock at the same level of the same skill",
   }
 });
 
+// Dan's rule from playtesting (1 Nov): Prospector Mk II parts must
+// be worth buying, so they arrive after the refinery opens and
+// before the Excavator replaces the Prospector, and they cost only
+// metal bars (which exist from the refinery on), never workshop
+// products (which arrive hours later).
+test("Components: Prospector Mk II lands between the refinery and the Excavator, paid in bars", () => {
+  const metalBars = Object.keys(RECIPES);              // what the refinery makes
+  for (const part of ["drill", "hold", "drive"]) {
+    const upgrade = SHIP_UPGRADES["prospector_" + part + "_2"];
+    assert.ok(upgrade.level > REFINERY.openAtMiningLevel, part + " after the refinery");
+    assert.ok(upgrade.level < EXCAVATOR_LEVEL, part + " before the Excavator");
+    for (const item of Object.keys(upgrade.costs)) {
+      assert.ok(metalBars.includes(item), part + " is paid in " + item + ", which isn't a metal bar");
+      // ...and a bar the refinery makes from the start (Refining 1).
+      // Nickel bars need Refining 5, which comes after the Excavator,
+      // so they're out (found 3 Nov in the pacing simulator).
+      assert.equal(RECIPES[item].unlockLevel, 1, part + " needs " + item + ", made only from Refining " + RECIPES[item].unlockLevel);
+    }
+  }
+});
+
 test("Components: rules in order - level, then grades in order, then cost", () => {
   const state = newGame();
   state.credits = 1_000_000;
@@ -3070,12 +3098,13 @@ test("Components: rules in order - level, then grades in order, then cost", () =
   assert.deepEqual(canBuyShipUpgrade(state, "prospector_drill_2"), { ok: false, reason: "Needs Prospector drill Mk I first." });
   assert.ok(buyShipUpgrade(state, "prospector_drill_1").ok);
   assert.equal(state.credits, 1_000_000 - 3000);
-  // Mk II needs 40 t wiring coils
-  assert.deepEqual(canBuyShipUpgrade(state, "prospector_drill_2"), { ok: false, reason: "Need 40 t more wiring coils." });
-  state.inventory.wiring_coils = 40;
-  state.bonded.wiring_coils = 40;                    // bonded stock counts (the same as station upgrades)
+  // Mk II needs 40 t iron bars (paid in bars since 1 Nov, so it
+  // can be bought before the workshop opens)
+  assert.deepEqual(canBuyShipUpgrade(state, "prospector_drill_2"), { ok: false, reason: "Need 40 t more iron bars." });
+  state.inventory.iron_bar = 40;
+  state.bonded.iron_bar = 40;                        // bonded stock counts (the same as station upgrades)
   assert.ok(buyShipUpgrade(state, "prospector_drill_2").ok);
-  assert.equal(state.inventory.wiring_coils, 0);
+  assert.equal(state.inventory.iron_bar, 0);
   assert.equal(getPartGrade(state, "prospector", "drill"), 2);
   assert.deepEqual(canBuyShipUpgrade(state, "prospector_drill_2"), { ok: false, reason: "Already fitted." });
   // Not enough credits

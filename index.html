@@ -26,48 +26,51 @@
        and new files after an update. tools/release.js writes this
        block; see that file for how it works. -->
   <!-- version:start (written by tools/release.js - don't edit by hand) -->
-  <meta name="game-version" content="0.2.9">
+  <meta name="game-version" content="0.2.10">
   <script type="importmap">
   {
     "imports": {
-      "./data/balance.js": "./data/balance.js?v=0.2.9",
-      "./data/content.js": "./data/content.js?v=0.2.9",
-      "./js/art.js": "./js/art.js?v=0.2.9",
-      "./js/banner.js": "./js/banner.js?v=0.2.9",
-      "./js/bonded.js": "./js/bonded.js?v=0.2.9",
-      "./js/clock.js": "./js/clock.js?v=0.2.9",
-      "./js/command.js": "./js/command.js?v=0.2.9",
-      "./js/contracts-screen.js": "./js/contracts-screen.js?v=0.2.9",
-      "./js/contracts.js": "./js/contracts.js?v=0.2.9",
-      "./js/dev-switch.js": "./js/dev-switch.js?v=0.2.9",
-      "./js/exploration-screen.js": "./js/exploration-screen.js?v=0.2.9",
-      "./js/exploration.js": "./js/exploration.js?v=0.2.9",
-      "./js/fleet-groups.js": "./js/fleet-groups.js?v=0.2.9",
-      "./js/jobs.js": "./js/jobs.js?v=0.2.9",
-      "./js/main.js": "./js/main.js?v=0.2.9",
-      "./js/nav.js": "./js/nav.js?v=0.2.9",
-      "./js/playtest.js": "./js/playtest.js?v=0.2.9",
-      "./js/refinery.js": "./js/refinery.js?v=0.2.9",
-      "./js/report.js": "./js/report.js?v=0.2.9",
-      "./js/save.js": "./js/save.js?v=0.2.9",
-      "./js/ship-upgrades.js": "./js/ship-upgrades.js?v=0.2.9",
-      "./js/shipyard.js": "./js/shipyard.js?v=0.2.9",
-      "./js/simulation.js": "./js/simulation.js?v=0.2.9",
-      "./js/skills.js": "./js/skills.js?v=0.2.9",
-      "./js/state.js": "./js/state.js?v=0.2.9",
-      "./js/system-map.js": "./js/system-map.js?v=0.2.9",
-      "./js/trade.js": "./js/trade.js?v=0.2.9",
-      "./js/ui.js": "./js/ui.js?v=0.2.9",
-      "./js/upgrades.js": "./js/upgrades.js?v=0.2.9",
-      "./js/version.js": "./js/version.js?v=0.2.9",
-      "./js/workshop.js": "./js/workshop.js?v=0.2.9"
+      "./data/balance.js": "./data/balance.js?v=0.2.10",
+      "./data/content.js": "./data/content.js?v=0.2.10",
+      "./js/art.js": "./js/art.js?v=0.2.10",
+      "./js/banner.js": "./js/banner.js?v=0.2.10",
+      "./js/bonded.js": "./js/bonded.js?v=0.2.10",
+      "./js/clock.js": "./js/clock.js?v=0.2.10",
+      "./js/command.js": "./js/command.js?v=0.2.10",
+      "./js/contracts-screen.js": "./js/contracts-screen.js?v=0.2.10",
+      "./js/contracts.js": "./js/contracts.js?v=0.2.10",
+      "./js/dev-switch.js": "./js/dev-switch.js?v=0.2.10",
+      "./js/exploration-screen.js": "./js/exploration-screen.js?v=0.2.10",
+      "./js/exploration-view.js": "./js/exploration-view.js?v=0.2.10",
+      "./js/exploration.js": "./js/exploration.js?v=0.2.10",
+      "./js/fleet-groups.js": "./js/fleet-groups.js?v=0.2.10",
+      "./js/industry-view.js": "./js/industry-view.js?v=0.2.10",
+      "./js/jobs.js": "./js/jobs.js?v=0.2.10",
+      "./js/main.js": "./js/main.js?v=0.2.10",
+      "./js/nav.js": "./js/nav.js?v=0.2.10",
+      "./js/playtest.js": "./js/playtest.js?v=0.2.10",
+      "./js/refinery.js": "./js/refinery.js?v=0.2.10",
+      "./js/report.js": "./js/report.js?v=0.2.10",
+      "./js/save.js": "./js/save.js?v=0.2.10",
+      "./js/ship-upgrades.js": "./js/ship-upgrades.js?v=0.2.10",
+      "./js/shipyard.js": "./js/shipyard.js?v=0.2.10",
+      "./js/simulation.js": "./js/simulation.js?v=0.2.10",
+      "./js/skills.js": "./js/skills.js?v=0.2.10",
+      "./js/state.js": "./js/state.js?v=0.2.10",
+      "./js/svg.js": "./js/svg.js?v=0.2.10",
+      "./js/system-map.js": "./js/system-map.js?v=0.2.10",
+      "./js/trade.js": "./js/trade.js?v=0.2.10",
+      "./js/ui.js": "./js/ui.js?v=0.2.10",
+      "./js/upgrades.js": "./js/upgrades.js?v=0.2.10",
+      "./js/version.js": "./js/version.js?v=0.2.10",
+      "./js/workshop.js": "./js/workshop.js?v=0.2.10"
     }
   }
   </script>
   <!-- version:end -->
 
   <!-- Our own styles: the tactical display look -->
-  <link rel="stylesheet" href="css/style.css?v=0.2.9">
+  <link rel="stylesheet" href="css/style.css?v=0.2.10">
 </head>
 <body>
 
@@ -524,6 +527,16 @@
              data-group="production" data-title="Industry" data-subtitle="Production // Anvil Station">
 
       <div class="main-col">
+        <!-- The viewscreen (Dan, 1 and 3 Nov): a live cutaway of
+             Anvil Station, drawn by industry-view.js. -->
+        <div class="panel viewscreen viewscreen-industry">
+          <div class="viewscreen-head">
+            <span class="viewscreen-title">Viewscreen // Anvil Station</span>
+          </div>
+          <svg class="system-map industry-view" id="industry-view" viewBox="0 0 1000 340"
+               role="img" aria-label="Cutaway of Anvil Station: ore at the dock, the refinery's furnaces, the workshop's slots, and the hold"></svg>
+        </div>
+
         <!-- 1. Refinery: turns ore from the hold into metal. One box
              per slot (built by ui.js); locked slots show when they open. -->
         <div class="panel">
@@ -600,6 +613,25 @@
              data-group="expansion" data-title="Exploration" data-subtitle="Expansion // Home system">
 
       <div class="main-col">
+        <!-- The viewscreen (Dan, 1 and 3 Nov): a sensor sweep of the
+             home system, drawn by exploration-view.js, with a card
+             for the next survey that's ready to launch. -->
+        <div class="panel viewscreen viewscreen-exploration">
+          <div class="viewscreen-head">
+            <span class="viewscreen-title">Sensors // Home system</span>
+          </div>
+          <svg class="system-map exploration-view" id="exploration-view" viewBox="0 0 1000 400"
+               role="img" aria-label="Sensor sweep: survey targets around Anvil Station, placed by flight time"></svg>
+          <!-- The next survey ready to launch (hidden when none is) -->
+          <div class="ev-card" id="ev-card" hidden>
+            <span class="ev-card-tag">Ready to launch</span>
+            <span class="ev-card-name" id="ev-card-name"></span>
+            <span class="ev-card-trip" id="ev-card-trip"></span>
+            <button class="btn btn-primary" id="ev-card-launch" type="button">Launch survey</button>
+            <span class="ev-card-more" id="ev-card-more"></span>
+          </div>
+        </div>
+
         <!-- Survey targets: one row each (built by exploration-screen.js) -->
         <div class="panel">
           <div class="panel-head">
@@ -726,7 +758,7 @@
     to share code. (This is why the game needs a small web
     server to run - see README.md.)
   -->
-  <script type="module" src="js/main.js?v=0.2.9"></script>
+  <script type="module" src="js/main.js?v=0.2.10"></script>
   <!-- The tooltip for hardpoints on ship drawings (ui.js,
        setupHardpointTips): the part's name, then what's fitted. -->
   <div class="hardpoint-tip" id="hardpoint-tip" role="tooltip" hidden><b></b><span></span></div>

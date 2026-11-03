@@ -3415,3 +3415,183 @@ body.nav-collapsed .nav-heading {
   outline: 1px solid var(--amber);
   outline-offset: 2px;
 }
+
+
+/* =============================================================
+   THE INDUSTRY VIEWSCREEN: a cutaway of Anvil Station (3 Nov)
+   Drawn by industry-view.js. Copper, the Production colour, for
+   what's working; steel for the structure.
+   ============================================================= */
+.viewscreen-industry {
+  background:
+    radial-gradient(ellipse at 45% 55%, rgba(196, 137, 95, 0.10), transparent 60%),
+    #05070a;
+}
+.viewscreen-industry .viewscreen-title,
+.viewscreen-exploration .viewscreen-title {
+  color: var(--group);
+}
+
+.industry-view .iv-hull { fill: #0a0e12; stroke: var(--line-strong); stroke-width: 2; }
+.industry-view .iv-divider { stroke: var(--line); stroke-width: 2; fill: none; }
+.industry-view .iv-section {
+  font-family: var(--font-display);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  fill: var(--production);
+}
+.industry-view .iv-bay { fill: none; stroke: var(--steel-dim); stroke-dasharray: 4 3; }
+.industry-view .iv-value { font-family: var(--font-display); font-size: 20px; font-weight: 700; fill: #e6eef4; }
+.industry-view .iv-small { font-family: var(--font-data); font-size: 12px; letter-spacing: 0.06em; fill: var(--steel); }
+.industry-view .iv-tiny { font-family: var(--font-data); font-size: 10px; letter-spacing: 0.04em; fill: var(--steel); }
+.industry-view .iv-dim { fill: var(--steel-dim); }
+.industry-view .iv-barge { fill: var(--amber); }
+
+/* Furnaces: an outline, with a copper glow that rises as it smelts */
+.industry-view .iv-furnace { fill: #0c1116; stroke: var(--production); stroke-width: 1.5; }
+.industry-view .iv-furnace.is-locked { fill: none; stroke: var(--line-strong); stroke-dasharray: 4 3; }
+.industry-view .iv-melt { fill: var(--production); fill-opacity: 0.55; }
+
+/* Workshop rings */
+.industry-view .iv-ring-track { fill: #0c1116; stroke: var(--line-strong); stroke-width: 7; }
+.industry-view .iv-ring-track.is-locked { fill: none; stroke-width: 1.5; stroke-dasharray: 4 3; }
+.industry-view .iv-ring { fill: none; stroke: var(--production); stroke-width: 7; }
+.industry-view .iv-ring-text { font-family: var(--font-display); font-size: 15px; font-weight: 700; fill: #e6eef4; }
+
+/* Hold tanks, one shade per section */
+.industry-view .iv-tank { fill: none; stroke: var(--line-strong); }
+.industry-view .iv-tank-ore { fill: var(--steel); fill-opacity: 0.55; }
+.industry-view .iv-tank-bar { fill: var(--production); fill-opacity: 0.5; }
+.industry-view .iv-tank-part { fill: #d8c6b4; fill-opacity: 0.55; }
+.industry-view .iv-tank-salvage { fill: var(--expansion); fill-opacity: 0.55; }
+
+/* The arrows between sections: dim when nothing flows, copper
+   with moving dashes while goods move along them */
+.industry-view .iv-flow { stroke: var(--line-strong); stroke-width: 2; stroke-dasharray: 5 4; }
+.industry-view .iv-flow.is-active {
+  stroke: var(--production);
+  animation: iv-flow 0.8s linear infinite;
+}
+@keyframes iv-flow {
+  to { stroke-dashoffset: -9; }     /* one dash and gap: a smooth loop */
+}
+
+.industry-view .is-hidden { display: none; }
+
+/* On a phone the cutaway is drawn small: keep the section names
+   and the ore figure, bigger, and drop the per-slot words (the
+   slot cards just below have them). */
+@container (max-width: 640px) {
+  .industry-view .iv-small,
+  .industry-view .iv-tiny { display: none; }
+  .industry-view .iv-section { font-size: 22px; }
+  .industry-view .iv-value { font-size: 30px; }
+}
+
+
+/* =============================================================
+   THE EXPLORATION VIEWSCREEN: the sensor sweep (3 Nov)
+   Drawn by exploration-view.js. Violet, the Expansion colour.
+   ============================================================= */
+.viewscreen-exploration {
+  background:
+    radial-gradient(circle at 38% 51%, rgba(155, 143, 199, 0.12), transparent 45%),
+    #05070a;
+}
+
+.exploration-view .ev-ring { fill: none; stroke: var(--expansion); stroke-opacity: 0.2; }
+.exploration-view .ev-ring-label { font-family: var(--font-data); font-size: 10px; fill: var(--expansion-dim); }
+.exploration-view .ev-station { fill: var(--bg); stroke: var(--amber); stroke-width: 2; }
+
+/* The sweep turns round the station once every 8 seconds. Its
+   "transform-origin" is the station's position in the drawing. */
+.exploration-view .ev-sweep {
+  transform-box: view-box;
+  transform-origin: 380px 205px;   /* the station: CENTRE in exploration-view.js */
+  animation: ev-sweep 8s linear infinite;
+}
+@keyframes ev-sweep {
+  to { transform: rotate(360deg); }
+}
+.exploration-view .ev-wedge { fill: var(--expansion); fill-opacity: 0.13; }
+.exploration-view .ev-edge { stroke: var(--expansion); stroke-width: 1.5; }
+
+/* Targets, by status (exploration-view.js sets is-...) */
+.exploration-view .ev-label { font-family: var(--font-data); font-size: 12px; letter-spacing: 0.06em; }
+.exploration-view .ev-halo { fill: none; stroke: none; }
+.exploration-view .is-surveyed .ev-dot { fill: var(--steel-dim); }
+.exploration-view .is-surveyed .ev-label { fill: var(--steel-dim); }
+.exploration-view .is-available .ev-dot { fill: var(--expansion); }
+.exploration-view .is-available .ev-label { fill: var(--steel); }
+.exploration-view .is-locked .ev-dot { fill: none; stroke: var(--steel-dim); stroke-dasharray: 2 2; }
+.exploration-view .is-locked .ev-label { fill: var(--steel-dim); }
+.exploration-view .is-ready .ev-dot { fill: var(--amber); }
+.exploration-view .is-ready .ev-halo { stroke: var(--amber); stroke-width: 1.5; }
+.exploration-view .is-ready .ev-label { fill: var(--amber); }
+.exploration-view .is-hidden { display: none; }
+
+/* Scouts */
+.exploration-view .ev-scout polygon { fill: var(--expansion); }
+.exploration-view .ev-scout-label { font-family: var(--font-data); font-size: 11px; fill: #e6eef4; }
+.exploration-view .ev-route { stroke: var(--expansion); stroke-opacity: 0.45; stroke-width: 1.2; stroke-dasharray: 5 5; }
+
+/* The card for the next survey ready to launch: on the right of
+   the sweep on a wide screen, under it on a narrow one */
+.ev-card {
+  position: absolute;
+  top: 44px;
+  right: 16px;
+  width: 280px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 16px;
+  background: rgba(8, 11, 14, 0.92);
+  border: 1px solid var(--amber-dim);
+}
+.ev-card-tag {
+  font-family: var(--font-display);
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--amber);
+}
+.ev-card-name {
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: #e6eef4;
+}
+.ev-card-trip,
+.ev-card-more {
+  font-size: 12px;
+  color: var(--steel);
+}
+.ev-card-more:empty { display: none; }
+
+/* Turning sweeps and moving dashes stop for players who've asked
+   their device for less motion. */
+@media (prefers-reduced-motion: reduce) {
+  .exploration-view .ev-sweep,
+  .industry-view .iv-flow.is-active {
+    animation: none;
+  }
+}
+
+@container (max-width: 760px) {
+  .ev-card {
+    position: static;
+    width: auto;
+    margin: 0 12px 12px;
+  }
+}
+/* On a phone the sweep is drawn too small for words: it shows
+   only the dots (ready ones in amber, with their ring), and the
+   card below it names the next survey. */
+@container (max-width: 640px) {
+  .exploration-view .ev-label,
+  .exploration-view .ev-ring-label,
+  .exploration-view .ev-scout-label { display: none; }
+}
