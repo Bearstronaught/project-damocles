@@ -4139,6 +4139,88 @@ test("Lore: every survey target has all its words", () => {
   }
 });
 
+// =============================================================
+// THE NEW VIEWSCREENS (3 Nov, v0.2.12): Contracts, Skills, Shipyard
+// The drawing itself is checked in a browser; these check the
+// rules each viewscreen uses to decide what to show.
+// The view files import ui.js, which expects a browser page. A
+// tiny stand-in for "window" and "document" lets them load here;
+// nothing in these tests touches the page.
+// =============================================================
+globalThis.window ??= { matchMedia: () => ({ matches: false, addEventListener() {}, addListener() {} }), addEventListener() {} };
+globalThis.document ??= { addEventListener() {}, getElementById() { return null; }, querySelector() { return null; }, querySelectorAll() { return []; } };
+const { noticeStatus, getLentOut } = await import("../js/contracts-view.js");
+const { isEarning, findNextUnlock } = await import("../js/skills-view.js");
+const { getBuildNeeds, getBuildProgress, defaultHull } = await import("../js/shipyard-view.js");
+
+test("Noticeboard: a notice is open, in progress, ready or waiting", () => {
+  // Why: the notice's colour and its Hand in button come from this,
+  // so a wrong answer would offer a hand-in that can't happen.
+  const state = gameWithBoard();
+  forceContract(state, "ore_requisition", { itemId: "iron_ore", amount: 150 });
+  assert.equal(noticeStatus(state, 0), "open");          // nothing in the hold
+  state.inventory.iron_ore = 60;
+  assert.equal(noticeStatus(state, 0), "progress");      // some of it there
+  state.inventory.iron_ore = 150;
+  assert.equal(noticeStatus(state, 0), "ready");         // all of it: hand in
+  discardContract(state, 0, START);
+  assert.equal(noticeStatus(state, 0), "waiting");       // empty slot, counting down
+});
+
+test("Noticeboard: a chartered ship shows as lent out, and as in progress", () => {
+  const state = gameWithBoard();
+  forceCharter(state, "inner_belt", 300);
+  assert.deepEqual(getLentOut(state), []);
+  const ship = state.ships[0];
+  assert.ok(charterShip(state, 0, ship.id).ok);
+  assert.deepEqual(getLentOut(state), [{ name: ship.name, job: "Charter" }]);
+  assert.equal(noticeStatus(state, 0), "progress");      // lent, though nothing delivered yet
+});
+
+test("Skill gauges: the earning-now dot follows the jobs", () => {
+  // Why: the dot is meant to show which skills are moving right now.
+  const state = newGame();
+  assert.equal(isEarning(state, "mining"), false);       // docked
+  startMiningJob(state, state.ships[0].id, "inner_belt", START);
+  assert.equal(isEarning(state, "mining"), true);
+  assert.equal(isEarning(state, "trade"), false);
+  // A refinery slot waiting for ore earns nothing
+  state.jobs.push({ id: "test-refine", type: "refine", slot: 0, status: "waiting" });
+  assert.equal(isEarning(state, "refining"), false);
+  state.jobs[state.jobs.length - 1].status = "working";
+  assert.equal(isEarning(state, "refining"), true);
+  // Diplomacy XP only arrives on hand-in, so it never shows as earning
+  assert.equal(isEarning(state, "diplomacy"), false);
+});
+
+test("Skill gauges: the next unlock is the first level above yours with something new", () => {
+  const state = newGame();
+  state.skills.mining.xp = XP_TABLE[3] + 5;
+  // A pretend list: only levels 5 and 9 unlock anything
+  const lines = (skillId, level) => (level === 5 || level === 9 ? [`thing at ${level}`] : []);
+  const next = findNextUnlock(state, "mining", lines);
+  assert.equal(next.level, 5);
+  assert.equal(next.xpToGo, XP_TABLE[5] - (XP_TABLE[3] + 5));
+  state.skills.mining.xp = XP_TABLE[9];
+  assert.equal(findNextUnlock(state, "mining", lines), null);   // nothing left above 9
+});
+
+test("Build cradle: the hull fills in with the credits, and is whole only when everything is met", () => {
+  const state = newGame();
+  const price = getShipPrice(state, "prospector");
+  state.credits = price / 2;
+  assert.equal(getBuildProgress(state, "prospector"), 0.5);
+  state.credits = price * 3;
+  assert.equal(getBuildProgress(state, "prospector"), 1);      // never past whole
+  assert.equal(getBuildNeeds(state, "prospector")[0].need, price);
+});
+
+test("Build cradle: it starts on the hull unlocked most recently", () => {
+  const state = newGame();
+  state.skills.mining.xp = XP_TABLE[15];                       // the Excavator unlocks at 15
+  assert.equal(defaultHull(state), "excavator");
+});
+
 // -------------------------------------------------------------
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) {

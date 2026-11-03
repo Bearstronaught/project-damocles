@@ -3595,3 +3595,352 @@ body.nav-collapsed .nav-heading {
   .exploration-view .ev-ring-label,
   .exploration-view .ev-scout-label { display: none; }
 }
+
+
+/* =============================================================
+   THE CONTRACTS VIEWSCREEN: the Last Post noticeboard (Dan, 3 Nov)
+   Built by contracts-view.js as plain HTML. Green, the Factions
+   colour, for work that's ready; teal for work under way.
+   ============================================================= */
+.viewscreen-contracts {
+  background:
+    radial-gradient(ellipse at 50% 40%, rgba(147, 179, 131, 0.10), transparent 60%),
+    #05070a;
+}
+.viewscreen-contracts .viewscreen-title { color: var(--group); }
+
+/* The notices: as many across as fit, at least 150 px each, so
+   four sit side by side on a laptop and two on a phone */
+.cv-board {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 18px;
+  padding: 52px 20px 8px;
+}
+
+/* One notice, pinned at the top */
+.cv-notice {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 190px;
+  padding: 16px 14px 12px;
+  background: #0b1013;
+  border: 1px solid var(--line-strong);
+  font-size: 12px;
+  color: #a9bccb;
+}
+.cv-pin {
+  position: absolute;
+  top: -5px;
+  left: 50%;
+  width: 10px;
+  height: 10px;
+  margin-left: -5px;
+  border-radius: 50%;
+  background: var(--steel-dim);
+}
+.cv-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.cv-status { color: var(--steel); }
+.cv-kind { color: var(--steel-dim); text-align: right; }
+.cv-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #e6eef4;
+}
+.cv-line { margin: 0; }
+.cv-bar { height: 4px; background: var(--line); }
+.cv-fill { height: 4px; width: 0; background: var(--steel); }
+.cv-pay { margin: 0; color: #e6eef4; }
+.cv-handin { margin-top: auto; display: none; }
+.cv-wait { margin: 0; }
+.cv-wait:empty { display: none; }
+
+/* Ready: green pin, border and bar, and the Hand in button shows */
+.cv-notice.is-ready {
+  border-color: var(--factions);
+  background: #0d140f;
+}
+.cv-notice.is-ready .cv-pin,
+.cv-notice.is-ready .cv-fill { background: var(--factions); }
+.cv-notice.is-ready .cv-status { color: var(--factions); }
+.cv-notice.is-ready .cv-handin { display: block; }
+
+/* In progress: teal, like ships at work */
+.cv-notice.is-progress .cv-status { color: var(--ships); }
+.cv-notice.is-progress .cv-fill { background: var(--ships); }
+
+/* Waiting: an empty, dashed space with its countdown in the middle */
+.cv-notice.is-waiting {
+  justify-content: center;
+  align-items: center;
+  text-align: center;
+  background: transparent;
+  border-style: dashed;
+}
+.cv-notice.is-waiting .cv-pin { background: var(--line-strong); }
+.cv-notice.is-waiting .cv-top { justify-content: center; }
+.cv-notice.is-waiting .cv-title,
+.cv-notice.is-waiting .cv-line,
+.cv-notice.is-waiting .cv-bar,
+.cv-notice.is-waiting .cv-pay { display: none; }
+.cv-notice.is-waiting .cv-wait { font-size: 14px; color: #e6eef4; }
+
+.cv-next,
+.cv-closed {
+  margin: 0;
+  padding: 4px 20px 14px;
+  font-size: 11px;
+  color: var(--steel-dim);
+}
+.cv-closed { padding-top: 60px; padding-bottom: 60px; text-align: center; font-size: 13px; }
+
+/* Lent out (the readout column) */
+.lent-list { list-style: none; margin: 0; padding: 0; }
+.lent-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 12px;
+  color: #a9bccb;
+}
+.lent-row:last-child { border-bottom: 0; }
+.lent-job { color: var(--ships); }
+
+/* On a phone the title sits above the board (as on the other
+   viewscreens), and the notices fall into two columns */
+@container (max-width: 640px) {
+  .cv-board {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+    padding: 14px 12px 8px;
+  }
+  .cv-notice { min-height: 160px; padding: 14px 10px 10px; }
+}
+
+
+/* =============================================================
+   THE SKILLS VIEWSCREEN: a bank of gauges (Dan, 3 Nov)
+   Built by skills-view.js. Each gauge is its own small drawing
+   in a grid, coloured by its skill's menu group (--skill, set on
+   each gauge by the script).
+   ============================================================= */
+.viewscreen-skills {
+  background:
+    radial-gradient(ellipse at 50% 45%, rgba(255, 180, 58, 0.08), transparent 60%),
+    #05070a;
+}
+
+/* Six across on a wide screen, three on a narrow one and a phone */
+.sv-gauges {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 18px 10px;
+  padding: 52px 16px 8px;
+}
+.sv-gauge,
+.sv-socket {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  text-align: center;
+}
+.sv-dial { width: 100%; max-width: 130px; height: auto; }
+
+.sv-track,
+.sv-track-inner,
+.sv-level,
+.sv-next { fill: none; }
+.sv-track { stroke: var(--line); stroke-width: 9; }
+.sv-track-inner { stroke: var(--line); stroke-width: 3; }
+.sv-level { stroke: var(--skill); stroke-width: 9; }
+.sv-next { stroke: #e6eef4; stroke-opacity: 0.7; stroke-width: 3; }
+.sv-number {
+  font-family: var(--font-display);
+  font-size: 32px;
+  font-weight: 700;
+  fill: #e6eef4;
+}
+/* The earning-now dot: hollow when idle, lit in the skill's colour */
+.sv-dot { fill: none; stroke: var(--steel-dim); stroke-width: 1.5; }
+.sv-dot.is-on { fill: var(--skill); stroke: var(--skill); }
+
+.sv-name {
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--steel);
+}
+.sv-note { font-size: 10px; color: var(--steel-dim); }
+
+/* A skill still to come: an empty dashed space */
+.sv-socket {
+  grid-column: span 2;
+  justify-content: center;
+  min-height: 64px;
+  border: 1px dashed var(--line-strong);
+}
+.sv-socket-name {
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--steel-dim);
+}
+.sv-key {
+  margin: 0;
+  padding: 4px 16px 14px;
+  font-size: 11px;
+  color: var(--steel-dim);
+}
+
+/* Readouts */
+.sv-next-panel { border-color: var(--amber-dim); }
+.sv-next-name {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: #e6eef4;
+}
+.sv-next-more { margin: 2px 0 0; font-size: 12px; color: var(--steel); }
+.sv-next-more:empty { display: none; }
+.sv-coming { list-style: none; margin: 0; padding: 0; }
+.sv-coming-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 12px;
+  color: #a9bccb;
+}
+.sv-coming-row:last-child { border-bottom: 0; }
+.sv-coming-skill { flex-shrink: 0; text-align: right; }
+
+@container (max-width: 760px) {
+  .sv-gauges { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .sv-socket { grid-column: span 1; }
+}
+@container (max-width: 640px) {
+  .sv-gauges {
+    gap: 12px 6px;
+    padding: 14px 10px 8px;
+  }
+  .sv-name { font-size: 10px; letter-spacing: 0.08em; }
+}
+
+
+/* =============================================================
+   THE SHIPYARD VIEWSCREEN: the build cradle (Dan, 3 Nov)
+   Drawn by shipyard-view.js. Teal, the Ships colour, for the
+   finished part of the hull; a dim outline for the rest.
+   ============================================================= */
+.viewscreen-shipyard {
+  background:
+    radial-gradient(ellipse at 50% 50%, rgba(111, 181, 173, 0.13), transparent 55%),
+    #05070a;
+}
+.viewscreen-shipyard .viewscreen-title { color: var(--group); }
+
+.shipyard-view .sy-gantry { fill: none; stroke: var(--line-strong); stroke-width: 1.5; }
+.shipyard-view .sy-clamp { stroke: var(--ships-dim); stroke-width: 1; }
+.shipyard-view .sy-clamp-pad { fill: var(--ships-dim); }
+.shipyard-view .sy-dim { fill: none; stroke: var(--steel-dim); }
+.shipyard-view .sy-size {
+  font-family: var(--font-data);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  fill: var(--steel);
+  paint-order: stroke;
+  stroke: #05070a;
+  stroke-width: 6px;           /* a dark edge so the words sit over the line */
+}
+
+/* The hull is drawn 3.6 times its card size: keep its lines thin */
+.shipyard-view .schematic * { vector-effect: non-scaling-stroke; }
+
+/* The unbuilt hull: a faint outline */
+.shipyard-view .sy-ghost .hull,
+.shipyard-view .sy-ghost .detail,
+.shipyard-view .sy-ghost .accent { fill: none; stroke: var(--line-strong); stroke-dasharray: 4 3; }
+.shipyard-view .sy-ghost .engine { display: none; }
+
+/* The built part: teal lines, the accent parts amber as on the cards */
+.shipyard-view .sy-built .hull { stroke: var(--ships); stroke-width: 2; }
+.shipyard-view .sy-built .detail { stroke: var(--ships-dim); stroke-width: 1.5; }
+.shipyard-view .sy-built .accent { stroke-width: 2; }
+.shipyard-view .sy-built .engine { opacity: 0; }
+
+/* The build line, and a glow when the whole hull is done */
+.shipyard-view .sy-line { stroke: var(--teal); stroke-width: 1.5; stroke-dasharray: 6 4; }
+.shipyard-view.is-complete .sy-line { display: none; }
+.shipyard-view.is-complete .sy-built .hull { filter: drop-shadow(0 0 4px rgba(111, 181, 173, 0.6)); }
+
+/* Picking the hull: small buttons along the bottom */
+.sy-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 0 14px 14px;
+}
+.sy-pick {
+  min-height: 36px;
+  padding: 0 12px;
+  font-family: var(--font-data);
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--steel);
+  background: transparent;
+  border: 1px solid var(--line-strong);
+  cursor: pointer;
+}
+.sy-pick:hover { color: #e6eef4; }
+.sy-pick.is-picked {
+  color: var(--ships);
+  border-color: var(--ships-dim);
+  background: var(--ships-faint);
+}
+
+/* Readouts */
+.sy-card { border-color: var(--ships-dim); }
+.sy-desc { margin: 0 0 12px; font-size: 12px; line-height: 1.6; color: #a9bccb; }
+.sy-build { width: 100%; }
+.sy-list { list-style: none; margin: 0; padding: 0; }
+.sy-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 12px;
+  color: #a9bccb;
+}
+.sy-row:last-child { border-bottom: 0; }
+.sy-value { color: #e6eef4; text-align: right; }
+.sy-row.is-met .sy-value { color: var(--factions); }
+.sy-row.is-short .sy-value { color: var(--amber); }
+
+/* On a phone the size line's words are drawn bigger */
+@container (max-width: 640px) {
+  .shipyard-view .sy-size { font-size: 28px; }
+}
+/* Hardpoint markers are sized for the small cards: in the cradle
+   they'd be big blobs, so they're left to the cards below */
+.shipyard-view .hardpoint { display: none; }

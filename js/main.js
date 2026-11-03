@@ -46,6 +46,9 @@ import { VERSION } from "./version.js";
 import { setupSystemMap } from "./system-map.js";
 import { setupIndustryView } from "./industry-view.js";
 import { setupExplorationView } from "./exploration-view.js";
+import { setupContractsView } from "./contracts-view.js";
+import { setupSkillsView } from "./skills-view.js";
+import { setupShipyardView } from "./shipyard-view.js";
 
 
 // -------------------------------------------------------------
@@ -904,8 +907,12 @@ function describeCargo(cargo) {
 //   ["New ship: Excavator-class barge"]   or   [] for nothing.
 // Used by the level-up banner. withPerk adds the level perk
 // line at the end (left off when several levels are combined).
+// preview: for the Skills screen's "Coming up" list, which looks
+// at levels not reached yet. Survey lines then just name the
+// target: surveyUnlockLine marks a survey as announced, which
+// must only happen when the level really arrives.
 // -------------------------------------------------------------
-function getUnlockLines(skillId, level, withPerk = true) {
+function getUnlockLines(skillId, level, withPerk = true, preview = false) {
   const lines = [];
   for (const typeId of getUnlocksAtLevel(skillId, level)) {
     lines.push("New ship: " + SHIP_TYPES[typeId].name);
@@ -940,7 +947,7 @@ function getUnlockLines(skillId, level, withPerk = true) {
   }
   if (skillId === "exploration") {
     for (const targetId of getTargetUnlocksAtLevel(level)) {
-      lines.push(surveyUnlockLine(targetId));
+      lines.push(preview ? "New survey target: " + getTarget(targetId).name : surveyUnlockLine(targetId));
     }
   }
   if (skillId === "diplomacy" && CONTRACTS.slotLevels.includes(level)) {
@@ -1229,6 +1236,9 @@ setupSystemMap(() => state, (shipId) => {
 // as the buttons in the target list.
 setupIndustryView(() => state);
 setupExplorationView(() => state, actions);
+setupContractsView(() => state, actions);
+setupSkillsView(() => state, (skillId, level) => getUnlockLines(skillId, level, false, true));
+setupShipyardView(() => state, actions);
 
 if (isNewGame) {
   addLog("Contract signed. One barge, one belt, no prospects. Time to dig.", "system");
