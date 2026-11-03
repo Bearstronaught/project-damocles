@@ -8,6 +8,8 @@
 // hour") and to try balance changes before making them.
 //
 // Run it with:   node tests/pacing-sim.js
+// (or --hours=24 for a whole day, --weeks=4 for a daily report
+// over 4 weeks: see the bottom of this file)
 //
 // The pretend player checks in once a minute and:
 //   1. sells all ore at home (no freighters this early)
@@ -35,7 +37,7 @@ import { advanceTo } from "../js/simulation.js";
 import { startMiningJob, getJobForShip, getTripPlan } from "../js/jobs.js";
 import { sellAll } from "../js/trade.js";
 import { ITEMS } from "../data/content.js";
-import { getLevel, isFieldUnlocked } from "../js/skills.js";
+import { getLevel, isFieldUnlocked, XP_TABLE } from "../js/skills.js";
 import { buyShip, getShipPrice, canBuyShip } from "../js/shipyard.js";
 import { buyUpgrade, getNextUpgradeCost, canBuyUpgrade } from "../js/command.js";
 import { canBuyShipUpgrade, buyShipUpgrade, getPartGrade } from "../js/ship-upgrades.js";
@@ -210,6 +212,8 @@ export function simulate(hours, untilMiningLevel, hourly = null, explore = true,
         nextShipPrice: getShipPrice(state, "prospector"),
         ships: state.ships.length,
         freePoints: getCommandFree(state),
+        commandUpgrades: state.commandUpgrades,   // how many of the 10 are bought
+        miningXp: state.skills.mining.xp,         // for the long-run report (--weeks)
         credits: state.credits,
         blockedBy: check.ok ? "nothing" : check.reason,
       });
@@ -289,28 +293,107 @@ export function simulate(hours, untilMiningLevel, hourly = null, explore = true,
 // Also prints the gaps between GOALS (purchases, Mining levels and
 // surveys): the design doc wants a next goal every 10 to 20 minutes
 // in the first hour, and roughly every hour in the first day.
+//
+// Three ways to run it (added 3 Nov for the early-game balance check):
+//   node tests/pacing-sim.js              up to the refinery (Mining 8), as before
+//   node tests/pacing-sim.js --hours=24   a whole first day: no stop at Mining 8
+//   node tests/pacing-sim.js --weeks=4    one line per day for 4 weeks, then
+//                                         when Mining 99 would land
+// --survey-delay=15 and --no-explore work with all three.
 if (import.meta.url === `file://${process.argv[1]}`) {
+  // Reads a "--name=value" option as a number, or null if it isn't there
+  const option = (name) => {
+    const arg = process.argv.find((a) => a.startsWith(`--${name}=`));
+    return arg ? Number(arg.split("=")[1]) : null;
+  };
   const explore = !process.argv.includes("--no-explore");
   // e.g. --survey-delay=15: launch each survey 15 minutes after it opens
-  const delayArg = process.argv.find((arg) => arg.startsWith("--survey-delay="));
-  const surveyDelay = delayArg ? Number(delayArg.split("=")[1]) : 0;
-  const events = simulate(4, REFINERY.openAtMiningLevel, null, explore, surveyDelay);
-  const time = (minute) => `${Math.floor(minute / 60)}h${String(minute % 60).padStart(2, "0")}`;
-  for (const e of events) {
-    console.log(`${time(e.minute)}  ${e.text}`);
-  }
+  const surveyDelay = option("survey-delay") ?? 0;
+  const weeks = option("weeks");
+  const hours = option("hours");
 
-  // The longest wait for a next goal in each hour
+  if (weeks) {
+    printWeeks(weeks, explore, surveyDelay);
+  } else if (hours) {
+    // A level above 99 never comes, so the run doesn't stop early
+    printTimeline(simulate(hours, Infinity, null, explore, surveyDelay));
+  } else {
+    printTimeline(simulate(4, REFINERY.openAtMiningLevel, null, explore, surveyDelay));
+  }
+}
+
+// Formats a minute count as 2h05
+function hoursAndMinutes(minute) {
+  return `${Math.floor(minute / 60)}h${String(minute % 60).padStart(2, "0")}`;
+}
+
+// -------------------------------------------------------------
+// printTimeline(events)
+// Prints every event, then the longest wait for a next goal in
+// each hour. An hour with no goal at all counts the wait still
+// running at the end of that hour (it used to show 0, which only
+// mattered once runs went past the busy first hours).
+// -------------------------------------------------------------
+function printTimeline(events) {
+  for (const e of events) {
+    console.log(`${hoursAndMinutes(e.minute)}  ${e.text}`);
+  }
   const goals = events.filter((e) => e.goal).map((e) => e.minute);
   const end = events[events.length - 1].minute;
   console.log("\nLongest wait between goals:");
   for (let hour = 0; hour * 60 < end; hour++) {
+    const hourStart = hour * 60;
+    const hourEnd = hourStart + 60;
+    let previous = goals.filter((m) => m < hourStart).pop() ?? 0;   // last goal before this hour
+    const inHour = goals.filter((m) => m >= hourStart && m < hourEnd);
     let longest = 0;
-    let previous = goals.filter((m) => m < hour * 60).pop() ?? 0;
-    for (const m of goals.filter((m) => m >= hour * 60 && m < hour * 60 + 60)) {
+    for (const m of inHour) {
       longest = Math.max(longest, m - previous);
       previous = m;
     }
+    if (inHour.length === 0) longest = Math.min(hourEnd, end) - previous;   // still waiting
     console.log(`  hour ${hour + 1}: ${longest} min`);
   }
+}
+
+// -------------------------------------------------------------
+// printWeeks(weeks, explore, surveyDelay)
+// The long view: plays "weeks" weeks and prints one line per day,
+// so price curves and the Mining XP rate can be checked against
+// the design doc's targets (Mining 99 after about 20 weeks).
+// The pretend player checks in every minute; offline progress is
+// exact, so a player who checks in daily gets close to this, a
+// little later. It doesn't use freighters or the workshop yet.
+// -------------------------------------------------------------
+function printWeeks(weeks, explore, surveyDelay) {
+  const days = [];    // the hourly report at the end of each day
+  simulate(weeks * 7 * 24, Infinity, (report) => {
+    if (report.hour % 24 === 0) days.push(report);
+  }, explore, surveyDelay);
+
+  // XP total -> level, by walking up the XP table
+  const levelFor = (xp) => {
+    let level = 1;
+    while (XP_TABLE[level + 1] !== undefined && xp >= XP_TABLE[level + 1]) level++;
+    return level;
+  };
+  const cr = (n) => Math.round(n).toLocaleString("en-GB");
+
+  console.log("day | Mining | cr per hour | ships | command upgrades | credits banked | next Prospector");
+  for (const d of days) {
+    console.log(`${String(d.hour / 24).padStart(3)} | ${String(levelFor(d.miningXp)).padStart(6)} | ` +
+      `${cr(d.earned).padStart(11)} | ${String(d.ships).padStart(5)} | ${String(d.commandUpgrades).padStart(16)} | ` +
+      `${cr(d.credits).padStart(14)} | ${cr(d.nextShipPrice)}`);
+  }
+
+  // When would Mining 99 land? Take the Mining XP earned per day over
+  // the second half of the run and carry it on in a straight line.
+  // (Real XP per day usually keeps rising slowly, so treat this as
+  // the latest it would land with today's content.)
+  const last = days[days.length - 1];
+  const middle = days[Math.floor(days.length / 2) - 1];
+  const perDay = (last.miningXp - middle.miningXp) / (days.length - Math.floor(days.length / 2));
+  const daysTo99 = days.length + Math.max(0, XP_TABLE[99] - last.miningXp) / perDay;
+  console.log(`\nMining XP per day over the second half: ${cr(perDay)}`);
+  console.log(`Mining 99 would land on about day ${Math.round(daysTo99)} (week ${(daysTo99 / 7).toFixed(1)})`);
 }

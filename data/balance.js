@@ -127,7 +127,7 @@ export const BALANCE = {
   command: { startPoints: 6, pointsPerUpgrade: 2, firstUpgradeCost: 80000, costMultiplier: 2, maxUpgrades: 10 },
   sellRate: 0.5,
   shipPriceGrowth: 1.6,
-  fleetXpExponent: 0.6,
+  fleetXpExponent: 0.4,
   trade: { tonneMinutesPerXp: 15 },
   hub: { travelSeconds: 180 },
   levelPerks: { miningDrillPerLevel: 0.005, tradeHubPricePerLevel: 0.005 },

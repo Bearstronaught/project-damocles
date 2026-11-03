@@ -723,12 +723,13 @@ function fleetMining(ships) {
   return state;
 }
 
-test("XP share per ship: 1 ship 100%, 2 ships 76%, 4 ships 57%, 12 ships 37%", () => {
+// Fleet XP exponent 0.4 since 3 Nov (was 0.6): each of n ships keeps n^(0.4 - 1) of its XP
+test("XP share per ship: 1 ship 100%, 2 ships 66%, 4 ships 44%, 12 ships 23%", () => {
   const close = (actual, expected) => assert.ok(Math.abs(actual - expected) < 0.005, actual.toFixed(3));
   close(getMiningXpShare(fleetMining(1)), 1);
-  close(getMiningXpShare(fleetMining(2)), 0.758);
-  close(getMiningXpShare(fleetMining(4)), 0.574);
-  close(getMiningXpShare(fleetMining(12)), 0.370);
+  close(getMiningXpShare(fleetMining(2)), 0.660);
+  close(getMiningXpShare(fleetMining(4)), 0.435);
+  close(getMiningXpShare(fleetMining(12)), 0.225);
 });
 
 test("A docked ship doesn't count: only ships out mining share the XP", () => {
@@ -739,7 +740,7 @@ test("A docked ship doesn't count: only ships out mining share the XP", () => {
   assert.equal(getMiningXpShare(state), 1);
 });
 
-test("Four Prospectors: same ore as before, but each trip earns 57% of its XP", () => {
+test("Four Prospectors: same ore as before, but each trip earns 44% of its XP", () => {
   const state = fleetMining(4);
   processJobs(state, START + TRIP);                 // one trip each
   assert.equal(state.inventory.iron_ore, 4 * PROSPECTOR.orePerTrip);      // ore (and so credits) untouched
@@ -755,7 +756,8 @@ test("A bigger fleet still earns more XP in total, just not in proportion", () =
   };
   const one = xpAfterAnHour(1);
   const four = xpAfterAnHour(4);
-  assert.ok(four > one * 2 && four < one * 2.5, (four / one).toFixed(2) + "x");
+  // 4 ^ 0.4 = 1.74x one ship (the exponent was 0.6, 2.3x, until 3 Nov)
+  assert.ok(four > one * 1.5 && four < one * 2, (four / one).toFixed(2) + "x");
 });
 
 test("Fleet XP: ticking for 2 hours equals one 2-hour jump", () => {
@@ -1027,7 +1029,7 @@ test("Constant runs still wait when the hold is empty", () => {
   assert.equal(job.status, "waiting");
 });
 
-test("Two Couriers flying at once each keep 76% of their Trade XP", () => {
+test("Two Couriers flying at once each keep 66% of their Trade XP", () => {
   const state = gameWithCourier("full");
   state.credits = getShipPrice(state, "courier");
   buyShip(state, "courier");                     // ship-3
@@ -1040,9 +1042,9 @@ test("Two Couriers flying at once each keep 76% of their Trade XP", () => {
   const gained = state.skills.trade.xp - before;
   assert.ok(Math.abs(gained - 2 * each) < 1e-9, String(gained));
   // Credits are not shared: each Courier is paid its full cargo.
-  // (The first sale lifts Trade to level 2, so the second one gets
-  // the +0.5% Trade perk: 4,800 + 4,824.)
-  assert.equal(state.credits, 4800 + 4824);
+  // (The first sale earns 79 Trade XP, just short of level 2 at 83,
+  // so neither gets the +0.5% Trade perk: 4,800 each.)
+  assert.equal(state.credits, 4800 + 4800);
 });
 
 test("A Courier waiting at home for ore doesn't reduce the flying one's XP", () => {
@@ -1900,6 +1902,9 @@ function busyEmpire() {
   // Excavator's level is the highest of the three, so it decides)
   state.skills.mining.xp = XP_TABLE[EXCAVATOR_LEVEL];
   state.skills.refining.xp = XP_TABLE[14];       // reaches 15 during the run
+  // Two scouts share XP by the fleet rule, so give them a head start
+  // to reach the last wreck stage (Exploration 15) within the 6 hours
+  state.skills.exploration.xp = XP_TABLE[12];
   state.credits = 10_000_000;
   state.commandUpgrades = 5;
   buyShip(state, "prospector");                  // ship-2
@@ -3534,8 +3539,9 @@ test("Exploration: two scouts share XP by the fleet rule", () => {
   const job = startScoutJob(state, "ship-2", DEEP_SCAN_ID, START);
   startScoutJob(state, "ship-3", DEEP_SCAN_ID, START);
   processJobs(state, START + job.durationMs);
-  // 2 ships: each keeps 2^(0.6 - 1) = 76% of its XP
-  assert.ok(Math.abs(state.skills.exploration.xp - 2 * DEEP_SCAN.xp * 2 ** -0.4) < 1e-9);
+  // 2 ships: each keeps 2^(exponent - 1) of its XP (66% at 0.4)
+  const share = 2 ** (BALANCE.fleetXpExponent - 1);
+  assert.ok(Math.abs(state.skills.exploration.xp - 2 * DEEP_SCAN.xp * share) < 1e-9);
 });
 
 test("Exploration: a version 14 save gains Exploration, and the first sale if it has played", () => {

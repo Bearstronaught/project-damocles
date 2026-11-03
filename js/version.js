@@ -17,4 +17,4 @@
 // (see that script for why).
 // =============================================================
 
-export const VERSION = "0.2.10";
+export const VERSION = "0.2.11";
