@@ -127,18 +127,30 @@ test("Prospector trip: 45s out, 1m mining, 45s back, 6s unloading = 2m 36s, 120 
   assert.equal(PROSPECTOR.xpPerTrip, 20);           // 120 t ÷ 6 (Dan, 30 Oct: was ÷ 10)
 });
 
-test("Excavator trip: 1m out (slower drive), 2m mining, 1m back, 12s unloading = 4m 12s, 480 t ore", () => {
+test("Excavator trip: 1m out (slower drive), 2m mining, 1m back, 16s unloading = 4m 16s, 640 t ore", () => {
+  // (640 t and 320 t/min since 4 Nov: the new-hull rule)
   assert.equal(EXCAVATOR.outboundMs, 60 * SECOND);
-  assert.equal(EXCAVATOR.miningMs, 120 * SECOND);
-  assert.equal(EXCAVATOR.unloadMs, 12 * SECOND);     // 480 t at 40 t/s (medium hull: bigger doors)
-  assert.equal(EXCAVATOR.durationMs, 252 * SECOND);
-  assert.equal(EXCAVATOR.orePerTrip, 480);
+  assert.equal(EXCAVATOR.miningMs, 120 * SECOND);    // 640 t at 320 t/min
+  assert.equal(EXCAVATOR.unloadMs, 16 * SECOND);     // 640 t at 40 t/s (medium hull: bigger doors)
+  assert.equal(EXCAVATOR.durationMs, 256 * SECOND);
+  assert.equal(EXCAVATOR.orePerTrip, 640);
 });
 
-test("Excavator earns 2.5x a Prospector per hour", () => {
-  const perHour = (plan) => plan.orePerTrip * (HOUR / plan.durationMs);
-  const ratio = perHour(EXCAVATOR) / perHour(PROSPECTOR);
-  assert.ok(ratio > 2.4 && ratio < 2.6, "ratio was " + ratio.toFixed(2));
+test("New-hull rule: a stock Excavator earns about 20% more per point than a Prospector with its Mk II parts", () => {
+  // Why: the agreed rule (Dan, 4 Nov). Prospector Mk II parts unlock
+  // at Mining 9 to 13, before the Excavator at 15, so that's what a
+  // player has when the Excavator arrives. Before 4 Nov a stock
+  // Excavator earned 9% LESS than that, and the casual player in the
+  // simulator never bought one. Both on the Outer Belt, home prices.
+  const state = newGame();
+  state.skills.mining.xp = XP_TABLE[15];
+  state.shipUpgrades.prospector = { drill: 2, hold: 2, drive: 2 };
+  const perPoint = (typeId) => {
+    const plan = getTripPlan(state, typeId, "outer_belt");
+    return plan.orePerTrip * (HOUR / plan.durationMs) / HULL_SIZES[SHIP_TYPES[typeId].size].commandPoints;
+  };
+  const ratio = perPoint("excavator") / perPoint("prospector");
+  assert.ok(ratio > 1.15 && ratio < 1.25, "ratio was " + ratio.toFixed(2));
 });
 
 test("On the same 2 command points, an Excavator beats two Prospectors", () => {
@@ -3045,7 +3057,7 @@ test("Loading: rate by hull size - small 20 t/s, medium 40 t/s", () => {
   assert.equal(HULL_SIZES.small.loadingRate, 20);
   assert.equal(HULL_SIZES.medium.loadingRate, 40);
   assert.equal(PROSPECTOR.unloadMs, 6 * SECOND);     // 120 t / 20
-  assert.equal(EXCAVATOR.unloadMs, 12 * SECOND);     // 480 t / 40
+  assert.equal(EXCAVATOR.unloadMs, 16 * SECOND);     // 640 t / 40
 });
 
 test("Loading: a constant-run Courier with 200 t loads and unloads in 10s each, not 30s", () => {
@@ -3157,13 +3169,13 @@ test("Components: stats add up - Mk I hold 138 t, Mk II drill + Mining 11 = 120 
   assert.ok(Math.abs(stats.miningRate - 120 * 1.35) < 1e-9);   // 1 + 0.15 + 0.15 + 0.05
   assert.ok(Math.abs(stats.speed - 1.1) < 1e-12);
   // Other hulls are untouched: components are per hull TYPE.
-  assert.equal(getShipStats(state, "excavator").cargoCapacity, 480);
+  assert.equal(getShipStats(state, "excavator").cargoCapacity, 640);
 });
 
-test("Components: a hold upgrade always gives whole tonnes (Excavator 480 x 1.45 = 696)", () => {
+test("Components: a hold upgrade always gives whole tonnes (Excavator 640 x 1.45 = 928)", () => {
   const state = newGame();
   state.shipUpgrades = { excavator: { hold: 3 } };
-  assert.equal(getShipStats(state, "excavator").cargoCapacity, 696);
+  assert.equal(getShipStats(state, "excavator").cargoCapacity, 928);
   for (const grade of [1, 2, 3]) {
     for (const hull of ["prospector", "excavator", "courier"]) {
       state.shipUpgrades = { [hull]: { hold: grade } };
@@ -4443,14 +4455,16 @@ test("Art: the Deep-core barge has a drawing with a marker on its drill, hold an
   assert.equal((html.match(/class="hardpoint /g) || []).length, 3);     // drill, hold and drive
 });
 
-test("Per-hull Mining XP: the Excavator and barge earn a quarter, the Prospector is unchanged", () => {
-  // Why: the agreed XP cut (Dan, 4 Nov) is on the big hulls, so the
-  // first 3 hours, carried by Prospectors, stay exactly as they were.
+test("Per-hull Mining XP: the barge earns a quarter, the Prospector and Excavator full XP", () => {
+  // Why: the barge's cut (Dan, 4 Nov) keeps it off the belts for XP.
+  // The Excavator went back to full XP the same evening: at a quarter,
+  // a Prospector earned 4 times its XP per point, a reason never to
+  // move up a size.
   const state = newGame();
   const xp = (typeId, fieldId) => getTripPlan(state, typeId, fieldId).xpPerTrip;
   const hold = (typeId) => getShipStats(state, typeId).cargoCapacity;
   assert.equal(xp("prospector", "outer_belt"), hold("prospector") / FIELDS.outer_belt.tonnesPerXp);
-  assert.equal(xp("excavator", "outer_belt"), hold("excavator") / FIELDS.outer_belt.tonnesPerXp * 0.25);
+  assert.equal(xp("excavator", "outer_belt"), hold("excavator") / FIELDS.outer_belt.tonnesPerXp);
   assert.equal(xp("deep_core_barge", "deep_core"), hold("deep_core_barge") / FIELDS.deep_core.tonnesPerXp * 0.25);
   // The XP a finished trip actually adds matches the plan, times the
   // fleet rule: an Excavator out alone is 2 command points working,
@@ -4462,7 +4476,7 @@ test("Per-hull Mining XP: the Excavator and barge earn a quarter, the Prospector
   const job = startMiningJob(state, excavator.id, "inner_belt", START);
   processJobs(state, START + job.durationMs);
   const share = 2 ** (BALANCE.fleetXpExponent - 1);
-  assert.ok(Math.abs((state.skills.mining.xp - before) - hold("excavator") / FIELDS.inner_belt.tonnesPerXp * 0.25 * share) < 1e-9);
+  assert.ok(Math.abs((state.skills.mining.xp - before) - hold("excavator") / FIELDS.inner_belt.tonnesPerXp * share) < 1e-9);
 });
 
 test("Per-hull Mining XP: a Deep-core barge earns more XP per hour on the deep core than on any belt", () => {

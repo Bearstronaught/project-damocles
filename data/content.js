@@ -277,11 +277,10 @@ export const ROLES = {
 //   speed          how fast the drive is, as a multiplier:
 //                  1.0 = normal, 0.75 = takes a third longer
 //   miningXp       (optional, mining ships) scales the Mining XP
-//                  this hull earns, 1 if not set. The Excavator and
-//                  Deep-core barge are 0.25, so big hulls earn
-//                  little XP on the old belts and their XP comes
-//                  from the rich fields, whose XP per tonne is set
-//                  to make up for it (Dan, 4 Nov)
+//                  this hull earns, 1 if not set. The Deep-core
+//                  barge is 0.25, so it earns little XP on the old
+//                  belts and its XP comes from the deep core, whose
+//                  XP per tonne is set to make up for it (Dan, 4 Nov)
 //   (resale        what it sells for if it has no shop price.
 //                  No ship uses this at the moment.)
 //
@@ -299,7 +298,7 @@ export const SHIP_TYPES = {
   },
   excavator: {
     name: "Excavator-class barge",
-    description: "Heavy hauler with twin drill heads. Slow to get there, but brings back four times the ore.",
+    description: "Heavy hauler with twin drill heads. Slow to get there, but brings back over five times the ore.",
     art: "hull_excavator",
     ...BALANCE.ships.excavator,
   },

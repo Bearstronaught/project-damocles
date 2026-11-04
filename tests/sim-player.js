@@ -646,9 +646,16 @@ export function extraShopping(state, now, swaps) {
 }
 
 
-// Which swaps the realistic player makes, smallest first.
+// Which swaps the realistic player considers. Each sells enough
+// "from" hulls to free the points for one "to" hull: 2 Prospectors
+// for an Excavator, 4 for a Deep-core barge, 2 Excavators for a
+// barge. (Added 4 Nov: before, only Prospectors -> Excavator
+// existed, so once barges arrived nothing ever retired the small
+// hulls, and the casual player kept 6 Prospectors all game.)
+// One Prospector is always kept, for the Ice moon.
 const SWAP_STEPS = [
   { from: "prospector", to: "excavator", keepAtLeast: 1 },
+  { from: "prospector", to: "deep_core_barge", keepAtLeast: 1 },
   { from: "excavator", to: "deep_core_barge", keepAtLeast: 0 },
 ];
 
@@ -660,27 +667,34 @@ const SWAP_STEPS = [
 // there aren't enough "from" barges to sell.
 // -------------------------------------------------------------
 function swapOption(state, now, swaps, from, to, keepAtLeast) {
+  // How many "from" hulls make room for one "to": its points ÷ theirs
+  //   e.g. a barge (4 points) for Prospectors (1 point each) -> 4
+  const count = pointsFor(to) / pointsFor(from);
   const unlocked = getLevel(state, "mining") >= SHIP_TYPES[to].unlockLevel;
   const outOfPoints = getCommandFree(state) < pointsFor(to);
-  const betterThanTwo = minerValuePerHour(state, to) > 2 * minerValuePerHour(state, from);
+  // Worth it only if the one big hull out-earns all the ones it replaces
+  const better = minerValuePerHour(state, to) > count * minerValuePerHour(state, from);
   const sellable = state.ships.filter((ship) => ship.type === from && !getCharter(state, ship.id));
-  if (!unlocked || !outOfPoints || !betterThanTwo || sellable.length < 2 + keepAtLeast) return null;
+  if (!unlocked || !outOfPoints || !better || sellable.length < count + keepAtLeast) return null;
 
-  // Each sale makes the next one of that type cheaper, so the
-  // second sells for the first one's price divided by the growth
-  // rate (found 4 Nov: counting both at the first price left the
-  // swap short).
+  // Each sale makes the next one of that type cheaper: each sells for
+  // the one before's price divided by the growth rate (found 4 Nov:
+  // counting them all at the first price left the swap short).
   //   e.g. first sells for 26,214 cr, second for 26,214 / 1.6 = 16,384 cr
-  const first = getSellValue(state, from);
-  const saleValue = first + Math.floor(first / SHIP_PRICE_GROWTH);
+  let saleValue = 0;
+  let price = getSellValue(state, from);
+  for (let i = 0; i < count; i++) {
+    saleValue += Math.floor(price);
+    price /= SHIP_PRICE_GROWTH;
+  }
   const netCost = getShipPrice(state, to) - saleValue;
   if (state.credits < netCost) return null;
   return {
     cost: netCost,
-    text: `${SHIP_TYPES[to].name} swap (recalling 2 ${SHIP_TYPES[from].name}s to sell)`,
+    text: `${SHIP_TYPES[to].name} swap (recalling ${count} x ${SHIP_TYPES[from].name} to sell)`,
     buy: () => {
-      // The two newest: they have the most refits waiting anyway
-      const pair = sellable.slice(-2).map((ship) => ship.id);
+      // The newest ones: they have the most refits waiting anyway
+      const pair = sellable.slice(-count).map((ship) => ship.id);
       for (const shipId of pair) {
         const job = getJobForShip(state, shipId);
         if (job) recallJob(state, job.id, now);
@@ -713,9 +727,9 @@ export function finishSwaps(state, swaps) {
     if (canBuyShip(state, swap.to).ok) {
       const price = getShipPrice(state, swap.to);
       buyShip(state, swap.to);
-      lines.push(`swap: sold 2 x ${fromName} (${sold.toLocaleString("en-GB")} cr), bought a ${toName} (${price.toLocaleString("en-GB")} cr)`);
+      lines.push(`swap: sold ${stillHere.length} x ${fromName} (${sold.toLocaleString("en-GB")} cr), bought a ${toName} (${price.toLocaleString("en-GB")} cr)`);
     } else {
-      lines.push(`swap: sold 2 x ${fromName} (${sold.toLocaleString("en-GB")} cr); ${toName} not affordable yet`);
+      lines.push(`swap: sold ${stillHere.length} x ${fromName} (${sold.toLocaleString("en-GB")} cr); ${toName} not affordable yet`);
     }
   }
   return lines;
