@@ -63,15 +63,17 @@ export function getCommandFree(state) {
 // getNextUpgradeCost(state)
 // Price of the next Fleet command upgrade, or null if the
 // player has bought them all.
-// Each one costs costMultiplier times the last:
-//   upgrade 1: 80,000   upgrade 2: 160,000   upgrade 3: 320,000 ...
+// Each one costs costMultiplier times the last (2.5 since 4 Nov):
+//   upgrade 1: 80,000   upgrade 2: 200,000   upgrade 3: 500,000 ...
+// Rounded to whole credits, because 2.5x makes halves from the
+// ninth upgrade on (122,070,312.5 cr).
 // -------------------------------------------------------------
 export function getNextUpgradeCost(state) {
   if (state.commandUpgrades >= COMMAND.maxUpgrades) {
     return null;
   }
-  // Math.pow(2, n) = 2 multiplied by itself n times (2^0 = 1).
-  return COMMAND.firstUpgradeCost * Math.pow(COMMAND.costMultiplier, state.commandUpgrades);
+  // Math.pow(2.5, n) = 2.5 multiplied by itself n times (2.5^0 = 1).
+  return Math.round(COMMAND.firstUpgradeCost * Math.pow(COMMAND.costMultiplier, state.commandUpgrades));
 }
 
 

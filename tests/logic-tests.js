@@ -619,15 +619,28 @@ test("A third Excavator is blocked by command, even with the money", () => {
   assert.equal(state.credits, 500000);               // no money taken for the third
 });
 
-test("Command upgrades: +2 points each, priced 80,000 then 160,000 then 320,000", () => {
-  // Four times the old prices (Dan, 29 Oct), still doubling.
+test("Command upgrade prices are always whole credits (2.5x makes halves)", () => {
   const state = newGame();
-  state.credits = 80000 + 160000 + 320000;
-  assert.equal(getNextUpgradeCost(state), 80000);
+  for (let bought = 0; bought < COMMAND.maxUpgrades; bought++) {
+    state.commandUpgrades = bought;
+    assert.ok(Number.isInteger(getNextUpgradeCost(state)), "upgrade " + (bought + 1) + ": " + getNextUpgradeCost(state));
+  }
+});
+
+test("Command upgrades: +2 points each, priced 80,000 then 200,000 then 500,000", () => {
+  // Four times the old prices (Dan, 29 Oct); each costs 2.5x the
+  // last since 4 Nov (was 2x). Uses the balance data's multiplier,
+  // so the test follows the sheet if it's tuned again.
+  const state = newGame();
+  const first = COMMAND.firstUpgradeCost;
+  const second = Math.round(first * COMMAND.costMultiplier);
+  const third = Math.round(first * COMMAND.costMultiplier ** 2);
+  state.credits = first + second + third;
+  assert.equal(getNextUpgradeCost(state), first);
   buyUpgrade(state);
-  assert.equal(getNextUpgradeCost(state), 160000);
+  assert.equal(getNextUpgradeCost(state), second);
   buyUpgrade(state);
-  assert.equal(getNextUpgradeCost(state), 320000);
+  assert.equal(getNextUpgradeCost(state), third);
   buyUpgrade(state);
   assert.equal(getCommandCapacity(state), 6 + 3 * 2);
   assert.equal(state.credits, 0);
