@@ -5,7 +5,7 @@
 // =============================================================
 
 import { SHIP_TYPES, SHIP_NAMES, SELL_RATE, SHIP_PRICE_GROWTH } from "../data/content.js";
-import { isShipTypeUnlocked } from "./skills.js";
+import { isShipTypeUnlocked, getFirstFieldFor } from "./skills.js";
 import { getShipPoints, getCommandFree } from "./command.js";
 import { findShip } from "./state.js";
 import { getJobForShip } from "./jobs.js";
@@ -106,8 +106,13 @@ export function buyShip(state, shipTypeId) {
   // What the ship does until told otherwise, by its role:
   if (SHIP_TYPES[shipTypeId].role === "freight") {
     ship.haulMode = "full";              // wait for a full hold
+  } else if (SHIP_TYPES[shipTypeId].role === "mining") {
+    // A barge heads for the first open field its hull can work:
+    // the Inner Belt for most, the deep core for a Deep-core barge
+    // (it can't work the belts at all).
+    ship.destination = getFirstFieldFor(state, shipTypeId);
   } else {
-    ship.destination = "inner_belt";     // mine the nearest field
+    ship.destination = "inner_belt";     // scouts: replaced when they pick a target
   }
 
   state.ships.push(ship);

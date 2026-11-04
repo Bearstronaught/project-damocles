@@ -49,7 +49,7 @@ import { advanceTo } from "../js/simulation.js";
 import { startMiningJob, getJobForShip, getTripPlan } from "../js/jobs.js";
 import { sellAll } from "../js/trade.js";
 import { ITEMS } from "../data/content.js";
-import { getLevel, isFieldUnlocked, XP_TABLE } from "../js/skills.js";
+import { getLevel, isFieldUnlocked, canHullWorkField, XP_TABLE } from "../js/skills.js";
 import { buyShip, getShipPrice, canBuyShip } from "../js/shipyard.js";
 import { buyUpgrade, getNextUpgradeCost, canBuyUpgrade } from "../js/command.js";
 import { canBuyShipUpgrade, buyShipUpgrade, getPartGrade } from "../js/ship-upgrades.js";
@@ -87,7 +87,7 @@ const START = 1_000_000_000_000;
 // "casual" (--casual) makes the realistic player check in three
 // times a day instead of every minute (see isCheckedIn).
 export function simulate(hours, untilMiningLevel, hourly = null, explore = true, surveyDelay = 0, realistic = true, peek = null, casual = false) {
-  const swaps = [];   // Excavator swaps waiting for their Prospectors to dock
+  const swaps = [];   // swaps waiting for their barges to dock (two small into one bigger)
   const state = createNewGame();
   // A fixed seed, so deep scan finds and contracts come out the same
   // every run and two runs can be compared (each real save has its own).
@@ -168,6 +168,7 @@ export function simulate(hours, untilMiningLevel, hourly = null, explore = true,
         fleet: {
           prospector: state.ships.filter((s) => s.type === "prospector").length,
           excavator: state.ships.filter((s) => s.type === "excavator").length,
+          deepCore: state.ships.filter((s) => s.type === "deep_core_barge").length,
           courier: state.ships.filter((s) => s.type === "courier").length,
         },
       });
@@ -304,7 +305,16 @@ export function simulate(hours, untilMiningLevel, hourly = null, explore = true,
       }
       // An Excavator (Mining 10) once it's affordable: twice the
       // command points of a Prospector, but more ore per point.
-      if (canBuyShip(state, "excavator").ok) {
+      // The realistic player prefers a Deep-core barge (Mining 30,
+      // 4 points) once it earns more per point than an Excavator
+      // (added 4 Nov), and stops buying Excavators then.
+      const barge = "deep_core_barge";
+      const bargesBetter = realistic && getLevel(state, "mining") >= SHIP_TYPES[barge].unlockLevel &&
+        minerValuePerHour(state, barge) / 4 > minerValuePerHour(state, "excavator") / 2;
+      if (bargesBetter && canBuyShip(state, barge).ok) {
+        options.push({ cost: getShipPrice(state, barge), buy: () => buyShip(state, barge), text: "Deep-core barge" });
+      }
+      if (!bargesBetter && canBuyShip(state, "excavator").ok) {
         options.push({ cost: getShipPrice(state, "excavator"), buy: () => buyShip(state, "excavator"), text: "Excavator" });
       }
       // The realistic player stops buying Prospectors once an
@@ -313,7 +323,11 @@ export function simulate(hours, untilMiningLevel, hourly = null, explore = true,
       const excavatorsBetter = realistic &&
         getLevel(state, "mining") >= SHIP_TYPES.excavator.unlockLevel &&
         minerValuePerHour(state, "excavator") / 2 > minerValuePerHour(state, "prospector");
-      if (excavatorsBetter && getCommandFree(state) < 2 && canBuyUpgrade(state).ok) {
+      if (bargesBetter && getCommandFree(state) < 4 && canBuyUpgrade(state).ok) {
+        options.push({ cost: getNextUpgradeCost(state), buy: () => buyUpgrade(state), text: "command upgrade" });
+      } else if (bargesBetter) {
+        // (no Prospectors on the list)
+      } else if (excavatorsBetter && getCommandFree(state) < 2 && canBuyUpgrade(state).ok) {
         // Out of points with no Prospector to buy: a command upgrade
         // makes room for the next Excavator.
         options.push({ cost: getNextUpgradeCost(state), buy: () => buyUpgrade(state), text: "command upgrade" });
@@ -377,6 +391,7 @@ export function simulate(hours, untilMiningLevel, hourly = null, explore = true,
       let best = null;
       for (const fieldId of Object.keys(FIELDS)) {
         if (!isFieldUnlocked(state, fieldId)) continue;
+        if (!canHullWorkField(ship.type, fieldId)) continue;   // hull rules (4 Nov)
         const plan = getTripPlan(state, ship.type, fieldId);
         const xpPerHour = plan.xpPerTrip / plan.durationMs;
         if (!best || xpPerHour > best.xpPerHour) best = { fieldId, xpPerHour };
@@ -510,15 +525,15 @@ function printWeeks(weeks, explore, surveyDelay, realistic, casual) {
 
   // One line per day. Skill columns: Min(ing), Ref(ining),
   // Mfg (Manufacturing), Trd (Trade), Exp(loration).
-  // Fleet: Prospectors / Excavators / Couriers.
+  // Fleet: Prospectors / Excavators / Deep-core barges / Couriers.
   // cr per hour is the last hour of that day: sales at Anvil,
   // Courier sales at Last Post, and contracts.
-  console.log("day | Min Ref Mfg Trd Exp | cr per hour | fleet P/E/C | cmd upg | credits banked");
+  console.log("day | Min Ref Mfg Trd Exp | cr per hour | fleet P/E/D/C | cmd upg | credits banked");
   for (const d of days) {
     const lv = (n) => String(n).padStart(3);
     console.log(`${String(d.hour / 24).padStart(3)} | ${lv(levelFor(d.miningXp))} ${lv(d.levels.refining)} ` +
       `${lv(d.levels.manufacturing)} ${lv(d.levels.trade)} ${lv(d.levels.exploration)} | ` +
-      `${cr(d.earned).padStart(11)} | ${`${d.fleet.prospector}/${d.fleet.excavator}/${d.fleet.courier}`.padStart(11)} | ` +
+      `${cr(d.earned).padStart(11)} | ${`${d.fleet.prospector}/${d.fleet.excavator}/${d.fleet.deepCore}/${d.fleet.courier}`.padStart(13)} | ` +
       `${String(d.commandUpgrades).padStart(7)} | ${cr(d.credits).padStart(14)}`);
   }
 

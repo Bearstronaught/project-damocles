@@ -61,7 +61,7 @@
 // =============================================================
 
 import { CONTRACT_KINDS, CONTRACT_CLIENTS, CONTRACT_FACTIONS, REPUTATION_TIERS, CONTRACTS, FIELDS, RECIPES, WORKSHOP_RECIPES, ITEMS, SURVEY_TARGETS, SHIP_TYPES } from "../data/content.js";
-import { getLevel, isFieldUnlocked, addXp } from "./skills.js";
+import { getLevel, isFieldUnlocked, addXp, canHullWorkField, getHullRuleText } from "./skills.js";
 import { getSellable } from "./bonded.js";
 import { isRefineryOpen, isRecipeUnlocked, getSlotCount as getRefinerySlotCount, getRefineJob, endTollJob, startWaitingBatches } from "./refinery.js";
 import { isWorkshopOpen, isWorkshopRecipeUnlocked } from "./workshop.js";
@@ -148,6 +148,11 @@ export function getSubjects(state, kindId, allowRepeats = false) {
     // metal from recipes they have, products likewise.
     if (kind.goods === "ore") {
       for (const [fieldId, field] of Object.entries(FIELDS)) {
+        // A charter needs a barge that can actually work the field
+        // (hull rules): no deep-core charters for a player with no
+        // Deep-core barge, for example.
+        const canLend = state.ships.some((ship) => SHIP_TYPES[ship.type].role === "mining" && canHullWorkField(ship.type, fieldId));
+        if (kind.kind === "charter" && !canLend) continue;
         if (isFieldUnlocked(state, fieldId)) {
           // A charter is about one field; a delivery just the ore.
           subjects.push({ itemId: field.yields, fieldId: kind.kind === "charter" ? fieldId : null, targetId: null });
@@ -502,6 +507,10 @@ export function canCharter(state, slotIndex, shipId) {
   const ship = state.ships.find((s) => s.id === shipId);
   if (!ship) return { ok: false, reason: "Pick a ship." };
   if (SHIP_TYPES[ship.type].role !== "mining") return { ok: false, reason: "Only mining ships can be chartered." };
+  // The ship has to be able to work the charter's field.
+  if (!canHullWorkField(ship.type, contract.fieldId)) {
+    return { ok: false, reason: `${FIELDS[contract.fieldId].name}: ${getHullRuleText(contract.fieldId)}.` };
+  }
   if (getCharter(state, shipId)) return { ok: false, reason: `${ship.name} is already on a charter.` };
   return { ok: true };
 }

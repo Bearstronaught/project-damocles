@@ -72,6 +72,40 @@ const SCHEMATICS = {
       <polygon class="accent" points="116,44 132,50 116,56" />
     </svg>`,
 
+  // --- Deep-core barge (large, 4 Nov): built for open space only.
+  //     A long, blocky hull with no wings, three engines, four
+  //     armoured ore holds, and one heavy drill train down the
+  //     centre line ending in a wide cutting head. Fills more of
+  //     the frame than the Excavator, so it reads as the big one. ---
+  hull_deep_core_barge: `
+    <svg viewBox="0 0 140 80" class="schematic" aria-hidden="true">
+      <!-- three drive flames -->
+      <polygon class="engine" points="8,19 0,22 8,25" />
+      <polygon class="engine" points="8,37 0,40 8,43" />
+      <polygon class="engine" points="8,55 0,58 8,61" />
+      <!-- three engine blocks on a crossbeam -->
+      <rect class="hull" x="8" y="16" width="9" height="12" />
+      <rect class="hull" x="8" y="34" width="9" height="12" />
+      <rect class="hull" x="8" y="52" width="9" height="12" />
+      <line class="detail" x1="17" y1="22" x2="17" y2="58" />
+      <!-- main hull: a long armoured block, squared off -->
+      <polygon class="hull" points="17,10 86,10 96,18 96,62 86,70 17,70" />
+      <!-- four armoured ore holds, two either side of the spine -->
+      <rect class="detail" x="24" y="15" width="28" height="20" />
+      <rect class="detail" x="56" y="15" width="28" height="20" />
+      <rect class="detail" x="24" y="45" width="28" height="20" />
+      <rect class="detail" x="56" y="45" width="28" height="20" />
+      <!-- the spine between them -->
+      <line class="detail" x1="20" y1="40" x2="90" y2="40" />
+      <!-- bridge at the bow -->
+      <rect class="detail" x="86" y="34" width="7" height="12" />
+      <!-- the drill train: a thick shaft and a wide cutting head -->
+      <rect class="hull" x="96" y="35" width="20" height="10" />
+      <line class="detail" x1="103" y1="35" x2="103" y2="45" />
+      <line class="detail" x1="110" y1="35" x2="110" y2="45" />
+      <polygon class="accent" points="116,26 124,26 136,40 124,54 116,54" />
+    </svg>`,
+
   // --- Courier: a spine with two rows of cargo pods clamped on
   //     each side, cockpit at the nose, one engine at the back.
   //     (Like the freighter builder: more rows = longer ship.) ---
@@ -144,6 +178,11 @@ const HARDPOINTS = {
     drive: [17, 40],      // between the twin engines
     hold:  [43, 33],      // the cargo bay
     drill: [108, 40],     // between the twin drill arms
+  },
+  hull_deep_core_barge: {
+    drive: [12, 40],      // the middle engine
+    hold:  [54, 25],      // between the upper holds
+    drill: [106, 40],     // the drill train
   },
   hull_courier: {
     drive: [23, 40],      // the engine block

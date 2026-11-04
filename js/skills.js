@@ -153,6 +153,61 @@ export function isFieldUnlocked(state, fieldId) {
 }
 
 // -------------------------------------------------------------
+// canHullWorkField(shipTypeId, fieldId)
+// True if a ship of this type can work this field at all, going
+// by its hull size (Dan, 1 and 4 Nov). A field's "hulls" lists the
+// sizes allowed; null means any hull can go there.
+//   Surface fields, e.g. the Ice moon (hulls: ['small']): only a
+//     small hull can land and lift off again.
+//   Deep-core fields (hulls: ['large', 'capital']): only a heavy
+//     barge can cut into a dense asteroid core.
+// This is about the HULL, not the player: whether the field is
+// open yet is isFieldUnlocked's job (above).
+// -------------------------------------------------------------
+export function canHullWorkField(shipTypeId, fieldId) {
+  const allowed = FIELDS[fieldId].hulls;
+  if (!allowed) return true;                          // any hull
+  return allowed.includes(SHIP_TYPES[shipTypeId].size);
+}
+
+// -------------------------------------------------------------
+// getFirstFieldFor(state, shipTypeId)
+// Where a newly bought barge heads by default.
+//   A big hull goes to an open field kept for its size, if there
+//   is one: a Deep-core barge to the deep core, the place it was
+//   built for. (It CAN work the belts - asteroid belts are open to
+//   every hull - but it would earn far less there.)
+//   Otherwise, the first open field (in screen order) it can
+//   work: the Inner Belt for a Prospector or an Excavator, as
+//   always, so the early game is unchanged.
+// Falls back to the first field this hull can ever work, so a
+// ship always has somewhere sensible to point at.
+// -------------------------------------------------------------
+export function getFirstFieldFor(state, shipTypeId) {
+  const size = SHIP_TYPES[shipTypeId].size;
+  const ids = Object.keys(FIELDS).filter((fieldId) => canHullWorkField(shipTypeId, fieldId));
+  const open = ids.filter((fieldId) => isFieldUnlocked(state, fieldId));
+  if (size !== "small") {
+    const keptForSize = open.find((fieldId) => FIELDS[fieldId].hulls && FIELDS[fieldId].hulls.includes(size));
+    if (keptForSize) return keptForSize;
+  }
+  return open[0] || ids[0];
+}
+
+// -------------------------------------------------------------
+// getHullRuleText(fieldId)
+// The hull rule in words, for screens and tooltips, or "" when
+// any hull can go:
+//   "small hulls only"            (the Ice moon)
+//   "large and capital hulls only" (the deep core)
+// -------------------------------------------------------------
+export function getHullRuleText(fieldId) {
+  const allowed = FIELDS[fieldId].hulls;
+  if (!allowed) return "";
+  return allowed.join(" and ") + " hulls only";
+}
+
+// -------------------------------------------------------------
 // getFieldRequirement(fieldId)
 // What opens a field, in words, for the screens:
 //   "Mining 5"          (outer_belt)

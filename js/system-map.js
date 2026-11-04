@@ -83,6 +83,9 @@ function getPlaces() {
     inner_belt: { name: FIELDS.inner_belt.name, seconds: FIELDS.inner_belt.travelSeconds, angle: -10, ring: true },
     outer_belt: { name: FIELDS.outer_belt.name, seconds: FIELDS.outer_belt.travelSeconds, angle: 8, ring: true },
     ice_moon: { name: FIELDS.ice_moon.name, seconds: FIELDS.ice_moon.travelSeconds, angle: -38 },
+    // The deep core (4 Nov): far out to the upper right, clear of
+    // the Ice moon and Last Post (at 62 its label fell off the map)
+    deep_core: { name: FIELDS.deep_core.name, seconds: FIELDS.deep_core.travelSeconds, angle: -18 },
     hub: { name: HUB.name, seconds: HUB.travelSeconds, angle: 28 },
     // The wreck is in the Outer Belt (same flight time)
     wreck: { name: "The wreck", seconds: getTarget("wreck_1").travelSeconds, angle: 52 },
@@ -277,6 +280,10 @@ function updatePlaces(state, view) {
   show("outer_belt", true, !isFieldUnlocked(state, "outer_belt"), isFieldUnlocked(state, "outer_belt") ? "" : " · LOCKED");
   const iceOpen = isFieldUnlocked(state, "ice_moon");
   show("ice_moon", true, !iceOpen, iceOpen ? " · SMALL HULLS" : " · UNSURVEYED");
+  // The deep core shows from the start, so players see something big
+  // to aim for, and says which hulls can work it.
+  const coreOpen = isFieldUnlocked(state, "deep_core");
+  show("deep_core", true, !coreOpen, coreOpen ? " · LARGE HULLS" : ` · MINING ${FIELDS.deep_core.unlockLevel}`);
   show("hub", true, false, "");
 
   // A discovery shows once a scout could go there, or has been.

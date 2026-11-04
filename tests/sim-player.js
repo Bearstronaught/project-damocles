@@ -31,7 +31,7 @@ import {
   FIELDS, ITEMS, RECIPES, WORKSHOP_RECIPES, SHIP_TYPES, SHIP_UPGRADES, UPGRADES, HULL_SIZES,
   SHIP_PRICE_GROWTH,
 } from "../data/content.js";
-import { getLevel, isFieldUnlocked } from "../js/skills.js";
+import { getLevel, isFieldUnlocked, canHullWorkField } from "../js/skills.js";
 import { getTripPlan, getHaulPlan, getJobForShip, recallJob } from "../js/jobs.js";
 import { getPrice, sellAll } from "../js/trade.js";
 import { setBond } from "../js/bonded.js";
@@ -98,11 +98,10 @@ export function minerValuePerHour(state, typeId) {
   let best = 0;
   for (const fieldId of Object.keys(FIELDS)) {
     if (!isFieldUnlocked(state, fieldId)) continue;
-    // Surface fields (the Ice moon) are meant to be small hulls
-    // only (design doc, 1 Nov), but the game doesn't enforce that
-    // yet, so neither does the player. When the rule is built, the
-    // field data gets a flag and this line starts using it.
-    if (FIELDS[fieldId].smallHullsOnly && SHIP_TYPES[typeId].size !== "small") continue;
+    // Hull rules (built 4 Nov): the Ice moon is small hulls only,
+    // the deep core large and up. A field this hull can't work
+    // isn't worth anything to it.
+    if (!canHullWorkField(typeId, fieldId)) continue;
     const plan = getTripPlan(state, typeId, fieldId);
     const stats = getShipStats(state, typeId);
     const value = stats.cargoCapacity * getPrice(FIELDS[fieldId].yields, "home");
@@ -121,6 +120,7 @@ export function bestXpField(state, typeId) {
   let best = null;
   for (const fieldId of Object.keys(FIELDS)) {
     if (!isFieldUnlocked(state, fieldId)) continue;
+    if (!canHullWorkField(typeId, fieldId)) continue;      // hull rules
     const plan = getTripPlan(state, typeId, fieldId);
     const xpPerHour = plan.xpPerTrip / plan.durationMs;
     if (!best || xpPerHour > best.xpPerHour) best = { fieldId, xpPerHour };
@@ -172,7 +172,8 @@ export function chooseMiningField(state, ship) {
       return job && job.type === "mining" && FIELDS[job.fieldId] && FIELDS[job.fieldId].yields === oreId;
     }).length;
     if (incoming >= 2) continue;                               // two barges on it is plenty
-    const fieldId = Object.keys(FIELDS).find((id) => FIELDS[id].yields === oreId && isFieldUnlocked(state, id));
+    const fieldId = Object.keys(FIELDS).find((id) => FIELDS[id].yields === oreId && isFieldUnlocked(state, id) &&
+      canHullWorkField(ship.type, id));                        // only a field this barge can work
     if (fieldId) return fieldId;
   }
   return best;
@@ -200,7 +201,10 @@ export function rebalanceMiners(state, now) {
     if (!fieldId) continue;
     if (miningJobs.some((job) => job.fieldId === fieldId)) continue;   // someone's on it
     // Recall a barge from another field (not a chartered one)
-    const job = miningJobs.find((j) => j.fieldId !== fieldId && !getCharter(state, j.shipId));
+    // (only one whose hull can work that field: no point recalling
+    // a Deep-core barge for iron ore it can't mine)
+    const job = miningJobs.find((j) => j.fieldId !== fieldId && !getCharter(state, j.shipId) &&
+      canHullWorkField(state.ships.find((s) => s.id === j.shipId).type, fieldId));
     if (!job) continue;
     recallJob(state, job.id, now);
     lines.push(`recalled a barge to send it for ${ITEMS[oreId].name.toLowerCase()} (refinery short)`);
@@ -420,7 +424,7 @@ export function runRefinery(state, keep, now) {
       // emptier, so slots don't flip back and forth every minute
       const emptiest = otherMetals.sort((a, b) => fullness(a) - fullness(b))[0];
       const currentId = current && current.recipeId;
-      recipe = emptiest || (canMake("nickel_bar") ? "nickel_bar" : "iron_bar");
+      recipe = emptiest || bestXpRecipe(state, canMake) || (canMake("nickel_bar") ? "nickel_bar" : "iron_bar");
       if (currentId && otherMetals.includes(currentId) && fullness(currentId) < 1) recipe = currentId;
     }
     if (current && (current.recipeId === recipe || current.toll !== undefined)) continue;
@@ -429,6 +433,28 @@ export function runRefinery(state, keep, now) {
     }
   }
   return lines;
+}
+
+
+// -------------------------------------------------------------
+// bestXpRecipe(state, canMake)
+// With nothing short, a spare refinery slot runs the recipe with
+// the most Refining XP per second that has a batch's ore in the
+// hold right now (added 4 Nov, for iridium bars: a real player
+// smelts the rich ore for the XP and the better price).
+//   e.g. iridium bars 80 XP / 180 s = 0.44 XP/s, steel 30 / 120 = 0.25
+// Returns a recipe ID, or null to fall back to nickel or iron.
+// -------------------------------------------------------------
+function bestXpRecipe(state, canMake) {
+  let best = null;
+  for (const [recipeId, recipe] of Object.entries(RECIPES)) {
+    if (recipeId === "iron_bar" || !canMake(recipeId)) continue;
+    const hasOre = Object.entries(recipe.inputs).every(([oreId, tonnes]) => (state.inventory[oreId] || 0) >= tonnes);
+    if (!hasOre) continue;
+    const xpPerSecond = recipe.xp / recipe.seconds;
+    if (!best || xpPerSecond > best.xpPerSecond) best = { recipeId, xpPerSecond };
+  }
+  return best ? best.recipeId : null;
 }
 
 
@@ -593,45 +619,75 @@ export function extraShopping(state, now, swaps) {
   if (canBuyShip(state, "courier").ok) {
     const courierPerPoint = courierValuePerHour(state) / pointsFor("courier");
     let minerPerPoint = minerValuePerHour(state, "prospector") / pointsFor("prospector");
-    if (getLevel(state, "mining") >= SHIP_TYPES.excavator.unlockLevel) {
-      minerPerPoint = Math.max(minerPerPoint, minerValuePerHour(state, "excavator") / pointsFor("excavator"));
+    for (const big of ["excavator", "deep_core_barge"]) {
+      if (getLevel(state, "mining") >= SHIP_TYPES[big].unlockLevel) {
+        minerPerPoint = Math.max(minerPerPoint, minerValuePerHour(state, big) / pointsFor(big));
+      }
     }
     if (courierPerPoint >= minerPerPoint) {
       options.push({ cost: getShipPrice(state, "courier"), buy: () => buyShip(state, "courier"), text: "Courier #" + (count(state, "courier") + 1) });
     }
   }
 
-  // An Excavator swap (never two at once)
-  const excavatorUnlocked = getLevel(state, "mining") >= SHIP_TYPES.excavator.unlockLevel;
-  const outOfPoints = getCommandFree(state) < pointsFor("excavator");
-  const betterThanTwo = minerValuePerHour(state, "excavator") > 2 * minerValuePerHour(state, "prospector");
-  const sellable = state.ships.filter((ship) => ship.type === "prospector" && !getCharter(state, ship.id));
-  if (excavatorUnlocked && outOfPoints && betterThanTwo && swaps.length === 0 && sellable.length >= 3) {
-    // Each sale makes the next Prospector cheaper, so the second
-    // one sells for the first one's price divided by the growth
-    // rate (found 4 Nov: counting both at the first price left
-    // the swap short).
-    //   e.g. first sells for 26,214 cr, second for 26,214 / 1.6 = 16,384 cr
-    const first = getSellValue(state, "prospector");
-    const saleValue = first + Math.floor(first / SHIP_PRICE_GROWTH);
-    const netCost = getShipPrice(state, "excavator") - saleValue;
-    if (state.credits >= netCost) {
-      options.push({
-        cost: netCost,
-        text: "Excavator swap (recalling 2 Prospectors to sell)",
-        buy: () => {
-          // The two newest Prospectors: they have the most refits waiting anyway
-          const pair = sellable.slice(-2).map((ship) => ship.id);
-          for (const shipId of pair) {
-            const job = getJobForShip(state, shipId);
-            if (job) recallJob(state, job.id, now);
-          }
-          swaps.push({ shipIds: pair });
-        },
-      });
-    }
+  // Swaps (never two at once): when the fleet is out of command
+  // points, recall two barges of one size, sell them, and buy one
+  // of the next size up in their points. Only if the bigger hull
+  // out-earns the two it replaces, which is the whole point of it.
+  //   two Prospectors (1 + 1 points) -> one Excavator (2)
+  //   two Excavators  (2 + 2 points) -> one Deep-core barge (4) (added 4 Nov)
+  // "keepAtLeast": how many of the small hull to keep anyway. One
+  // Prospector stays for the Ice moon, which bigger hulls can't work.
+  for (const { from, to, keepAtLeast } of SWAP_STEPS) {
+    if (swaps.length > 0) break;
+    const option = swapOption(state, now, swaps, from, to, keepAtLeast);
+    if (option) options.push(option);
   }
   return options;
+}
+
+
+// Which swaps the realistic player makes, smallest first.
+const SWAP_STEPS = [
+  { from: "prospector", to: "excavator", keepAtLeast: 1 },
+  { from: "excavator", to: "deep_core_barge", keepAtLeast: 0 },
+];
+
+// -------------------------------------------------------------
+// swapOption(state, now, swaps, from, to, keepAtLeast)
+// One swap for the shopping list, or null if it doesn't make
+// sense yet: "to" isn't unlocked, there are spare points to just
+// buy one, it wouldn't earn more than the two it replaces, or
+// there aren't enough "from" barges to sell.
+// -------------------------------------------------------------
+function swapOption(state, now, swaps, from, to, keepAtLeast) {
+  const unlocked = getLevel(state, "mining") >= SHIP_TYPES[to].unlockLevel;
+  const outOfPoints = getCommandFree(state) < pointsFor(to);
+  const betterThanTwo = minerValuePerHour(state, to) > 2 * minerValuePerHour(state, from);
+  const sellable = state.ships.filter((ship) => ship.type === from && !getCharter(state, ship.id));
+  if (!unlocked || !outOfPoints || !betterThanTwo || sellable.length < 2 + keepAtLeast) return null;
+
+  // Each sale makes the next one of that type cheaper, so the
+  // second sells for the first one's price divided by the growth
+  // rate (found 4 Nov: counting both at the first price left the
+  // swap short).
+  //   e.g. first sells for 26,214 cr, second for 26,214 / 1.6 = 16,384 cr
+  const first = getSellValue(state, from);
+  const saleValue = first + Math.floor(first / SHIP_PRICE_GROWTH);
+  const netCost = getShipPrice(state, to) - saleValue;
+  if (state.credits < netCost) return null;
+  return {
+    cost: netCost,
+    text: `${SHIP_TYPES[to].name} swap (recalling 2 ${SHIP_TYPES[from].name}s to sell)`,
+    buy: () => {
+      // The two newest: they have the most refits waiting anyway
+      const pair = sellable.slice(-2).map((ship) => ship.id);
+      for (const shipId of pair) {
+        const job = getJobForShip(state, shipId);
+        if (job) recallJob(state, job.id, now);
+      }
+      swaps.push({ shipIds: pair, from, to });
+    },
+  };
 }
 
 
@@ -653,12 +709,13 @@ export function finishSwaps(state, swaps) {
     let sold = 0;
     for (const id of stillHere) sold += sellShip(state, id);
     swaps.splice(i, 1);
-    if (canBuyShip(state, "excavator").ok) {
-      const price = getShipPrice(state, "excavator");
-      buyShip(state, "excavator");
-      lines.push(`swap: sold 2 Prospectors (${sold.toLocaleString("en-GB")} cr), bought an Excavator (${price.toLocaleString("en-GB")} cr)`);
+    const fromName = SHIP_TYPES[swap.from].name, toName = SHIP_TYPES[swap.to].name;
+    if (canBuyShip(state, swap.to).ok) {
+      const price = getShipPrice(state, swap.to);
+      buyShip(state, swap.to);
+      lines.push(`swap: sold 2 x ${fromName} (${sold.toLocaleString("en-GB")} cr), bought a ${toName} (${price.toLocaleString("en-GB")} cr)`);
     } else {
-      lines.push(`swap: sold 2 Prospectors (${sold.toLocaleString("en-GB")} cr); Excavator not affordable yet`);
+      lines.push(`swap: sold 2 x ${fromName} (${sold.toLocaleString("en-GB")} cr); ${toName} not affordable yet`);
     }
   }
   return lines;

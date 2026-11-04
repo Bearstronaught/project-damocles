@@ -28,7 +28,7 @@ import { sellAll, sellEverything } from "./trade.js";
 import { setBond } from "./bonded.js";
 import { buyShip, sellShip, renameShip } from "./shipyard.js";
 import { buyUpgrade, getCommandCapacity } from "./command.js";
-import { getUnlocksAtLevel, getFieldUnlocksAtLevel, isFieldUnlocked } from "./skills.js";
+import { getUnlocksAtLevel, getFieldUnlocksAtLevel, isFieldUnlocked, canHullWorkField } from "./skills.js";
 import { setRecipe, getRefineJob, getRecipeUnlocksAtLevel, getSlotUnlocksAtLevel } from "./refinery.js";
 import { addOrder, cancelOrder, getWorkshopJob, getWorkshopRecipeUnlocksAtLevel, getWorkshopSlotUnlocksAtLevel, isQueueUnlockLevel, getQueueLimit, addStandingOrder, removeStandingOrder, getStandingOrders } from "./workshop.js";
 import { buyIndustryUpgrade, getUpgradeUnlocksAtLevel } from "./upgrades.js";
@@ -129,6 +129,11 @@ const actions = {
     // that are unlocked. (The buttons are disabled otherwise,
     // but checking here too means the rule can't be skipped.)
     if (!ship || getJobForShip(state, shipId) || !isFieldUnlocked(state, fieldId)) {
+      return;
+    }
+    // ...and only to a field this hull can work (the Ice moon is
+    // small hulls only, the deep core large and up).
+    if (!canHullWorkField(ship.type, fieldId)) {
       return;
     }
     // A chartered ship goes where the charter says (contracts.js).

@@ -48,7 +48,7 @@ import { getShipPrice, canBuyShip, countOwned } from "./shipyard.js";
 import { isShipTypeUnlocked } from "./skills.js";
 import { getShipPoints, getCommandFree } from "./command.js";
 import { getShipArt, getSchematic } from "./art.js";
-import { getHullGrades, getShipStats } from "./ship-upgrades.js";
+import { getHullGrades, getShipStats, getHullShortName } from "./ship-upgrades.js";
 import { formatNumber, formatTonnes, formatSpeed, tripTable } from "./ui.js";
 import { make, setText } from "./svg.js";
 
@@ -118,14 +118,25 @@ const TRIP_TAGS = {
 
 // -------------------------------------------------------------
 // compareWith(typeId)
-// Another hull of the same job and a different size to compare
-// with "per command point" (the Excavator against the Prospector,
-// and the other way round), or null if there isn't one yet.
+// Another hull of the same job to compare with "per command
+// point", or null if there isn't one. The nearest size wins, the
+// one below first: a Deep-core barge against the Excavator (not
+// the Prospector), an Excavator against the Prospector, and a
+// Prospector against the Excavator above it.
 // -------------------------------------------------------------
+const SIZE_ORDER = ["small", "medium", "large", "capital"];
 function compareWith(typeId) {
   const type = SHIP_TYPES[typeId];
-  return Object.keys(SHIP_TYPES).find((otherId) =>
-    otherId !== typeId && SHIP_TYPES[otherId].role === type.role && SHIP_TYPES[otherId].size !== type.size) || null;
+  const rank = SIZE_ORDER.indexOf(type.size);
+  const others = Object.keys(SHIP_TYPES).filter((otherId) =>
+    otherId !== typeId && SHIP_TYPES[otherId].role === type.role && SHIP_TYPES[otherId].size !== type.size);
+  // Sort by how many sizes away, and on a tie the smaller one first
+  const distance = (otherId) => {
+    const step = SIZE_ORDER.indexOf(SHIP_TYPES[otherId].size) - rank;
+    return Math.abs(step) * 2 + (step > 0 ? 1 : 0);
+  };
+  others.sort((a, b) => distance(a) - distance(b));
+  return others[0] || null;
 }
 
 
@@ -242,7 +253,7 @@ export function setupShipyardView(getState, actions) {
         const button = document.createElement("button");
         button.type = "button";
         button.className = "sy-pick";
-        button.textContent = SHIP_TYPES[typeId].name.split("-")[0];   // "Prospector-class barge" -> "Prospector"
+        button.textContent = getHullShortName(typeId);   // "Prospector-class barge" -> "Prospector"
         button.addEventListener("click", () => { picked = typeId; savePick(typeId); });
         button.addEventListener("animationend", () => button.classList.remove("is-fresh"));
         els.picker.appendChild(button);
@@ -268,7 +279,7 @@ export function setupShipyardView(getState, actions) {
         wasReady[typeId] = ready;
 
         // What a screen reader says: the name, plus "ready to build"
-        const shortName = SHIP_TYPES[typeId].name.split("-")[0];
+        const shortName = getHullShortName(typeId);
         const label = ready ? `${shortName}, ready to build` : shortName;
         if (button.getAttribute("aria-label") !== label) button.setAttribute("aria-label", label);
       }
@@ -347,7 +358,7 @@ export function setupShipyardView(getState, actions) {
     const statsKey = JSON.stringify(stats) + other;
     if (statsKey !== lastStats) {
       lastStats = statsKey;
-      setText(els.compareTag, other ? `Per pt vs ${SHIP_TYPES[other].name.split("-")[0]}` : "With your components");
+      setText(els.compareTag, other ? `Per pt vs ${getHullShortName(other)}` : "With your components");
       els.stats.innerHTML = "";
       for (const [label, value] of stats) els.stats.appendChild(row(label, value, ""));
     }

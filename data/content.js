@@ -63,6 +63,14 @@ export const ITEMS = {
     group: "ore",
     ...BALANCE.items.nickel_ore,
   },
+  // Rich ore, tier 1 (Dan, 4 Nov): a natural alloy of iridium and
+  // osmium, two of the densest metals there are. Found in dense
+  // asteroid cores, so only large hulls can reach it.
+  osmiridium: {
+    name: "Osmiridium",
+    group: "ore",
+    ...BALANCE.items.osmiridium,
+  },
   // Refined metals, made at the refinery (see RECIPES below)
   iron_bar: {
     name: "Iron bars",
@@ -78,6 +86,11 @@ export const ITEMS = {
     name: "Steel",
     group: "bar",
     ...BALANCE.items.steel,
+  },
+  iridium_bar: {
+    name: "Iridium bars",
+    group: "bar",
+    ...BALANCE.items.iridium_bar,
   },
   // Manufactured products, made at the workshop (see
   // WORKSHOP_RECIPES below). Each sells for more than the metal
@@ -297,6 +310,16 @@ export const SHIP_TYPES = {
     unlockAfter: "firstSale",
     ...BALANCE.ships.pathfinder,
   },
+  // The first large hull (Dan, 4 Nov). It comes with a field only
+  // it can work - the deep core - rather than a bigger hold on the
+  // same old fields.
+  deep_core_barge: {
+    name: "Deep-core barge",
+    shortName: "Deep-core",           // the hyphen is part of the name, so it's spelled out
+    description: "A vacuum-built bulk barge with a hardened drill train. Too heavy for anything but open space, it cuts into dense asteroid cores that smaller barges can't touch.",
+    art: "hull_deep_core_barge",
+    ...BALANCE.ships.deep_core_barge,
+  },
 };
 
 // -------------------------------------------------------------
@@ -331,6 +354,11 @@ export const SHIP_NAMES = [
 //   tonnesPerXp   1 Mining XP for every this-many tonnes brought
 //                 home (10 = 1 XP per 10 t, so a 120 t hold = 12 XP).
 //   unlockLevel   Mining level needed to send ships there
+//   hardness      how hard the rock is: drill speed is multiplied
+//                 by this (1 = normal, 0.5 = mines at half speed)
+//   hulls         which hull sizes can work it, e.g. ['small'] for
+//                 a moon's surface (only small hulls can land and
+//                 lift off again), or null for any hull
 export const FIELDS = {
   inner_belt: {
     name: "Inner Belt",
@@ -348,6 +376,14 @@ export const FIELDS = {
     name: "Ice moon",
     description: "Thick ice under a thin crust, a long flight out. Water is scarce in a system with nowhere to live, so it sells well.",
     ...BALANCE.fields.ice_moon,
+  },
+  // The first deep-core field (Dan, 4 Nov): the shattered core of
+  // a young planet, all heavy metal. Hard rock (hardness 0.5 halves
+  // drill speed), and only large and capital hulls can work it.
+  deep_core: {
+    name: "Deep core",
+    description: "The broken core of a planet that never finished forming: dense, hard metal that sank to its heart billions of years ago. Slow cutting, rich hauls, and only heavy barges need apply.",
+    ...BALANCE.fields.deep_core,
   },
 };
 
@@ -380,6 +416,10 @@ export const RECIPES = {
   steel: {
     name: "Steel",
     ...BALANCE.recipes.steel,
+  },
+  iridium_bar: {
+    name: "Iridium bars",
+    ...BALANCE.recipes.iridium_bar,
   },
 };
 

@@ -48,7 +48,7 @@ import { getMaxOrderBatches, addStandingOrder, removeStandingOrder, getStandingO
 import { XP_TABLE, getLevelForXp, getLevel, getLevelProgress, addXp, isShipTypeUnlocked, MAX_LEVEL } from "../js/skills.js";
 import { canBuyShip, buyShip, canSellShip, sellShip, getSellValue, renameShip, getShipPrice } from "../js/shipyard.js";
 import { getCommandCapacity, getCommandUsed, getNextUpgradeCost, buyUpgrade } from "../js/command.js";
-import { isFieldUnlocked } from "../js/skills.js";
+import { isFieldUnlocked, canHullWorkField, getFirstFieldFor, getHullRuleText } from "../js/skills.js";
 import { getRoleGroups, describeGroup, getShipActivity } from "../js/fleet-groups.js";
 import { setRecipe, getRefineJob, isRefineryOpen, getSlotCount, getBatchMs, isRecipeUnlocked, getRecipeUnlocksAtLevel, getSlotUnlocksAtLevel } from "../js/refinery.js";
 import { RECIPES, REFINERY, WORKSHOP_RECIPES, WORKSHOP } from "../data/content.js";
@@ -4281,6 +4281,166 @@ test("Trips readout: a scout's table drops surveys already done, but always keep
   const html = tripTable(state, "pathfinder");
   assert.doesNotMatch(html, /Inner Belt survey/);              // done: no trip left to show
   assert.match(html, /Deep scan/);                             // never runs out
+});
+
+// =============================================================
+// HULL RULES, HARDNESS AND THE DEEP CORE (4 Nov)
+// =============================================================
+
+// A game at a given Mining level, with one extra ship of a type,
+// docked. Returns [state, shipId].
+function gameWithShip(level, typeId) {
+  const state = newGame();
+  state.skills.mining.xp = XP_TABLE[level];
+  state.credits = 10_000_000;
+  state.commandUpgrades = 10;                 // plenty of command points
+  const ship = buyShip(state, typeId);
+  return [state, ship.id];
+}
+
+test("Hull rules: the Ice moon is small hulls only, the deep core large and up, the belts anything", () => {
+  // Why: the whole rule in one place. If the data or the check
+  // slips, every screen and the simulator go wrong with it.
+  assert.equal(canHullWorkField("prospector", "ice_moon"), true);
+  assert.equal(canHullWorkField("excavator", "ice_moon"), false);
+  assert.equal(canHullWorkField("deep_core_barge", "ice_moon"), false);
+  assert.equal(canHullWorkField("prospector", "deep_core"), false);
+  assert.equal(canHullWorkField("excavator", "deep_core"), false);
+  assert.equal(canHullWorkField("deep_core_barge", "deep_core"), true);
+  for (const typeId of ["prospector", "excavator", "deep_core_barge"]) {
+    assert.equal(canHullWorkField(typeId, "inner_belt"), true);
+    assert.equal(canHullWorkField(typeId, "outer_belt"), true);
+  }
+  assert.equal(getHullRuleText("ice_moon"), "small hulls only");
+  assert.equal(getHullRuleText("deep_core"), "large and capital hulls only");
+  assert.equal(getHullRuleText("inner_belt"), "");
+});
+
+test("Hull rules: a barge can't be sent to a field its hull can't work, even when the field is open", () => {
+  // Why: the screens grey these out, but the rule has to hold in
+  // the game itself too, or a stale button could still send one.
+  const [state, excavatorId] = gameWithShip(30, "excavator");
+  state.exploration.surveyed.ice_moon = true;              // the Ice moon is open
+  assert.equal(isFieldUnlocked(state, "ice_moon"), true);
+  assert.equal(startMiningJob(state, excavatorId, "ice_moon", START), null);
+  assert.equal(startMiningJob(state, excavatorId, "deep_core", START), null);
+  assert.equal(startMiningJob(state, "ship-1", "deep_core", START), null);   // the starter Prospector
+  assert.ok(startMiningJob(state, "ship-1", "ice_moon", START), "a Prospector can still land on the moon");
+});
+
+test("The deep core opens at Mining 30, and a Deep-core barge heads there when bought", () => {
+  // Why: the barge can't work any other field, so pointing it at
+  // the Inner Belt (the old default) would leave it stuck at home.
+  const [state, bargeId] = gameWithShip(30, "deep_core_barge");
+  assert.equal(isFieldUnlocked(state, "deep_core"), true);
+  assert.equal(state.ships.find((s) => s.id === bargeId).destination, "deep_core");
+  assert.equal(getFirstFieldFor(state, "excavator"), "inner_belt");   // others unchanged
+  assert.equal(getFirstFieldFor(state, "prospector"), "inner_belt");  // early game unchanged
+  const early = newGame();
+  early.skills.mining.xp = XP_TABLE[29];
+  assert.equal(isFieldUnlocked(early, "deep_core"), false);
+});
+
+test("Hardness: the deep core's 0.5 doubles the drilling time, and only the drilling", () => {
+  // Why: hardness is meant to slow the cutting, not the flights
+  // or the unloading, so drill upgrades matter most on hard rock.
+  const state = newGame();
+  state.skills.mining.xp = XP_TABLE[1];                    // no level perk, to keep the sums plain
+  const ship = SHIP_TYPES.deep_core_barge;
+  const plan = getTripPlan(state, "deep_core_barge", "deep_core");
+  const softMs = (ship.cargoCapacity / ship.miningRate) * 60 * 1000;   // at hardness 1
+  assert.equal(plan.miningMs, Math.round(softMs / FIELDS.deep_core.hardness));
+  assert.equal(plan.outboundMs, Math.round(FIELDS.deep_core.travelSeconds / ship.speed * 1000));
+  // Every existing field is hardness 1, so nothing else changed
+  for (const fieldId of ["inner_belt", "outer_belt", "ice_moon"]) assert.equal(FIELDS[fieldId].hardness, 1);
+});
+
+test("A Deep-core barge brings home osmiridium, and iridium bars are smelted from it", () => {
+  // Why: the new ore and its recipe have to join up, or the barge's
+  // haul has nowhere to go but the market.
+  const [state, bargeId] = gameWithShip(30, "deep_core_barge");
+  const job = startMiningJob(state, bargeId, "deep_core", START);
+  processJobs(state, START + job.durationMs);
+  assert.equal(state.inventory.osmiridium, SHIP_TYPES.deep_core_barge.cargoCapacity);
+  assert.deepEqual(RECIPES.iridium_bar.inputs, { osmiridium: 60 });
+  assert.equal(RECIPES.iridium_bar.output, "iridium_bar");
+  assert.equal(ITEMS.osmiridium.group, "ore");
+  assert.equal(ITEMS.iridium_bar.group, "bar");
+});
+
+test("A Deep-core barge earns about 25% more per command point than an Excavator with its Mk II parts", () => {
+  // Why: the agreed rule for every size step (Dan, 4 Nov). The
+  // comparison is against Mk II because those parts unlock at
+  // Mining 20 to 26, before the barge, so that's what a player has.
+  // (Against a stock Excavator the barge would win easily, and the
+  // simulator showed nobody would ever buy one.)
+  const state = newGame();
+  state.skills.mining.xp = XP_TABLE[30];
+  state.shipUpgrades.excavator = { drill: 2, hold: 2, drive: 2 };
+  const perPoint = (typeId, fieldId) => {
+    const plan = getTripPlan(state, typeId, fieldId);
+    const credits = getShipStats(state, typeId).cargoCapacity * ITEMS[FIELDS[fieldId].yields].sellPrice;
+    return credits * (HOUR_MS / plan.durationMs) / HULL_SIZES[SHIP_TYPES[typeId].size].commandPoints;
+  };
+  const ratio = perPoint("deep_core_barge", "deep_core") / perPoint("excavator", "outer_belt");
+  assert.ok(ratio > 1.2 && ratio < 1.3, `barge earns ${ratio.toFixed(2)}x an Excavator per point`);
+});
+
+test("Old saves: an Excavator mining the Ice moon finishes its trip, then docks and points at a field it can work", () => {
+  // Why: before 4 Nov nothing stopped this. Taking the ore away or
+  // stopping mid-trip would cost players something; finishing the
+  // trip and then docking costs nothing.
+  const [state, excavatorId] = gameWithShip(20, "excavator");
+  state.exploration.surveyed.ice_moon = true;
+  // Fake the old save: start it on the Inner Belt, then switch it to the moon
+  const job = startMiningJob(state, excavatorId, "inner_belt", START);
+  job.fieldId = "ice_moon";
+  state.ships.find((s) => s.id === excavatorId).destination = "ice_moon";
+  processJobs(state, START + job.durationMs);
+  assert.equal(state.inventory.ice, job.orePerTrip);                     // the haul still counts
+  assert.ok(!getJobForShip(state, excavatorId), "docked, not going round again");
+  assert.equal(state.ships.find((s) => s.id === excavatorId).destination, "inner_belt");
+});
+
+test("Charters: no deep-core charter without a barge to lend, and an Excavator can't take an Ice moon charter", () => {
+  // Why: a charter you can't possibly fill would sit on the board
+  // forever, and lending the wrong hull would never deliver.
+  const state = gameWithBoard();
+  state.skills.mining.xp = XP_TABLE[30];
+  state.exploration.surveyed.ice_moon = true;
+  const fields = getSubjects(state, "mining_charter", true).map((s) => s.fieldId);
+  assert.ok(!fields.includes("deep_core"), "only Prospectors owned: no deep-core charters");
+  assert.ok(fields.includes("ice_moon"));
+  state.credits = 10_000_000;
+  state.commandUpgrades = 10;
+  const excavator = buyShip(state, "excavator");
+  forceCharter(state, "ice_moon", 200);
+  const check = canCharter(state, 0, excavator.id);
+  assert.equal(check.ok, false);
+  assert.match(check.reason, /small hulls only/);
+  assert.equal(canCharter(state, 0, "ship-1").ok, true);                  // a Prospector can
+});
+
+test("Trips readout: a barge's table lists only the fields its hull can work", () => {
+  // Why: showing an Excavator's earnings on the Ice moon would
+  // promise money it can never make. (The belts are open to every
+  // hull, so they stay on every barge's table.)
+  const state = newGame();
+  const excavator = tripTable(state, "excavator");
+  assert.doesNotMatch(excavator, /data-field="ice_moon"/);
+  assert.doesNotMatch(excavator, /data-field="deep_core"/);
+  assert.match(excavator, /data-field="outer_belt"/);
+  const barge = tripTable(state, "deep_core_barge");
+  assert.match(barge, /data-field="deep_core" class="locked"/);          // shut until Mining 30
+  assert.match(barge, /data-field="inner_belt"/);                        // belts: any hull
+  assert.doesNotMatch(barge, /data-field="ice_moon"/);
+});
+
+test("Art: the Deep-core barge has a drawing with a marker on its drill, hold and drive", () => {
+  // Why: every hull is drawn by name; a missing one leaves a blank card.
+  const html = getShipArt("hull_deep_core_barge", { drill: 0, hold: 0, drive: 0 });
+  assert.match(html, /<svg/);
+  assert.equal((html.match(/class="hardpoint /g) || []).length, 3);     // drill, hold and drive
 });
 
 // -------------------------------------------------------------

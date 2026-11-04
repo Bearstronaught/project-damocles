@@ -68,7 +68,7 @@
 
 import { FIELDS, SHIP_TYPES, ITEMS, HUB, FLEET_XP_EXPONENT, HULL_SIZES } from "../data/content.js";
 import { addItem, findShip } from "./state.js";
-import { addXp, isFieldUnlocked } from "./skills.js";
+import { addXp, isFieldUnlocked, canHullWorkField, getFirstFieldFor } from "./skills.js";
 import { sellAtHub } from "./trade.js";
 import { startWaitingBatches, finishBatch } from "./refinery.js";
 import { startWaitingOrders, finishWorkshopBatch } from "./workshop.js";
@@ -111,7 +111,12 @@ export function getTripPlan(state, shipTypeId, fieldId, grades) {
   const travelMs = Math.round((field.travelSeconds / stats.speed) * 1000);
 
   // Mining: minutes to fill the hold = cargo ÷ (tonnes per minute).
-  const miningMs = Math.round((stats.cargoCapacity / stats.miningRate) * 60 * 1000);
+  // The field's hardness slows the drill (Dan, 4 Nov): the deep
+  // core's 0.5 means half the tonnes per minute, so twice as long.
+  // Drill upgrades and the level perk are already in miningRate, so
+  // on hard rock they save the most time.
+  const drillRate = stats.miningRate * field.hardness;
+  const miningMs = Math.round((stats.cargoCapacity / drillRate) * 60 * 1000);
 
   // Unloading a full hold at home.
   const unloadMs = getLoadMs(shipTypeId, stats.cargoCapacity);
@@ -249,6 +254,12 @@ export function startMiningJob(state, shipId, fieldId, now) {
 
   // Only mining ships can mine.
   if (SHIP_TYPES[ship.type].role !== "mining") {
+    return null;
+  }
+
+  // ...and only at a field its hull can work (surface fields are
+  // small hulls only, deep-core fields large and up).
+  if (!canHullWorkField(ship.type, fieldId)) {
     return null;
   }
 
@@ -953,6 +964,19 @@ function runEvent(state, job, time) {
       newLevels = addXp(state, "mining", xp);
       // The running total of ore mined at each field
       state.stats.mined[job.fieldId] = (state.stats.mined[job.fieldId] || 0) + amount;
+    }
+
+    // A hull that can't work this field any more docks instead of
+    // going round again. This only happens to saves from before
+    // the hull rules (4 Nov): an Excavator that was mining the Ice
+    // moon finishes the trip it was on - nothing is lost - then
+    // stays home to be sent somewhere it can work.
+    const ship = findShip(state, job.shipId);
+    const mustDock = job.repeat && !canHullWorkField(ship.type, job.fieldId);
+    if (mustDock) {
+      job.repeat = false;
+      // Point it at a field it CAN work, so Dispatch just works.
+      ship.destination = getFirstFieldFor(state, ship.type);
     }
 
     if (job.repeat) {

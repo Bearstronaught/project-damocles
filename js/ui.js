@@ -22,7 +22,7 @@ import { isOwned, canBuyIndustryUpgrade, getUpgradeLines } from "./upgrades.js";
 import { gameNow, SPEEDS } from "./clock.js";
 import { getShipStats, getHullParts, getPartGrade, getPartBonus, getNextUpgrade, canBuyShipUpgrade, getUpgradeName, getHullShortName, findUpgrade, getBonusUpTo, getShipGrades, getPendingRefits } from "./ship-upgrades.js";
 import { getJobForShip, getJobPhase, getTripPlan, getHaulPlan, getOreInHold, getMiningXpShare } from "./jobs.js";
-import { getLevel, getLevelProgress, isShipTypeUnlocked, isFieldUnlocked, getFieldRequirement, getMiningDrillPerk, getTradeHubPerk, getLevelPerk } from "./skills.js";
+import { getLevel, getLevelProgress, isShipTypeUnlocked, isFieldUnlocked, getFieldRequirement, getMiningDrillPerk, getTradeHubPerk, getLevelPerk, canHullWorkField, getHullRuleText } from "./skills.js";
 import { canBuyShip, canSellShip, getSellValue, getShipPrice, MAX_NAME_LENGTH } from "./shipyard.js";
 import { getShipPoints, getCommandCapacity, getCommandUsed, getNextUpgradeCost, canBuyUpgrade } from "./command.js";
 import { getCargoValue, getTradeXp } from "./trade.js";
@@ -742,7 +742,12 @@ export function tripTable(state, typeId) {
 // whether to grey out fields the player can't mine yet (the
 // Shipyard does; the Fleet and Command cards never did).
 function minerTripTable(state, typeId, grades, dimLocked) {
-  const fieldRows = Object.entries(FIELDS).map(([fieldId, field]) => {
+  // Only fields this hull can work at all (hull rules, 4 Nov): an
+  // Excavator's table has no Ice moon or deep core, and a Deep-core
+  // barge's has only the deep core. A field that's merely not open
+  // YET still shows, dimmed, as something to aim for.
+  const workable = Object.entries(FIELDS).filter(([fieldId]) => canHullWorkField(typeId, fieldId));
+  const fieldRows = workable.map(([fieldId, field]) => {
     const plan = getTripPlan(state, typeId, fieldId, grades);
     const price = ITEMS[field.yields].sellPrice;
     const tripsPerHour = (60 * 60 * 1000) / plan.durationMs;   // 1 hour in ms / one trip in ms
@@ -2111,8 +2116,14 @@ function renderFleet(state, now) {
     const select = part(card, "dest");
     for (const option of select.options) {
       const field = FIELDS[option.value];
-      const unlocked = isFieldUnlocked(state, option.value);
-      const label = unlocked ? field.name : `${field.name} (${fieldNeeds(option.value)})`;
+      // A field this hull can't work (hull rules, 4 Nov) is greyed
+      // out with the reason, e.g. "Ice moon (small hulls only)".
+      // That reason wins over a level, since no level fixes it.
+      const hullOk = canHullWorkField(ship.type, option.value);
+      const unlocked = hullOk && isFieldUnlocked(state, option.value);
+      let label = field.name;
+      if (!hullOk) label = `${field.name} (${getHullRuleText(option.value)})`;
+      else if (!unlocked) label = `${field.name} (${fieldNeeds(option.value)})`;
       if (option.textContent !== label) option.textContent = label;
       if (option.disabled === unlocked) option.disabled = !unlocked;
     }

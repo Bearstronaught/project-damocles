@@ -160,10 +160,13 @@ export function getPendingRefits(state, ship) {
 
 // -------------------------------------------------------------
 // getHullShortName(hullId)
-// "Prospector-class barge" -> "Prospector", for upgrade names.
+// "Prospector-class barge" -> "Prospector", for upgrade names and
+// buttons. A ship can spell its own out with "shortName" in
+// content.js, when the first word won't do ("Deep-core barge"
+// would come out as just "Deep").
 // -------------------------------------------------------------
 export function getHullShortName(hullId) {
-  return SHIP_TYPES[hullId].name.split("-")[0];
+  return SHIP_TYPES[hullId].shortName || SHIP_TYPES[hullId].name.split("-")[0];
 }
 
 // -------------------------------------------------------------
