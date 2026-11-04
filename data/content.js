@@ -276,6 +276,12 @@ export const ROLES = {
 //                  (mining time = cargo / rate). Freighters have none.
 //   speed          how fast the drive is, as a multiplier:
 //                  1.0 = normal, 0.75 = takes a third longer
+//   miningXp       (optional, mining ships) scales the Mining XP
+//                  this hull earns, 1 if not set. The Excavator and
+//                  Deep-core barge are 0.25, so big hulls earn
+//                  little XP on the old belts and their XP comes
+//                  from the rich fields, whose XP per tonne is set
+//                  to make up for it (Dan, 4 Nov)
 //   (resale        what it sells for if it has no shop price.
 //                  No ship uses this at the moment.)
 //

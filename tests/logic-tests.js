@@ -4443,6 +4443,43 @@ test("Art: the Deep-core barge has a drawing with a marker on its drill, hold an
   assert.equal((html.match(/class="hardpoint /g) || []).length, 3);     // drill, hold and drive
 });
 
+test("Per-hull Mining XP: the Excavator and barge earn a quarter, the Prospector is unchanged", () => {
+  // Why: the agreed XP cut (Dan, 4 Nov) is on the big hulls, so the
+  // first 3 hours, carried by Prospectors, stay exactly as they were.
+  const state = newGame();
+  const xp = (typeId, fieldId) => getTripPlan(state, typeId, fieldId).xpPerTrip;
+  const hold = (typeId) => getShipStats(state, typeId).cargoCapacity;
+  assert.equal(xp("prospector", "outer_belt"), hold("prospector") / FIELDS.outer_belt.tonnesPerXp);
+  assert.equal(xp("excavator", "outer_belt"), hold("excavator") / FIELDS.outer_belt.tonnesPerXp * 0.25);
+  assert.equal(xp("deep_core_barge", "deep_core"), hold("deep_core_barge") / FIELDS.deep_core.tonnesPerXp * 0.25);
+  // The XP a finished trip actually adds matches the plan, times the
+  // fleet rule: an Excavator out alone is 2 command points working,
+  // so it keeps 2 ^ (0.4 - 1), about 66%, of its trip's XP
+  state.skills.mining.xp = XP_TABLE[15];
+  state.credits = 1_000_000;
+  const excavator = buyShip(state, "excavator");
+  const before = state.skills.mining.xp;
+  const job = startMiningJob(state, excavator.id, "inner_belt", START);
+  processJobs(state, START + job.durationMs);
+  const share = 2 ** (BALANCE.fleetXpExponent - 1);
+  assert.ok(Math.abs((state.skills.mining.xp - before) - hold("excavator") / FIELDS.inner_belt.tonnesPerXp * 0.25 * share) < 1e-9);
+});
+
+test("Per-hull Mining XP: a Deep-core barge earns more XP per hour on the deep core than on any belt", () => {
+  // Why: the simulator found barges farming the Outer Belt for XP and
+  // leaving the deep core empty. Each big hull's best XP should be on
+  // the field kept for its size.
+  const state = newGame();
+  state.skills.mining.xp = XP_TABLE[30];
+  const perHour = (fieldId) => {
+    const plan = getTripPlan(state, "deep_core_barge", fieldId);
+    return plan.xpPerTrip * (HOUR_MS / plan.durationMs);
+  };
+  for (const belt of ["inner_belt", "outer_belt"]) {
+    assert.ok(perHour("deep_core") > perHour(belt), `deep core ${Math.round(perHour("deep_core"))} XP/h vs ${belt} ${Math.round(perHour(belt))}`);
+  }
+});
+
 // -------------------------------------------------------------
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) {

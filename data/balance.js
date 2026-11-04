@@ -23,16 +23,16 @@ export const BALANCE = {
   },
   ships: {
     prospector: { role: 'mining', size: 'small', skill: 'mining', unlockLevel: 1, cost: 5000, cargoCapacity: 120, miningRate: 120, speed: 1 },
-    excavator: { role: 'mining', size: 'medium', skill: 'mining', unlockLevel: 15, cost: 60000, cargoCapacity: 480, miningRate: 240, speed: 0.75 },
+    excavator: { role: 'mining', size: 'medium', skill: 'mining', unlockLevel: 15, cost: 60000, cargoCapacity: 480, miningRate: 240, speed: 0.75, miningXp: 0.25 },
     courier: { role: 'freight', size: 'small', skill: 'trade', unlockLevel: 1, cost: 50000, cargoCapacity: 600, speed: 1 },
     pathfinder: { role: 'scout', size: 'small', skill: 'exploration', unlockLevel: 1, cost: 2000, cargoCapacity: 0, speed: 1.25 },
-    deep_core_barge: { role: 'mining', size: 'large', skill: 'mining', unlockLevel: 30, cost: 500000, cargoCapacity: 1200, miningRate: 400, speed: 0.6 },
+    deep_core_barge: { role: 'mining', size: 'large', skill: 'mining', unlockLevel: 30, cost: 500000, cargoCapacity: 1200, miningRate: 400, speed: 0.6, miningXp: 0.25 },
   },
   fields: {
     inner_belt: { yields: 'iron_ore', travelSeconds: 45, tonnesPerXp: 6, unlockLevel: 1, survey: null, hardness: 1, hulls: null },
     outer_belt: { yields: 'nickel_ore', travelSeconds: 90, tonnesPerXp: 3, unlockLevel: 5, survey: null, hardness: 1, hulls: null },
     ice_moon: { yields: 'ice', travelSeconds: 120, tonnesPerXp: 4, unlockLevel: 1, survey: 'ice_moon', hardness: 1, hulls: ['small'] },
-    deep_core: { yields: 'osmiridium', travelSeconds: 180, tonnesPerXp: 1, unlockLevel: 30, survey: null, hardness: 0.5, hulls: ['large', 'capital'] },
+    deep_core: { yields: 'osmiridium', travelSeconds: 180, tonnesPerXp: 0.35, unlockLevel: 30, survey: null, hardness: 0.5, hulls: ['large', 'capital'] },
   },
   recipes: {
     iron_bar: { unlockLevel: 1, inputs: { iron_ore: 60 }, output: 'iron_bar', outputAmount: 30, seconds: 60, xp: 8 },

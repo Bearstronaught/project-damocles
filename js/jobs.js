@@ -97,6 +97,24 @@ export function getLoadMs(shipTypeId, tonnes) {
 
 
 // -------------------------------------------------------------
+// getMiningXp(shipTypeId, fieldId, tonnes)
+// Mining XP for bringing home this many tonnes, before the fleet
+// share. The field sets the base (1 XP per tonnesPerXp tonnes),
+// and the HULL can scale it with miningXp (Ships tab, default 1).
+//   e.g. 480 t of nickel ore (3 t per XP) = 160 XP,
+//        x 0.5 for a hull with miningXp 0.5 = 80 XP
+// Why per hull (Dan, 4 Nov): the first 3 hours stay as they are,
+// and Prospectors use the Outer Belt from about 49 minutes in, so
+// the XP cut for later levels goes on the Excavator (2h43 onwards)
+// rather than on the field.
+// -------------------------------------------------------------
+export function getMiningXp(shipTypeId, fieldId, tonnes) {
+  const hullFactor = SHIP_TYPES[shipTypeId].miningXp ?? 1;   // "??" = use 1 if it isn't set
+  return (tonnes / FIELDS[fieldId].tonnesPerXp) * hullFactor;
+}
+
+
+// -------------------------------------------------------------
 // getTripPlan(state, shipTypeId, fieldId)
 // Works out one mining trip for a ship of this type, using its
 // stats RIGHT NOW (upgrades and the Mining level perk included -
@@ -128,7 +146,7 @@ export function getTripPlan(state, shipTypeId, fieldId, grades) {
     unloadMs: unloadMs,
     durationMs: travelMs + miningMs + travelMs + unloadMs,
     orePerTrip: stats.cargoCapacity,
-    xpPerTrip: stats.cargoCapacity / field.tonnesPerXp,   // e.g. 120 t ÷ 10 = 12 XP
+    xpPerTrip: getMiningXp(shipTypeId, fieldId, stats.cargoCapacity),   // e.g. 120 t ÷ 6 = 20 XP
   };
 }
 
@@ -948,7 +966,7 @@ function runEvent(state, job, time) {
     const amount = job.amountOverride ?? job.orePerTrip;
     // Full XP for the ore, times this ship's share of the fleet's XP.
     // Worked out BEFORE a recalled ship leaves the job list below.
-    const xp = (amount / field.tonnesPerXp) * getMiningXpShare(state);
+    const xp = getMiningXp(findShip(state, job.shipId).type, job.fieldId, amount) * getMiningXpShare(state);
     delete job.amountOverride;
 
     let newLevels = [];
