@@ -102,7 +102,6 @@ export function setupUI(state, actions) {
 
   buildCargoTable(actions);
   buildFleetViews(state, actions);
-  buildShipyard(actions);
   buildSkillCards();
   buildRefinery(actions);
   buildWorkshop(actions);
@@ -642,23 +641,6 @@ function statsList(state, typeId, grades) {
   // The drill's bonus includes the Mining level perk.
   const drillBonus = bonusOf("drill") + getMiningDrillPerk(state);
 
-  // One row per field: trip length, income and XP per hour.
-  // data-field lets render() dim the fields that are locked.
-  const fieldRows = Object.entries(FIELDS).map(([fieldId, field]) => {
-    const plan = getTripPlan(state, typeId, fieldId, grades);
-    const price = ITEMS[field.yields].sellPrice;
-    const tripsPerHour = (60 * 60 * 1000) / plan.durationMs;
-
-    return `
-      <tr data-field="${fieldId}">
-        <td>${field.name}</td>
-        <td>${formatDuration(plan.durationMs)}</td>
-        <td class="stat-hot">${formatNumber(plan.orePerTrip * price * tripsPerHour)}</td>
-        <td>${formatNumber(plan.xpPerTrip * tripsPerHour)}</td>
-      </tr>
-    `;
-  }).join("");
-
   // <dl> is a "description list": pairs of label (dt) and value (dd).
   return `
     <div class="stat-block">
@@ -669,12 +651,7 @@ function statsList(state, typeId, grades) {
         <dt>Drive speed</dt>  <dd>${formatSpeed(stats.speed)}${bonusTag(bonusOf("drive"))}</dd>
         <dt>Unloading</dt>    <dd>${HULL_SIZES[shipType.size].loadingRate} t/s</dd>
       </dl>
-      <table class="trip-table">
-        <thead>
-          <tr><th>Field</th><th>Trip</th><th>cr/h</th><th>XP/h</th></tr>
-        </thead>
-        <tbody>${fieldRows}</tbody>
-      </table>
+      ${minerTripTable(state, typeId, grades, false)}
     </div>
   `;
 }
@@ -696,19 +673,6 @@ function freighterStats(state, typeId, grades) {
     : getPartBonus(state, typeId, partId);
   const perk = getTradeHubPerk(state);
 
-  const oreRows = Object.entries(ITEMS).map(([itemId, item]) => {
-    const hubCredits = Math.round(plan.capacity * item.hubPrice * (1 + perk));
-    const homeCredits = plan.capacity * item.sellPrice;
-    return `
-      <tr>
-        <td><span class="tip-item" data-tip-item="${itemId}">${item.name}</span></td>
-        <td class="stat-hot">${formatNumber(hubCredits)}</td>
-        <td>+${formatNumber(hubCredits - homeCredits)}</td>
-        <td>${formatXp(getTradeXp(plan.capacity, HUB.travelSeconds))}</td>
-      </tr>
-    `;
-  }).join("");
-
   return `
     <div class="stat-block">
       <dl class="stats">
@@ -719,12 +683,7 @@ function freighterStats(state, typeId, grades) {
         <dt>Hub run</dt>      <dd>${formatDuration(plan.durationMs)} round trip</dd>
         <dt>Hub prices</dt>   <dd>${perk > 0 ? bonusTag(perk).trim() + " (Trade level)" : "Base"}</dd>
       </dl>
-      <table class="trip-table">
-        <thead>
-          <tr><th>Full load of</th><th>cr</th><th>vs home</th><th>XP</th></tr>
-        </thead>
-        <tbody>${oreRows}</tbody>
-      </table>
+      ${freighterTripTable(state, typeId, grades)}
     </div>
   `;
 }
@@ -758,6 +717,112 @@ function scoutStats(state, typeId, grades) {
         <dt>Deep scan</dt>    <dd>${formatDuration(deep.durationMs)} · ${formatXp(deep.xp)} XP</dd>
       </dl>
     </div>
+  `;
+}
+
+
+// -------------------------------------------------------------
+// tripTable(state, typeId)
+// The Shipyard's Trips readout (Dan, 4 Nov): what one trip of
+// this hull does, as a small table, with its current components.
+// Which table depends on the hull's job:
+//   mining ship  one row per field: trip time, cr/h and XP/h
+//   freighter    one row per kind of goods: a full load's value
+//   scout        one row per survey target, then the deep scan
+// Fields and targets you can't use yet are dimmed ("locked").
+// -------------------------------------------------------------
+export function tripTable(state, typeId) {
+  const role = SHIP_TYPES[typeId].role;
+  if (role === "freight") return freighterTripTable(state, typeId);
+  if (role === "scout") return scoutTripTable(state, typeId);
+  return minerTripTable(state, typeId, undefined, true);
+}
+
+// A mining ship's table: one row per field. "dimLocked" says
+// whether to grey out fields the player can't mine yet (the
+// Shipyard does; the Fleet and Command cards never did).
+function minerTripTable(state, typeId, grades, dimLocked) {
+  const fieldRows = Object.entries(FIELDS).map(([fieldId, field]) => {
+    const plan = getTripPlan(state, typeId, fieldId, grades);
+    const price = ITEMS[field.yields].sellPrice;
+    const tripsPerHour = (60 * 60 * 1000) / plan.durationMs;   // 1 hour in ms / one trip in ms
+    const locked = dimLocked && !isFieldUnlocked(state, fieldId);
+
+    return `
+      <tr data-field="${fieldId}"${locked ? ' class="locked"' : ""}>
+        <td>${field.name}</td>
+        <td>${formatDuration(plan.durationMs)}</td>
+        <td class="stat-hot">${formatNumber(plan.orePerTrip * price * tripsPerHour)}</td>
+        <td>${formatNumber(plan.xpPerTrip * tripsPerHour)}</td>
+      </tr>
+    `;
+  }).join("");
+
+  return `
+    <table class="trip-table">
+      <thead>
+        <tr><th>Field</th><th>Trip</th><th>cr/h</th><th>XP/h</th></tr>
+      </thead>
+      <tbody>${fieldRows}</tbody>
+    </table>
+  `;
+}
+
+// A freighter's table: what ONE full hold of each kind of goods
+// earns at the hub (Trade perk included), and how much more that
+// is than selling the same load at home.
+function freighterTripTable(state, typeId, grades) {
+  const plan = getHaulPlan(state, typeId, undefined, grades);
+  const perk = getTradeHubPerk(state);
+
+  const goodsRows = Object.entries(ITEMS).map(([itemId, item]) => {
+    const hubCredits = Math.round(plan.capacity * item.hubPrice * (1 + perk));
+    const homeCredits = plan.capacity * item.sellPrice;
+    return `
+      <tr>
+        <td><span class="tip-item" data-tip-item="${itemId}">${item.name}</span></td>
+        <td class="stat-hot">${formatNumber(hubCredits)}</td>
+        <td>+${formatNumber(hubCredits - homeCredits)}</td>
+        <td>${formatXp(getTradeXp(plan.capacity, HUB.travelSeconds))}</td>
+      </tr>
+    `;
+  }).join("");
+
+  return `
+    <table class="trip-table">
+      <thead>
+        <tr><th>Full load of</th><th>cr</th><th>vs home</th><th>XP</th></tr>
+      </thead>
+      <tbody>${goodsRows}</tbody>
+    </table>
+  `;
+}
+
+// A scout's table: each survey target not yet done (dimmed if
+// its level or the survey before it isn't reached), then the
+// deep scan, which is always there.
+function scoutTripTable(state, typeId) {
+  const rows = [];
+  for (const targetId of getAllTargetIds()) {
+    const status = getTargetStatus(state, targetId);
+    if (status === "surveyed") continue;            // done: no trip left to show
+    const plan = getScoutPlan(state, typeId, targetId);
+    rows.push(`
+      <tr${status === "locked" ? ' class="locked"' : ""}>
+        <td>${getTarget(targetId).name}</td>
+        <td>${formatDuration(plan.durationMs)}</td>
+        <td>${formatXp(plan.xp)}</td>
+      </tr>
+    `);
+  }
+
+  return `
+    <table class="trip-table">
+      <thead>
+        <tr><th>Target</th><th>Trip</th><th>XP</th></tr>
+      </thead>
+      <tbody>${rows.join("")}</tbody>
+    </table>
   `;
 }
 
@@ -1651,48 +1716,6 @@ function buildStationHold(actions) {
 
 
 // -------------------------------------------------------------
-// buildShipyard(actions)
-// One card per ship TYPE. Ship types come from content.js and
-// don't change while playing, so this only runs once.
-// -------------------------------------------------------------
-function buildShipyard(actions) {
-  const list = byId("shipyard-list");
-  list.innerHTML = "";
-
-  // Object.entries gives pairs: ["excavator", { name: ... }]
-  for (const [typeId, shipType] of Object.entries(SHIP_TYPES)) {
-    const skillName = SKILLS[shipType.skill].name;
-
-    const card = document.createElement("div");
-    card.className = "yard-card";
-    card.id = "yard-" + typeId;
-    card.innerHTML = `
-      <div class="card-header">
-        <span class="card-name">${shipType.name}</span>
-        <span class="card-tag" data-part="tag"></span>
-      </div>
-      <div class="yard-art" data-art="${typeId}"></div>
-      <p class="ship-desc">${shipType.description}</p>
-      ${statsBox(typeId)}
-      <dl class="stats stats-yard">
-        <dt>Requires</dt>  <dd>${skillName} level ${shipType.unlockLevel}${shipType.unlockAfter ? " · first ore sold" : ""}</dd>
-        <dt>Next one</dt>  <dd data-part="price"></dd>
-        <dt>Owned</dt>     <dd data-part="owned">0</dd>
-      </dl>
-      <div class="yard-note" data-part="note"></div>
-      <button class="btn btn-primary" data-part="button"></button>
-    `;
-
-    part(card, "button").addEventListener("click", () => {
-      actions.buyShip(typeId);
-    });
-
-    list.appendChild(card);
-  }
-}
-
-
-// -------------------------------------------------------------
 // buildSkillCards()
 // One card per skill, each with an XP bar and its unlock list
 // (ships AND fields, in level order).
@@ -2482,65 +2505,24 @@ function renderCommand(state) {
 // What renderShipyard found you can afford, for the Shipyard dot.
 let lastAffordableShips = {};
 
-// Each ship type on the Ships screen
+// The Shipyard screen's share of render(). The hull tiles that
+// used to sit under the build cradle were removed (Dan, 4 Nov):
+// the cradle's readouts show all of it. What's left here:
+//   - which hulls you can afford right now, for the Shipyard nav
+//     dot (this was worked out while filling the tiles, so it is
+//     kept on purpose, or the dot would quietly stop working)
+//   - the note under the hull picker about hulls still locked
 function renderShipyard(state) {
   // Ships you could buy right now, as { prospector: 12800 } (the
   // price matters: buying one raises the next one's price, which
   // counts as something new to tell you about).
   const affordable = {};
 
-  for (const [typeId, shipType] of Object.entries(SHIP_TYPES)) {
-    const card = byId("yard-" + typeId);
-    const tag = part(card, "tag");
-    const note = part(card, "note");
-    const button = part(card, "button");
-
-    // How many of this type the player has.
-    const count = state.ships.filter((ship) => ship.type === typeId).length;
-    part(card, "owned").textContent = count;
-
-    const unlocked = isShipTypeUnlocked(state, typeId);
-    const check = canBuyShip(state, typeId);
-
-    // Locked ships are hidden until the skill level is reached.
-    // (Their unlock still shows on the Skills screen.)
-    card.hidden = !unlocked;
-    if (!unlocked) {
-      continue;
-    }
-
-    // Dim field rows the player can't use yet
-    for (const fieldRow of card.querySelectorAll("tr[data-field]")) {
-      fieldRow.classList.toggle("locked", !isFieldUnlocked(state, fieldRow.dataset.field));
-    }
-
-    // The price of the NEXT one: it rises with each one you own.
-    const price = getShipPrice(state, typeId);
-    part(card, "price").textContent = price === null ? "Not sold" : formatNumber(price) + " cr";
-
-    // Pick the tag, note and button text for each situation.
-    if (shipType.cost === null) {
-      tag.textContent = "Starter";
-      note.textContent = "Your first barge. Not sold at this yard.";
-      button.hidden = true;
-      continue;
-    }
-
-    button.hidden = false;
-    button.disabled = !check.ok;
-    button.textContent = `Buy — ${formatNumber(price)} cr`;
-
-    // (Locked ships were skipped above, so they never get here.)
-    if (check.reason === "Not enough command points") {
-      tag.textContent = "Available";
-      note.textContent = `Needs ${getShipPoints(typeId)} command points; you have ${getCommandCapacity(state) - getCommandUsed(state)} free. Expand command or sell a ship.`;
-    } else if (check.reason === "Not enough credits") {
-      tag.textContent = "Available";
-      note.textContent = `Need ${formatNumber(price - state.credits)} more cr.`;
-    } else {
-      tag.textContent = "Available";
-      note.textContent = `Ready to buy. New ships dock at ${HOME.name}, awaiting orders.`;
-      affordable[typeId] = price;
+  for (const typeId of Object.keys(SHIP_TYPES)) {
+    // canBuyShip checks everything at once: unlocked, for sale,
+    // enough credits and enough free command points.
+    if (canBuyShip(state, typeId).ok) {
+      affordable[typeId] = getShipPrice(state, typeId);
     }
   }
 
@@ -2553,7 +2535,7 @@ function renderShipyard(state) {
   const lockedCount = Object.keys(SHIP_TYPES).filter((typeId) => !isShipTypeUnlocked(state, typeId)).length;
   byId("shipyard-note").textContent = lockedCount === 0
     ? "Every ship type is unlocked."
-    : `${lockedCount} more ship type${lockedCount === 1 ? "" : "s"} unlock as your skills level up. See Skills for what's next.`;
+    : `${lockedCount} more ship type${lockedCount === 1 ? " unlocks" : "s unlock"} as your skills level up. See Skills for what's next.`;
 }
 
 

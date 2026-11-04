@@ -681,10 +681,9 @@ main {
 }
 
 
-/* ----- Cards (ships, shipyard, skills) ----- */
+/* ----- Cards (ships, skills) ----- */
 .ship-card,
 .owned-row,
-.yard-card,
 .skill-card {
   background: var(--panel-raised);
   border: 1px solid var(--line);
@@ -1102,31 +1101,10 @@ main {
   gap: 12px;
 }
 
-.yard-card {
-  display: flex;
-  flex-direction: column;
-}
-
 /* Skill cards open and close, so each keeps its own height
    (otherwise opening one stretches its neighbour to match). */
 #skills-list {
   align-items: start;
-}
-
-.yard-art {
-  margin: 10px auto 2px;
-  width: 70%;
-  max-width: 200px;
-}
-
-.yard-card.locked .card-tag {
-  color: var(--steel-dim);
-}
-
-/* Locked ship types are dimmed */
-.yard-card.locked .yard-art,
-.yard-card.locked .stats {
-  opacity: 0.5;
 }
 
 .yard-note {
@@ -1134,10 +1112,6 @@ main {
   color: var(--steel-dim);
   margin: 4px 0 10px;
   min-height: 1.5em;
-}
-
-.yard-card .btn {
-  margin-top: auto;           /* buttons line up at the bottom of each card */
 }
 
 
@@ -1169,14 +1143,6 @@ main {
   color: var(--amber);
   font-weight: 600;
 }
-
-/* The shipyard's second list (role, price...) sits under a rule */
-.stats-yard {
-  margin-top: 0;
-  padding-top: 8px;
-  border-top: 1px dashed var(--line-strong);
-}
-
 
 /* ----- Cargo panel ----- */
 .cargo-table {
@@ -3184,6 +3150,16 @@ body.nav-collapsed .nav-heading {
   .layout.layout-rail {
     grid-template-columns: minmax(0, 1fr);
   }
+
+  /* Shipyard (4 Nov): with the hull tiles gone, the only Build
+     button is in the readouts, so on a narrow screen they come
+     straight after the cradle, ahead of Ship components (which
+     grows with every hull you own). "display: contents" lets the
+     main column's panels take part in the page's own ordering. */
+  [data-screen="shipyard"] .main-col { display: contents; }
+  [data-screen="shipyard"] .viewscreen-shipyard { order: 1; }
+  [data-screen="shipyard"] .rail { order: 2; }
+  [data-screen="shipyard"] .sy-components { order: 3; }
 }
 
 
@@ -3918,6 +3894,42 @@ body.nav-collapsed .nav-heading {
   background: var(--ships-faint);
 }
 
+/* Ready to build (Dan, 4 Nov): you could build this hull right
+   now. Bright amber name with a glowing outline, so it stands out
+   from the dim buttons AND from the filled "picked" one. The glow
+   changes the button's shape as well as its colour, which helps
+   anyone who finds colours hard to tell apart. */
+.sy-pick.is-ready {
+  color: var(--amber);
+  border-color: var(--amber);
+  box-shadow: 0 0 6px rgba(255, 180, 58, 0.45), inset 0 0 4px rgba(255, 180, 58, 0.2);
+}
+/* Picked AND ready: stays filled (the Build button already says
+   it's ready), with a thin amber edge as a hint */
+.sy-pick.is-picked.is-ready {
+  color: var(--ships);
+  border-color: var(--amber);
+  box-shadow: none;
+}
+/* One short pulse the moment a hull becomes buildable */
+.sy-pick.is-fresh {
+  animation: sy-ready-pulse 0.9s ease-out 2;
+}
+@keyframes sy-ready-pulse {
+  0%   { box-shadow: 0 0 0 0 rgba(255, 180, 58, 0.7); }
+  100% { box-shadow: 0 0 0 10px rgba(255, 180, 58, 0); }
+}
+/* Players who turned on "reduce motion" get no pulse */
+@media (prefers-reduced-motion: reduce) {
+  .sy-pick.is-fresh { animation: none; }
+}
+
+/* The note under the picker about hulls still locked */
+.sy-picker-note { margin: -4px 14px 14px; }
+
+/* The Trips readout sits in a narrow column: keep it tight */
+#sy-trips .trip-table { margin-bottom: 0; }
+
 /* Readouts */
 .sy-card { border-color: var(--ships-dim); }
 .sy-desc { margin: 0 0 12px; font-size: 12px; line-height: 1.6; color: #a9bccb; }
@@ -3941,6 +3953,6 @@ body.nav-collapsed .nav-heading {
 @container (max-width: 640px) {
   .shipyard-view .sy-size { font-size: 28px; }
 }
-/* Hardpoint markers are sized for the small cards: in the cradle
-   they'd be big blobs, so they're left to the cards below */
+/* Hardpoint markers are sized for small drawings: in the cradle
+   they'd be big blobs, so they're left to the components menu */
 .shipyard-view .hardpoint { display: none; }

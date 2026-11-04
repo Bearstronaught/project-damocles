@@ -21,6 +21,21 @@
 // along the bottom (unlocked hulls only). The pick is remembered
 // in this browser, not the save: it's how they like the screen.
 //
+// PICKER STATES (Dan, 4 Nov). Each button can be:
+//   dim          not affordable yet
+//   is-ready     you could build one right now: bright amber name
+//                with a glowing outline, and one short pulse the
+//                moment it becomes buildable
+//   is-picked    the hull in the cradle: a solid filled button
+//                (filled wins if it's both; the Build button and
+//                Needed list already say it's ready)
+// "Ready" is also in each button's screen-reader label, so the
+// difference never rests on colour alone.
+//
+// TRIPS READOUT (Dan, 4 Nov). The trip table that used to sit on
+// the hull tiles below the cradle (removed) now sits in the
+// readouts, for the hull in the cradle.
+//
 // ART: today the cradle draws the code-drawn hulls from art.js,
 // looked up by name (hull_prospector and so on). When the bought
 // sprites can go on the public site, the same name can point at a
@@ -34,7 +49,7 @@ import { isShipTypeUnlocked } from "./skills.js";
 import { getShipPoints, getCommandFree } from "./command.js";
 import { getShipArt, getSchematic } from "./art.js";
 import { getHullGrades, getShipStats } from "./ship-upgrades.js";
-import { formatNumber, formatTonnes, formatSpeed } from "./ui.js";
+import { formatNumber, formatTonnes, formatSpeed, tripTable } from "./ui.js";
 import { make, setText } from "./svg.js";
 
 
@@ -93,6 +108,13 @@ export function defaultHull(state) {
   }
   return best;
 }
+
+// What the Trips table measures, shown beside its title
+const TRIP_TAGS = {
+  mining: "Round trip from home",
+  freight: "One full hold, sold at the hub",
+  scout: "Round trip, scan included",
+};
 
 // -------------------------------------------------------------
 // compareWith(typeId)
@@ -188,11 +210,16 @@ export function setupShipyardView(getState, actions) {
     needs: document.getElementById("sy-needs"),
     compareTag: document.getElementById("sy-compare-tag"),
     stats: document.getElementById("sy-stats"),
+    trips: document.getElementById("sy-trips"),
+    tripsTag: document.getElementById("sy-trips-tag"),
   };
   let picked = loadPick();
   const pickButtons = {};
   let lastNeeds = "";
   let lastStats = "";
+  let lastTrips = "";        // the trip table's HTML last time it was drawn
+  let tripsCheckedAt = 0;    // when (ms) the trip table was last worked out
+  const wasReady = {};       // each hull's "ready" state last frame, to spot the change
 
   els.build.addEventListener("click", () => {
     if (picked) actions.buyShip(picked);
@@ -217,13 +244,33 @@ export function setupShipyardView(getState, actions) {
         button.className = "sy-pick";
         button.textContent = SHIP_TYPES[typeId].name.split("-")[0];   // "Prospector-class barge" -> "Prospector"
         button.addEventListener("click", () => { picked = typeId; savePick(typeId); });
+        button.addEventListener("animationend", () => button.classList.remove("is-fresh"));
         els.picker.appendChild(button);
         pickButtons[typeId] = button;
       }
-      if (pickButtons[typeId]) {
-        pickButtons[typeId].hidden = !unlocked;
-        pickButtons[typeId].classList.toggle("is-picked", typeId === picked);
-        pickButtons[typeId].setAttribute("aria-pressed", String(typeId === picked));
+      const button = pickButtons[typeId];
+      if (button) {
+        button.hidden = !unlocked;
+        button.classList.toggle("is-picked", typeId === picked);
+        button.setAttribute("aria-pressed", String(typeId === picked));
+
+        // Could you build one right now? Same check as the Build
+        // button, so the picker and the button always agree.
+        const ready = unlocked && canBuyShip(state, typeId).ok;
+        button.classList.toggle("is-ready", ready);
+
+        // Just became ready: play the pulse once. The class comes
+        // off when the animation ends, so it can play again next
+        // time. (With reduced motion on, the CSS skips the pulse.)
+        if (ready && !wasReady[typeId]) {
+          button.classList.add("is-fresh");
+        }
+        wasReady[typeId] = ready;
+
+        // What a screen reader says: the name, plus "ready to build"
+        const shortName = SHIP_TYPES[typeId].name.split("-")[0];
+        const label = ready ? `${shortName}, ready to build` : shortName;
+        if (button.getAttribute("aria-label") !== label) button.setAttribute("aria-label", label);
       }
     }
 
@@ -303,6 +350,21 @@ export function setupShipyardView(getState, actions) {
       setText(els.compareTag, other ? `Per pt vs ${SHIP_TYPES[other].name.split("-")[0]}` : "With your components");
       els.stats.innerHTML = "";
       for (const [label, value] of stats) els.stats.appendChild(row(label, value, ""));
+    }
+
+    // ----- Trips: worked out at most twice a second (it only
+    //       changes with levels, components or a new pick), and
+    //       redrawn only when the table actually changes -----
+    const now = performance.now();
+    if (now - tripsCheckedAt > 500 || els.trips.dataset.hull !== picked) {
+      tripsCheckedAt = now;
+      const html = tripTable(state, picked);
+      if (html !== lastTrips || els.trips.dataset.hull !== picked) {
+        lastTrips = html;
+        els.trips.dataset.hull = picked;
+        els.trips.innerHTML = html;
+        setText(els.tripsTag, TRIP_TAGS[type.role] || TRIP_TAGS.mining);
+      }
     }
   }
   requestAnimationFrame(frame);

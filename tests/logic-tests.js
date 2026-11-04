@@ -4221,6 +4221,39 @@ test("Build cradle: it starts on the hull unlocked most recently", () => {
   assert.equal(defaultHull(state), "excavator");
 });
 
+// The Trips readout (Dan, 4 Nov): the trip table that used to sit
+// on the hull tiles, now in the Shipyard's readouts.
+const { tripTable } = await import("../js/ui.js");
+
+test("Trips readout: a mining ship's table dims fields you can't mine yet", () => {
+  // Why: the old tiles dimmed locked fields; the readout must too,
+  // or a new player would think they can already mine the Outer Belt.
+  const state = newGame();                                     // Mining 1: only the Inner Belt is open
+  const html = tripTable(state, "prospector");
+  assert.match(html, /<tr data-field="inner_belt">/);          // open: not dimmed
+  assert.match(html, /<tr data-field="outer_belt" class="locked">/);
+  state.skills.mining.xp = XP_TABLE[5];                        // the Outer Belt opens at Mining 5
+  assert.match(tripTable(state, "prospector"), /<tr data-field="outer_belt">/);
+});
+
+test("Trips readout: each job gets its own table", () => {
+  // Why: one table can't fit all three jobs; a freighter has no
+  // fields, and a scout's trips are surveys.
+  const state = newGame();
+  assert.match(tripTable(state, "prospector"), /<th>Field<\/th>/);
+  assert.match(tripTable(state, "courier"), /<th>Full load of<\/th>/);
+  assert.match(tripTable(state, "pathfinder"), /<th>Target<\/th>/);
+});
+
+test("Trips readout: a scout's table drops surveys already done, but always keeps the deep scan", () => {
+  const state = newGame();
+  assert.match(tripTable(state, "pathfinder"), /Inner Belt survey/);
+  state.exploration.surveyed.inner_belt_survey = true;
+  const html = tripTable(state, "pathfinder");
+  assert.doesNotMatch(html, /Inner Belt survey/);              // done: no trip left to show
+  assert.match(html, /Deep scan/);                             // never runs out
+});
+
 // -------------------------------------------------------------
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) {
