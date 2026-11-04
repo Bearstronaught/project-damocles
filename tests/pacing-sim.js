@@ -11,15 +11,27 @@
 // (or --hours=24 for a whole day, --weeks=4 for a daily report
 // over 4 weeks: see the bottom of this file)
 //
-// The pretend player checks in once a minute and:
-//   1. sells all ore at home (no freighters this early)
-//   2. buys the cheapest useful thing it can afford: a ship
+// There are two pretend players.
+//
+// The REALISTIC player (the default since 4 Nov) plays the whole
+// game as built: freighters, the workshop, station upgrades, parts
+// for every hull, and swapping Prospectors for Excavators once
+// command points run out. Its habits live in tests/sim-player.js.
+//
+// The SIMPLE player (run with --simple) is the one the 3 Nov
+// balance check used, kept so old and new results can be compared.
+// It checks in once a minute and:
+//   1. sells all ore at home (no freighters)
+//   2. buys the cheapest useful thing it can afford: a Prospector
 //      component, another Prospector or an Excavator, or a command
 //      upgrade when there's no room for another Prospector
 //   3. sends every docked ship to the field with the most Mining
 //      XP per hour
 // Once the refinery opens it also keeps the refinery smelting
-// and sells the metal. No freighters or workshop yet.
+// and sells the metal. No freighters or workshop.
+//
+// Both hand in contracts, lend ships and refinery slots to them,
+// and buy and run a Pathfinder.
 // With "explore" on (the default), it buys one Pathfinder as soon
 // as it can and keeps it scouting (design doc, Early exploration);
 // every finished survey and Exploration level is printed too.
@@ -31,7 +43,7 @@
 // It's simpler than a real player, so treat its times as a guide.
 // =============================================================
 
-import { FIELDS, SHIP_UPGRADES, REFINERY, RECIPES } from "../data/content.js";
+import { FIELDS, SHIP_UPGRADES, REFINERY, RECIPES, SHIP_TYPES } from "../data/content.js";
 import { createNewGame } from "../js/state.js";
 import { advanceTo } from "../js/simulation.js";
 import { startMiningJob, getJobForShip, getTripPlan } from "../js/jobs.js";
@@ -48,6 +60,13 @@ import { startScoutJob, chooseNextTarget, getTarget, getReadySurveys, launchSurv
 import { canHandIn, handInContract, canCharter, charterShip, getCharter, canLendSlot, lendSlot } from "../js/contracts.js";
 const getCharterField = (state, shipId) => getCharter(state, shipId)?.fieldId;
 import { CONTRACT_KINDS } from "../data/content.js";
+import { startHaulJob } from "../js/jobs.js";
+// The realistic player's habits (4 Nov): see tests/sim-player.js
+import {
+  stockToKeep, sellAtHome, runRefinery, runWorkshop, extraShopping,
+  finishSwaps, shipsInSwaps, minerValuePerHour,
+  chooseMiningField, rebalanceMiners,
+} from "./sim-player.js";
 
 const MINUTE = 60 * 1000;
 const START = 1_000_000_000_000;
@@ -61,7 +80,12 @@ const START = 1_000_000_000_000;
 // "hourly" (optional) is called once an hour with a report:
 //   { hour, earned, nextShipPrice, freePoints, blockedBy }
 // -------------------------------------------------------------
-export function simulate(hours, untilMiningLevel, hourly = null, explore = true, surveyDelay = 0) {
+// "realistic" (true unless --simple) picks which pretend player plays.
+// "peek" (optional) is called every minute with (state, minute),
+// for one-off checks that need to see inside the game, such as
+// what's in the hold. It mustn't change anything.
+export function simulate(hours, untilMiningLevel, hourly = null, explore = true, surveyDelay = 0, realistic = true, peek = null) {
+  const swaps = [];   // Excavator swaps waiting for their Prospectors to dock
   const state = createNewGame();
   // A fixed seed, so deep scan finds and contracts come out the same
   // every run and two runs can be compared (each real save has its own).
@@ -79,6 +103,12 @@ export function simulate(hours, untilMiningLevel, hourly = null, explore = true,
   for (let minute = 0; minute <= hours * 60; minute++) {
     const now = START + minute * MINUTE;
     const report = advanceTo(state, now);
+    if (peek) peek(state, minute);
+
+    // Courier sales at Last Post count as income too (4 Nov)
+    for (const result of report.results) {
+      if (result.kind === "haul") earnedThisHour += result.credits || 0;
+    }
 
     // Surveys finished since last time (deep scans are routine)
     for (const result of report.results) {
@@ -169,19 +199,33 @@ export function simulate(hours, untilMiningLevel, hourly = null, explore = true,
     //    the game's own way to keep stock from being sold, starting
     //    one Mining level before the part unlocks so the bars are
     //    ready on time. Everything above the bond still sells.
+    // (The realistic player saves for every hull's parts and the
+    // station upgrades too, and leaves freighters a load: see
+    // stockToKeep and sellAtHome in sim-player.js. Then it skips
+    // the simple player's selling and smelting below.)
+    if (realistic) {
+      const saving = stockToKeep(state);
+      earnedThisHour += sellAtHome(state, saving, wanted);
+      for (const line of runRefinery(state, saving, now)) events.push({ minute, text: line });
+      for (const line of runWorkshop(state, saving, now)) events.push({ minute, text: line });
+    }
+
     const keep = {};                 // item -> tonnes to hold back
     for (const part of ["drill", "hold", "drive"]) {
+      if (realistic) break;          // the realistic player did its own above
       const next = SHIP_UPGRADES[`prospector_${part}_${getPartGrade(state, "prospector", part) + 1}`];
       if (!next || getLevel(state, "mining") < next.level - 1) continue;
       for (const [item, tonnes] of Object.entries(next.costs)) {
         keep[item] = (keep[item] || 0) + tonnes;
       }
     }
-    for (const itemId of Object.keys(RECIPES)) {   // the metal bars
-      setBond(state, itemId, keep[itemId] || 0);
-    }
-    for (const itemId of Object.keys(ITEMS)) {
-      if (!wanted.has(itemId)) earnedThisHour += sellAll(state, itemId).credits;
+    if (!realistic) {
+      for (const itemId of Object.keys(RECIPES)) {   // the metal bars
+        setBond(state, itemId, keep[itemId] || 0);
+      }
+      for (const itemId of Object.keys(ITEMS)) {
+        if (!wanted.has(itemId)) earnedThisHour += sellAll(state, itemId).credits;
+      }
     }
 
     // 1b. Keep every refinery slot smelting (once it's open).
@@ -191,7 +235,7 @@ export function simulate(hours, untilMiningLevel, hourly = null, explore = true,
     //     switches to nickel until there's enough, then back.
     const needNickel = (keep.nickel_bar || 0) > (state.inventory.nickel_bar || 0) &&
       isRecipeUnlocked(state, "nickel_bar") && isFieldUnlocked(state, "outer_belt");
-    for (let slot = 0; slot < getSlotCount(state); slot++) {
+    for (let slot = 0; slot < getSlotCount(state) && !realistic; slot++) {
       const current = getRefineJob(state, slot);
       let recipe = isRecipeUnlocked(state, "nickel_bar") && isFieldUnlocked(state, "outer_belt") && slot % 2 === 1
         ? "nickel_bar" : "iron_bar";
@@ -216,13 +260,34 @@ export function simulate(hours, untilMiningLevel, hourly = null, explore = true,
         miningXp: state.skills.mining.xp,         // for the long-run report (--weeks)
         credits: state.credits,
         blockedBy: check.ok ? "nothing" : check.reason,
+        // Added 4 Nov, so the long run shows every skill and the fleet mix
+        levels: {
+          refining: getLevel(state, "refining"),
+          manufacturing: getLevel(state, "manufacturing"),
+          trade: getLevel(state, "trade"),
+          exploration: getLevel(state, "exploration"),
+        },
+        fleet: {
+          prospector: state.ships.filter((s) => s.type === "prospector").length,
+          excavator: state.ships.filter((s) => s.type === "excavator").length,
+          courier: state.ships.filter((s) => s.type === "courier").length,
+        },
       });
       earnedThisHour = 0;
     }
 
     // 2. Buy the cheapest useful thing, repeatedly, while affordable
-    for (;;) {
-      const options = [];
+    //    (the realistic player first finishes any Excavator swap
+    //    whose Prospectors are home)
+    if (realistic) {
+      for (const line of finishSwaps(state, swaps)) events.push({ minute, text: line, goal: true });
+    }
+    // While a swap's Prospectors fly home, the player saves for
+    // the Excavator and buys nothing else (found 4 Nov: otherwise
+    // the money went on parts and the Excavator wasn't affordable
+    // when they landed).
+    for (; !(realistic && swaps.length > 0);) {
+      const options = realistic ? extraShopping(state, now, swaps) : [];
       for (const id of Object.keys(SHIP_UPGRADES)) {
         if (SHIP_UPGRADES[id].hull === "prospector" && canBuyShipUpgrade(state, id).ok) {
           options.push({ cost: SHIP_UPGRADES[id].credits, buy: () => buyShipUpgrade(state, id), text: "component " + id });
@@ -233,7 +298,19 @@ export function simulate(hours, untilMiningLevel, hourly = null, explore = true,
       if (canBuyShip(state, "excavator").ok) {
         options.push({ cost: getShipPrice(state, "excavator"), buy: () => buyShip(state, "excavator"), text: "Excavator" });
       }
-      if (canBuyShip(state, "prospector").ok) {
+      // The realistic player stops buying Prospectors once an
+      // Excavator earns more per command point (2 points) than a
+      // Prospector (1); before that, cheap Prospectors still win.
+      const excavatorsBetter = realistic &&
+        getLevel(state, "mining") >= SHIP_TYPES.excavator.unlockLevel &&
+        minerValuePerHour(state, "excavator") / 2 > minerValuePerHour(state, "prospector");
+      if (excavatorsBetter && getCommandFree(state) < 2 && canBuyUpgrade(state).ok) {
+        // Out of points with no Prospector to buy: a command upgrade
+        // makes room for the next Excavator.
+        options.push({ cost: getNextUpgradeCost(state), buy: () => buyUpgrade(state), text: "command upgrade" });
+      } else if (excavatorsBetter) {
+        // (no Prospectors on the list)
+      } else if (canBuyShip(state, "prospector").ok) {
         options.push({ cost: getShipPrice(state, "prospector"), buy: () => buyShip(state, "prospector"), text: "Prospector #" + (state.ships.filter((s) => s.type === "prospector").length + 1) });
       } else if (canBuyShip(state, "prospector").reason === "Not enough command points" && canBuyUpgrade(state).ok) {
         options.push({ cost: getNextUpgradeCost(state), buy: () => buyUpgrade(state), text: "command upgrade" });
@@ -268,8 +345,21 @@ export function simulate(hours, untilMiningLevel, hourly = null, explore = true,
     }
 
     // 3. Send docked ships to the best field for Mining XP per hour
+    //    (the realistic player sends one for iron ore instead when
+    //    the refinery runs short, recalling a barge if need be:
+    //    see chooseMiningField and rebalanceMiners in sim-player.js)
+    if (realistic) {
+      for (const line of rebalanceMiners(state, now)) events.push({ minute, text: line });
+    }
+    const waitingToBeSold = shipsInSwaps(swaps);   // recalled for an Excavator swap
     for (const ship of state.ships) {
       if (getJobForShip(state, ship.id)) continue;
+      if (waitingToBeSold.has(ship.id)) continue;   // stays docked to be sold
+      // A docked Courier starts its run to Last Post (it repeats by itself)
+      if (SHIP_TYPES[ship.type].role === "freight") {
+        startHaulJob(state, ship.id, now);
+        continue;
+      }
       // A docked scout goes to the next target (it moves on by itself after that)
       if (ship.type === "pathfinder") {
         startScoutJob(state, ship.id, chooseNextTarget(state, ship.id), now);
@@ -282,8 +372,9 @@ export function simulate(hours, untilMiningLevel, hourly = null, explore = true,
         const xpPerHour = plan.xpPerTrip / plan.durationMs;
         if (!best || xpPerHour > best.xpPerHour) best = { fieldId, xpPerHour };
       }
+      const field = realistic ? chooseMiningField(state, ship) : best.fieldId;
       // (A chartered ship goes where its charter says: jobs.js picks the field.)
-      startMiningJob(state, ship.id, ship.destination && getCharterField(state, ship.id) ? ship.destination : best.fieldId, now);
+      startMiningJob(state, ship.id, ship.destination && getCharterField(state, ship.id) ? ship.destination : field, now);
     }
   }
   return events;
@@ -311,14 +402,17 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const surveyDelay = option("survey-delay") ?? 0;
   const weeks = option("weeks");
   const hours = option("hours");
+  // --simple: the 3 Nov pretend player, for comparing with old runs
+  const realistic = !process.argv.includes("--simple");
+  console.log(realistic ? "Realistic player (run with --simple for the 3 Nov player)\n" : "Simple player (3 Nov)\n");
 
   if (weeks) {
-    printWeeks(weeks, explore, surveyDelay);
+    printWeeks(weeks, explore, surveyDelay, realistic);
   } else if (hours) {
     // A level above 99 never comes, so the run doesn't stop early
-    printTimeline(simulate(hours, Infinity, null, explore, surveyDelay));
+    printTimeline(simulate(hours, Infinity, null, explore, surveyDelay, realistic));
   } else {
-    printTimeline(simulate(4, REFINERY.openAtMiningLevel, null, explore, surveyDelay));
+    printTimeline(simulate(4, REFINERY.openAtMiningLevel, null, explore, surveyDelay, realistic));
   }
 }
 
@@ -365,11 +459,11 @@ function printTimeline(events) {
 // exact, so a player who checks in daily gets close to this, a
 // little later. It doesn't use freighters or the workshop yet.
 // -------------------------------------------------------------
-function printWeeks(weeks, explore, surveyDelay) {
+function printWeeks(weeks, explore, surveyDelay, realistic) {
   const days = [];    // the hourly report at the end of each day
   simulate(weeks * 7 * 24, Infinity, (report) => {
     if (report.hour % 24 === 0) days.push(report);
-  }, explore, surveyDelay);
+  }, explore, surveyDelay, realistic);
 
   // XP total -> level, by walking up the XP table
   const levelFor = (xp) => {
@@ -379,11 +473,18 @@ function printWeeks(weeks, explore, surveyDelay) {
   };
   const cr = (n) => Math.round(n).toLocaleString("en-GB");
 
-  console.log("day | Mining | cr per hour | ships | command upgrades | credits banked | next Prospector");
+  // One line per day. Skill columns: Min(ing), Ref(ining),
+  // Mfg (Manufacturing), Trd (Trade), Exp(loration).
+  // Fleet: Prospectors / Excavators / Couriers.
+  // cr per hour is the last hour of that day: sales at Anvil,
+  // Courier sales at Last Post, and contracts.
+  console.log("day | Min Ref Mfg Trd Exp | cr per hour | fleet P/E/C | cmd upg | credits banked");
   for (const d of days) {
-    console.log(`${String(d.hour / 24).padStart(3)} | ${String(levelFor(d.miningXp)).padStart(6)} | ` +
-      `${cr(d.earned).padStart(11)} | ${String(d.ships).padStart(5)} | ${String(d.commandUpgrades).padStart(16)} | ` +
-      `${cr(d.credits).padStart(14)} | ${cr(d.nextShipPrice)}`);
+    const lv = (n) => String(n).padStart(3);
+    console.log(`${String(d.hour / 24).padStart(3)} | ${lv(levelFor(d.miningXp))} ${lv(d.levels.refining)} ` +
+      `${lv(d.levels.manufacturing)} ${lv(d.levels.trade)} ${lv(d.levels.exploration)} | ` +
+      `${cr(d.earned).padStart(11)} | ${`${d.fleet.prospector}/${d.fleet.excavator}/${d.fleet.courier}`.padStart(11)} | ` +
+      `${String(d.commandUpgrades).padStart(7)} | ${cr(d.credits).padStart(14)}`);
   }
 
   // When would Mining 99 land? Take the Mining XP earned per day over
