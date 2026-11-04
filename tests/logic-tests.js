@@ -732,6 +732,22 @@ test("XP share per ship: 1 ship 100%, 2 ships 66%, 4 ships 44%, 12 ships 23%", (
   close(getMiningXpShare(fleetMining(12)), 0.225);
 });
 
+// Since 4 Nov the fleet is counted in command points, not ships,
+// so a medium hull counts twice (the pacing simulator found a
+// fleet of Excavators dodging the rule).
+test("Fleet XP counts command points: a lone Excavator keeps 66%, like each of two Prospectors", () => {
+  const close = (actual, expected) => assert.ok(Math.abs(actual - expected) < 0.005, actual.toFixed(3));
+  const state = newGame();
+  state.credits = 1e9;
+  state.skills.mining.xp = 1e7;                     // Mining 15+: Excavators unlocked
+  state.commandUpgrades = COMMAND.maxUpgrades;
+  const excavator = buyShip(state, "excavator");
+  startMiningJob(state, excavator.id, "inner_belt", START);
+  close(getMiningXpShare(state), 0.660);            // 2 points: same as two Prospectors
+  startMiningJob(state, "ship-1", "inner_belt", START);
+  close(getMiningXpShare(state), 3 ** (BALANCE.fleetXpExponent - 1));   // 1 + 2 = 3 points
+});
+
 test("A docked ship doesn't count: only ships out mining share the XP", () => {
   const state = newGame();
   state.credits = 1e9;

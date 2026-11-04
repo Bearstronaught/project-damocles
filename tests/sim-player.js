@@ -445,7 +445,10 @@ export function runRefinery(state, keep, now) {
 // makes its missing input instead.
 // Returns a list of log lines.
 // -------------------------------------------------------------
-export function runWorkshop(state, keep, now) {
+// "away" (the casual player, 4 Nov): it's about to leave for hours,
+// so it fills each queue to the game's limit with the biggest
+// orders allowed, as a real player heading out would.
+export function runWorkshop(state, keep, now, away = false) {
   const lines = [];
   if (!isWorkshopOpen(state)) return lines;
 
@@ -512,7 +515,8 @@ export function runWorkshop(state, keep, now) {
   for (let slot = 0; slot < getWorkshopSlotCount(state); slot++) {
     const job = getWorkshopJob(state, slot);
     const queued = job ? job.orders.length : 0;
-    if (queued >= Math.min(ORDERS_KEPT_QUEUED, getQueueLimit(state))) continue;
+    const keepQueued = away ? getQueueLimit(state) : Math.min(ORDERS_KEPT_QUEUED, getQueueLimit(state));
+    if (queued >= keepQueued) continue;
 
     // 1. Something being saved for and short
     let choice = null;
@@ -533,7 +537,7 @@ export function runWorkshop(state, keep, now) {
     for (const [inputId, tonnes] of Object.entries(WORKSHOP_RECIPES[choice].inputs)) {
       affordable = Math.min(affordable, Math.floor(available(inputId) / tonnes));
     }
-    const batches = Math.min(BATCHES_PER_ORDER, getMaxOrderBatches(state), affordable);
+    const batches = Math.min(away ? getMaxOrderBatches(state) : BATCHES_PER_ORDER, getMaxOrderBatches(state), affordable);
     if (batches < 1) continue;
     if (addOrder(state, slot, choice, batches, now).ok) {
       // Promise its inputs, so the next slot doesn't count them too

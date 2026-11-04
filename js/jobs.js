@@ -132,43 +132,69 @@ export function getTripPlan(state, shipTypeId, fieldId, grades) {
 // getMiningXpShare(state)
 // How much of a trip's Mining XP each ship keeps, given how many
 // ships are out mining right now (Dan, 29 Oct). Big fleets still
-// earn more XP in total, but each extra ship adds less:
-//     ships working:   1      2      4      12
-//     share each:     100%    76%    57%    37%
-// (the share is ships ^ (FLEET_XP_EXPONENT - 1)).
+// earn more XP in total, but each extra ship adds less.
+//
+// The fleet is measured in COMMAND POINTS, not ships (4 Nov). A
+// medium hull counts as 2, so swapping two Prospectors for an
+// Excavator no longer dodges the rule: the pacing simulator found
+// a fleet of Excavators reaching Mining 99 around week 13 instead
+// of week 20, because 8 Excavators counted as only 8 ships.
+//     points working:   1      2      4      12
+//     share each:      100%    66%    44%    23%
+// (the share is points ^ (FLEET_XP_EXPONENT - 1)).
+// A lone Excavator (2 points) keeps 66%, the same as each of two
+// Prospectors, so at equal command points the Excavator still
+// earns its intended edge of about a quarter more.
 // Credits are never reduced - only XP.
 // -------------------------------------------------------------
 export function getMiningXpShare(state) {
-  // Count the mining jobs: one per ship that's out working
-  // (including ships turned for home with a part-load).
-  const shipsMining = state.jobs.filter((job) => job.type === "mining").length;
-  return getFleetXpShare(shipsMining);
+  // Add up the command points of the ships out mining (including
+  // ships turned for home with a part-load).
+  const pointsMining = state.jobs
+    .filter((job) => job.type === "mining")
+    .reduce((total, job) => total + getShipPoints(state, job.shipId), 0);
+  return getFleetXpShare(pointsMining);
 }
 
 
 // -------------------------------------------------------------
 // getFreightXpShare(state)
-// The same rule for Trade XP: freighters out flying share it.
-// A freighter waiting at home for a load doesn't count.
+// The same rule for Trade XP: freighters out flying share it,
+// counted in command points too. A freighter waiting at home for
+// a load doesn't count.
 // -------------------------------------------------------------
 export function getFreightXpShare(state) {
-  const freightersFlying = state.jobs.filter(
-    (job) => job.type === "haul" && job.status === "travelling"
-  ).length;
-  return getFleetXpShare(freightersFlying);
+  const pointsFlying = state.jobs
+    .filter((job) => job.type === "haul" && job.status === "travelling")
+    .reduce((total, job) => total + getShipPoints(state, job.shipId), 0);
+  return getFleetXpShare(pointsFlying);
 }
 
 
 // -------------------------------------------------------------
-// getFleetXpShare(shipsWorking)
-// Each ship's share of its XP when this many are working:
-// shipsWorking ^ (FLEET_XP_EXPONENT - 1). A lone ship gets 100%.
+// getShipPoints(state, shipId)
+// The command points one ship uses: 1 for a small hull, 2 for a
+// medium one (HULL_SIZES in the data). A ship that has just been
+// sold counts as 1, so nothing breaks mid-trip.
 // -------------------------------------------------------------
-function getFleetXpShare(shipsWorking) {
-  if (shipsWorking <= 1) {
-    return 1;                      // a lone ship always gets full XP
+function getShipPoints(state, shipId) {
+  const ship = findShip(state, shipId);
+  if (!ship) return 1;
+  return HULL_SIZES[SHIP_TYPES[ship.type].size].commandPoints;
+}
+
+
+// -------------------------------------------------------------
+// getFleetXpShare(pointsWorking)
+// Each ship's share of its XP when this many command points are
+// working: pointsWorking ^ (FLEET_XP_EXPONENT - 1).
+// 1 point (a lone small ship) gets 100%.
+// -------------------------------------------------------------
+function getFleetXpShare(pointsWorking) {
+  if (pointsWorking <= 1) {
+    return 1;                      // a lone small ship always gets full XP
   }
-  return shipsWorking ** (FLEET_XP_EXPONENT - 1);
+  return pointsWorking ** (FLEET_XP_EXPONENT - 1);
 }
 
 

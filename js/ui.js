@@ -2562,12 +2562,20 @@ function renderSkills(state) {
     part(card, "total").textContent = formatNumber(progress.xp) + " XP total";
 
     // Mining only: how much XP each ship keeps with today's fleet.
+    // The fleet is counted in command points since 4 Nov, so a
+    // lone Excavator (2 points) already earns less than full XP.
     if (skillId === "mining") {
-      const working = state.jobs.filter((job) => job.type === "mining").length;
+      const miningJobs = state.jobs.filter((job) => job.type === "mining");
+      const working = miningJobs.length;
+      const points = miningJobs.reduce((total, job) => {
+        const ship = state.ships.find((s) => s.id === job.shipId);
+        return total + (ship ? HULL_SIZES[SHIP_TYPES[ship.type].size].commandPoints : 1);
+      }, 0);
       const share = Math.round(getMiningXpShare(state) * 100);
-      part(card, "share").textContent = working <= 1
-        ? "Fleet XP: a lone ship earns full XP. Each extra ship mining adds a little less than the last."
-        : `Fleet XP: ${working} ships mining, each earning ${share}% of its XP.`;
+      const shipWord = working === 1 ? "ship" : "ships";
+      part(card, "share").textContent = points <= 1
+        ? "Fleet XP: a lone small ship earns full XP. Each extra command point out mining adds a little less than the last."
+        : `Fleet XP: ${working} ${shipWord} mining (${points} command points), each earning ${share}% of its XP.`;
     }
 
     if (progress.isMax) {

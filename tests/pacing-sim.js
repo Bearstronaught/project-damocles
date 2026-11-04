@@ -84,7 +84,9 @@ const START = 1_000_000_000_000;
 // "peek" (optional) is called every minute with (state, minute),
 // for one-off checks that need to see inside the game, such as
 // what's in the hold. It mustn't change anything.
-export function simulate(hours, untilMiningLevel, hourly = null, explore = true, surveyDelay = 0, realistic = true, peek = null) {
+// "casual" (--casual) makes the realistic player check in three
+// times a day instead of every minute (see isCheckedIn).
+export function simulate(hours, untilMiningLevel, hourly = null, explore = true, surveyDelay = 0, realistic = true, peek = null, casual = false) {
   const swaps = [];   // Excavator swaps waiting for their Prospectors to dock
   const state = createNewGame();
   // A fixed seed, so deep scan finds and contracts come out the same
@@ -141,6 +143,42 @@ export function simulate(hours, untilMiningLevel, hourly = null, explore = true,
       events.push({ minute, text: `Diplomacy ${l}` });
     }
     lastDiplomacy = diplomacy;
+
+    // Once an hour: what the player earned, and what's holding up
+    // the next Prospector - credits, or command points?
+    if (hourly && minute > 0 && minute % 60 === 0) {
+      const check = canBuyShip(state, "prospector");
+      hourly({
+        hour: minute / 60,
+        earned: earnedThisHour,
+        nextShipPrice: getShipPrice(state, "prospector"),
+        ships: state.ships.length,
+        freePoints: getCommandFree(state),
+        commandUpgrades: state.commandUpgrades,   // how many of the 10 are bought
+        miningXp: state.skills.mining.xp,         // for the long-run report (--weeks)
+        credits: state.credits,
+        blockedBy: check.ok ? "nothing" : check.reason,
+        // Added 4 Nov, so the long run shows every skill and the fleet mix
+        levels: {
+          refining: getLevel(state, "refining"),
+          manufacturing: getLevel(state, "manufacturing"),
+          trade: getLevel(state, "trade"),
+          exploration: getLevel(state, "exploration"),
+        },
+        fleet: {
+          prospector: state.ships.filter((s) => s.type === "prospector").length,
+          excavator: state.ships.filter((s) => s.type === "excavator").length,
+          courier: state.ships.filter((s) => s.type === "courier").length,
+        },
+      });
+      earnedThisHour = 0;
+    }
+
+    // The CASUAL player (--casual) only acts while it's checked in:
+    // see isCheckedIn below. Between visits the game runs on by
+    // itself, exactly as offline progress does in the real game.
+    // (The hourly report above still counts every hour.)
+    if (casual && !isCheckedIn(minute)) continue;
 
     // 0. Hand in every contract that's ready (by hand since 30 Oct;
     //    an active player checks the board), deliveries before
@@ -207,7 +245,7 @@ export function simulate(hours, untilMiningLevel, hourly = null, explore = true,
       const saving = stockToKeep(state);
       earnedThisHour += sellAtHome(state, saving, wanted);
       for (const line of runRefinery(state, saving, now)) events.push({ minute, text: line });
-      for (const line of runWorkshop(state, saving, now)) events.push({ minute, text: line });
+      for (const line of runWorkshop(state, saving, now, casual)) events.push({ minute, text: line });
     }
 
     const keep = {};                 // item -> tonnes to hold back
@@ -246,35 +284,6 @@ export function simulate(hours, untilMiningLevel, hourly = null, explore = true,
       }
     }
 
-    // Once an hour: what the player earned, and what's holding up
-    // the next Prospector - credits, or command points?
-    if (hourly && minute > 0 && minute % 60 === 0) {
-      const check = canBuyShip(state, "prospector");
-      hourly({
-        hour: minute / 60,
-        earned: earnedThisHour,
-        nextShipPrice: getShipPrice(state, "prospector"),
-        ships: state.ships.length,
-        freePoints: getCommandFree(state),
-        commandUpgrades: state.commandUpgrades,   // how many of the 10 are bought
-        miningXp: state.skills.mining.xp,         // for the long-run report (--weeks)
-        credits: state.credits,
-        blockedBy: check.ok ? "nothing" : check.reason,
-        // Added 4 Nov, so the long run shows every skill and the fleet mix
-        levels: {
-          refining: getLevel(state, "refining"),
-          manufacturing: getLevel(state, "manufacturing"),
-          trade: getLevel(state, "trade"),
-          exploration: getLevel(state, "exploration"),
-        },
-        fleet: {
-          prospector: state.ships.filter((s) => s.type === "prospector").length,
-          excavator: state.ships.filter((s) => s.type === "excavator").length,
-          courier: state.ships.filter((s) => s.type === "courier").length,
-        },
-      });
-      earnedThisHour = 0;
-    }
 
     // 2. Buy the cheapest useful thing, repeatedly, while affordable
     //    (the realistic player first finishes any Excavator swap
@@ -380,6 +389,28 @@ export function simulate(hours, untilMiningLevel, hourly = null, explore = true,
   return events;
 }
 
+// -------------------------------------------------------------
+// isCheckedIn(minute)
+// When the CASUAL player is at the game (added 4 Nov). Its first
+// session is 2 hours of active play, like any new player. After
+// that it checks in three times a day for 10 minutes: morning
+// (8:00), lunch (13:00) and evening (20:00), taking the game's
+// start as 8:00 on day 1. The overnight gap is 12 hours, past
+// nothing (the offline cap is 24 hours).
+//   e.g. minute 0 to 120: playing; minute 300 (13:00): playing;
+//        minute 400: away
+// -------------------------------------------------------------
+const FIRST_SESSION_MINUTES = 120;
+const VISIT_MINUTES = 10;
+const VISITS = [8 * 60, 13 * 60, 20 * 60];   // times of day, in minutes after midnight
+const START_TIME_OF_DAY = 8 * 60;             // the game starts at 8:00
+
+function isCheckedIn(minute) {
+  if (minute <= FIRST_SESSION_MINUTES) return true;
+  const timeOfDay = (minute + START_TIME_OF_DAY) % (24 * 60);
+  return VISITS.some((visit) => timeOfDay >= visit && timeOfDay < visit + VISIT_MINUTES);
+}
+
 // When this file is run directly (not imported), print a timeline.
 // Also prints the gaps between GOALS (purchases, Mining levels and
 // surveys): the design doc wants a next goal every 10 to 20 minutes
@@ -404,15 +435,19 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const hours = option("hours");
   // --simple: the 3 Nov pretend player, for comparing with old runs
   const realistic = !process.argv.includes("--simple");
-  console.log(realistic ? "Realistic player (run with --simple for the 3 Nov player)\n" : "Simple player (3 Nov)\n");
+  // --casual: the realistic player, checking in three times a day
+  const casual = process.argv.includes("--casual");
+  console.log(casual ? "Casual player: active first 2 hours, then 3 visits a day\n"
+    : realistic ? "Realistic player, checking in every minute (--casual for 3 visits a day, --simple for the 3 Nov player)\n"
+    : "Simple player (3 Nov)\n");
 
   if (weeks) {
-    printWeeks(weeks, explore, surveyDelay, realistic);
+    printWeeks(weeks, explore, surveyDelay, realistic, casual);
   } else if (hours) {
     // A level above 99 never comes, so the run doesn't stop early
-    printTimeline(simulate(hours, Infinity, null, explore, surveyDelay, realistic));
+    printTimeline(simulate(hours, Infinity, null, explore, surveyDelay, realistic, null, casual));
   } else {
-    printTimeline(simulate(4, REFINERY.openAtMiningLevel, null, explore, surveyDelay, realistic));
+    printTimeline(simulate(4, REFINERY.openAtMiningLevel, null, explore, surveyDelay, realistic, null, casual));
   }
 }
 
@@ -459,11 +494,11 @@ function printTimeline(events) {
 // exact, so a player who checks in daily gets close to this, a
 // little later. It doesn't use freighters or the workshop yet.
 // -------------------------------------------------------------
-function printWeeks(weeks, explore, surveyDelay, realistic) {
+function printWeeks(weeks, explore, surveyDelay, realistic, casual) {
   const days = [];    // the hourly report at the end of each day
   simulate(weeks * 7 * 24, Infinity, (report) => {
     if (report.hour % 24 === 0) days.push(report);
-  }, explore, surveyDelay, realistic);
+  }, explore, surveyDelay, realistic, null, casual);
 
   // XP total -> level, by walking up the XP table
   const levelFor = (xp) => {
