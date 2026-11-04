@@ -50,8 +50,8 @@ const RING_GAP = 70;
 const RING_R = 28;
 const RING_Y = 175;
 const HOLD_X = 774;         // first tank
-const TANK_W = 34;
-const TANK_GAP = 8;
+const TANK_W = 32;
+const TANK_GAP = 12;        // room for the labels underneath (SALVAGE is the longest)
 
 // The full length of a ring's circle, for drawing part of it
 // (a ring that's 45% done shows 45% of this length).
@@ -75,8 +75,10 @@ function shortName(name) {
 // update()). Gives back the parts update() changes.
 // -------------------------------------------------------------
 function drawStation(svg) {
-  // The station's hull: a long box with cut corners
-  make("polygon", { class: "iv-hull", points: "60,120 110,62 890,62 940,120 940,252 890,310 110,310 60,252" }, svg);
+  // The station's hull: a long box with cut corners. The right end
+  // reaches x=975 so the angled corner clears the hold's last tank
+  // and its label (at 940 it cut through them: Dan, 4 Nov).
+  make("polygon", { class: "iv-hull", points: "60,120 110,62 925,62 975,120 975,252 925,310 110,310 60,252" }, svg);
   for (const x of [238, 528, 758]) {
     make("line", { class: "iv-divider", x1: x, y1: 62, x2: x, y2: 310 }, svg);
   }
