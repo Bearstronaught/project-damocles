@@ -36,6 +36,8 @@
   --teal: #46d6c8;
   --teal-faint: rgba(70, 214, 200, 0.12);
   --red: #ff5a4a;
+  --fitted: #74d37f;           /* a ship component already bought */
+  --fitted-faint: rgba(116, 211, 127, 0.10);
 
   /* Glows: used sparingly, on values only */
   --glow-amber: 0 0 8px rgba(255, 180, 58, 0.45);
@@ -2493,6 +2495,188 @@ main {
   color: var(--teal);
   text-transform: none;
   letter-spacing: 0;
+}
+
+/* ---- Ship component slots (drill, cargo hold, drive...) ---- */
+/* One collapsible slot inside a hull's section */
+.slot-group {
+  border-top: 1px solid var(--line);
+}
+
+.slot-summary {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;             /* on a phone, the status drops below the name */
+  gap: 4px 12px;
+  padding: 8px 0;
+  cursor: pointer;
+  list-style: none;            /* no default triangle */
+}
+
+.slot-summary::-webkit-details-marker {
+  display: none;
+}
+
+.slot-name {
+  font-weight: 600;
+  color: var(--steel);
+  min-width: 96px;
+}
+
+/* "Mk II · +30% mining rate", or "Stock" */
+.slot-status {
+  font-size: 12px;
+  color: var(--steel-dim);
+  flex: 1;
+}
+
+.slot-group:has(.grade-box.fitted) .slot-status {
+  color: var(--fitted);
+}
+
+/* "Ready to buy": only shows when a grade in this slot can be bought */
+.slot-ready {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--teal);
+}
+
+.slot-ready:empty {
+  display: none;
+}
+
+/* The slot's own open/close arrow. It's set here, after the
+   "More +" rule, so an open HULL section doesn't flip the arrows
+   of the slots inside it. (":not([open])" also makes these rules
+   outrank the hull's "Less −" rule, which would otherwise win.) */
+.slot-group:not([open]) .expand-hint::after,
+.slot-group[open] .expand-hint::after {
+  content: "▸";
+  font-size: 12px;
+  letter-spacing: 0;
+}
+.slot-group[open] .expand-hint::after {
+  content: "▾";
+}
+.slot-summary:hover .expand-hint::after,
+.slot-summary:hover .slot-name {
+  color: var(--amber);
+}
+
+/* The grade boxes, side by side. auto-fill fits as many 150px+
+   boxes on a line as there's room for, then wraps: 5 on a wide
+   screen, 2 on a phone. */
+.grade-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 8px;
+  padding: 2px 0 12px;
+}
+
+/* One grade (Mk I, Mk II...). Its colour shows its state. */
+.grade-box {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 8px 10px;
+  border: 1px solid var(--line-strong);
+  background: var(--panel-raised);
+  font-size: 12px;
+}
+
+.grade-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.grade-name {
+  font-family: var(--font-display);
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--amber);
+}
+
+.grade-mark {
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.grade-bonus {
+  color: var(--steel);
+}
+
+.grade-level {
+  font-size: 11px;
+  color: var(--steel-dim);
+}
+
+.grade-cost {
+  color: var(--teal);
+}
+
+/* Why it's locked, e.g. "Needs Mining 12." */
+.grade-reason {
+  color: var(--amber-dim);
+}
+.grade-reason:empty {
+  display: none;
+}
+
+/* The Buy button sits at the bottom of the box */
+.grade-buy {
+  margin-top: auto;            /* pushes it to the bottom */
+  width: 100%;
+}
+.grade-buy[hidden] {
+  display: none;
+}
+
+/* FITTED: green, with a tick */
+.grade-box.fitted {
+  border-color: var(--fitted);
+  background: var(--fitted-faint);
+}
+.grade-box.fitted .grade-name,
+.grade-box.fitted .grade-mark {
+  color: var(--fitted);
+}
+.grade-box.fitted .grade-cost {
+  display: none;               /* already paid, so the cost is just clutter */
+}
+
+/* READY: lit up, so it's the first thing you see */
+.grade-box.ready {
+  border-color: var(--teal);
+  background: var(--teal-faint);
+  box-shadow: var(--glow-teal);
+}
+
+/* On a phone: two narrower boxes per line instead of one wide
+   one, and the slot's status gets a line of its own below the
+   name rather than being squashed into a thin column. */
+@media (max-width: 480px) {
+  .grade-grid {
+    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  }
+  .slot-status {
+    order: 3;                  /* move it after "Ready to buy" and the arrow */
+    flex-basis: 100%;          /* and give it the whole line */
+  }
+  .slot-summary .expand-hint {
+    margin-left: auto;         /* keep the arrow on the right */
+  }
+}
+
+/* LOCKED: greyed out. Still readable, so you can plan ahead. */
+.grade-box.locked {
+  opacity: 0.5;
+}
+.grade-box.locked .grade-name,
+.grade-box.locked .grade-cost {
+  color: var(--steel-dim);
 }
 
 /* An upgrade or component that can be bought right now */

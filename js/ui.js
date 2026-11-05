@@ -3149,19 +3149,26 @@ export function formatDuration(ms) {
 // SHIP COMPONENTS (on the Shipyard tab)
 // -------------------------------------------------------------
 // The upgrades in ship-upgrades.js, shown to players as "ship
-// components". One collapsible section per hull type you own,
-// headed by its drawing (with hardpoints) and a summary. Inside,
-// one block per component type (drill, cargo hold, drive), each
-// listing every grade, Mk I to Mk III:
-//   Mk I    Mining 2    +15% mining rate               Fitted
-//   Mk II   Mining 12   40 t wiring coils + 12,000 cr  [Buy]
-//   Mk III  Mining 25   ...                            Locked
+// components". Three layers, each one collapsible:
+//
+//   Prospector                       5 of 9 fitted · 1 ready   <- hull type
+//     ▸ Drill    Mk II · +30% mining rate · 1 ready             <- slot
+//         [ Mk I ✓ ] [ Mk II ✓ ] [ Mk III  Buy ] [ Mk IV ] ...  <- grade boxes
+//     ▸ Cargo hold   Stock
+//     ▸ Drive        Mk I · +10% speed
+//
+// Each grade is a box, coloured by its state:
+//   fitted   green, with a tick         - already bought
+//   ready    lit teal, with a Buy button - you can buy it now
+//   locked   greyed out, with the reason - not yet
+// The boxes wrap onto a new line on narrow screens, so Mk IV
+// and Mk V (when they arrive) fit without any changes here.
 // Only the next grade can be bought.
 // =============================================================
 
 // -------------------------------------------------------------
 // buildComponents(actions)
-// Makes every section, block and row once; renderComponents
+// Makes every section, slot and box once; renderComponents
 // fills in the parts that change.
 // -------------------------------------------------------------
 function buildComponents(actions) {
@@ -3172,6 +3179,7 @@ function buildComponents(actions) {
     const parts = getHullParts(hullId);
     if (parts.length === 0) continue;   // a hull with no components yet
 
+    // --- Layer 1: the hull type ---
     // <details> opens and closes when its summary is clicked;
     // rememberOpenState keeps it that way across redraws.
     const section = document.createElement("details");
@@ -3191,41 +3199,58 @@ function buildComponents(actions) {
     const body = section.querySelector(".component-body");
 
     for (const partId of parts) {
-      const block = document.createElement("div");
-      block.className = "component-block";
-      block.innerHTML = `
-        <h3 class="sub-title">${SHIP_PARTS[partId].name}
-          <span class="component-total" data-part="total-${partId}"></span></h3>
+      // --- Layer 2: one slot (drill, cargo hold, drive...) ---
+      // Its own <details>, so each slot opens on its own. The
+      // summary line says where the slot is up to, so you can
+      // see that without opening it.
+      const slot = document.createElement("details");
+      slot.className = "slot-group";
+      slot.id = `slot-${hullId}-${partId}`;   // e.g. "slot-prospector-drill"
+      slot.innerHTML = `
+        <summary class="slot-summary">
+          <span class="slot-name">${SHIP_PARTS[partId].name}</span>
+          <span class="slot-status" data-part="status"></span>
+          <span class="slot-ready" data-part="ready"></span>
+          <span class="expand-hint" aria-hidden="true"></span>
+        </summary>
+        <div class="grade-grid"></div>
       `;
+      const grid = slot.querySelector(".grade-grid");
 
-      // One row per grade: Mk I, Mk II, Mk III...
+      // --- Layer 3: one box per grade, Mk I, Mk II, Mk III... ---
       for (let grade = 1; findUpgrade(hullId, partId, grade); grade++) {
         const upgrade = findUpgrade(hullId, partId, grade);
-        // The cost, e.g. "40 t wiring coils + 12,000 cr"
-        const goods = Object.entries(upgrade.costs)
-          .map(([itemId, tonnes]) => `${formatTonnes(tonnes)} ${ITEMS[itemId].name.toLowerCase()}`);
-        const cost = [...goods, formatNumber(upgrade.credits) + " cr"].join(" + ");
 
-        const row = document.createElement("div");
-        row.className = "upgrade-row";
-        row.id = "component-" + upgrade.id;
-        row.innerHTML = `
-          <div class="upgrade-text">
-            <div class="upgrade-name">${upgrade.gradeName}
-              <span class="upgrade-level">${SKILLS[upgrade.skill].name} ${upgrade.level}</span></div>
-            <div class="upgrade-desc">+${formatPercent(upgrade.bonus)} ${SHIP_PARTS[partId].says}</div>
-            <div class="upgrade-cost">${cost}</div>
-            <div class="upgrade-reason" data-part="reason"></div>
+        // The cost as separate lines, e.g.
+        //   40 t wiring coils
+        //   12,000 cr
+        const goodsLines = Object.entries(upgrade.costs)
+          .map(([itemId, tonnes]) => `<div>${formatTonnes(tonnes)} ${ITEMS[itemId].name.toLowerCase()}</div>`)
+          .join("");
+
+        const box = document.createElement("div");
+        box.className = "grade-box locked";      // render sets the real state
+        box.id = "component-" + upgrade.id;      // same ID as before, so tests still find it
+        box.innerHTML = `
+          <div class="grade-top">
+            <span class="grade-name">${upgrade.gradeName}</span>
+            <span class="grade-mark" data-part="mark"></span>
           </div>
-          <button class="btn btn-small" data-part="buy">Buy</button>
+          <div class="grade-bonus">+${formatPercent(upgrade.bonus)} ${SHIP_PARTS[partId].says}</div>
+          <div class="grade-level">${SKILLS[upgrade.skill].name} ${upgrade.level}</div>
+          <div class="grade-cost">${goodsLines}<div>${formatNumber(upgrade.credits)} cr</div></div>
+          <div class="grade-reason" data-part="reason"></div>
+          <button class="btn btn-small grade-buy" data-part="buy">Buy</button>
         `;
-        part(row, "buy").addEventListener("click", () => {
+        part(box, "buy").addEventListener("click", () => {
           const result = actions.buyShipUpgrade(upgrade.id);
           byId("component-message").textContent = result.ok ? "" : `${getUpgradeName(upgrade)}: ${result.reason}`;
         });
-        block.appendChild(row);
+        grid.appendChild(box);
       }
-      body.appendChild(block);
+
+      rememberOpenState(slot);
+      body.appendChild(slot);
     }
     rememberOpenState(section);
     list.appendChild(section);
@@ -3234,9 +3259,10 @@ function buildComponents(actions) {
 
 // -------------------------------------------------------------
 // renderComponents(state)
-// Shows the sections for hull types you own, and sets every
-// row: Fitted, ready to buy, or why not yet. Returns the IDs of
-// the components that could be bought right now (for the nav dot).
+// Shows the sections for hull types you own, and colours every
+// grade box: fitted, ready to buy, or locked (with the reason).
+// Returns the IDs of the components that could be bought right
+// now (for the nav dot).
 // -------------------------------------------------------------
 function renderComponents(state) {
   let fittedAll = 0;
@@ -3252,49 +3278,64 @@ function renderComponents(state) {
     section.hidden = !owned;
     if (owned) anyShown = true;
 
-    let fitted = 0;
+    let fitted = 0;   // counts for the whole hull type
     let total = 0;
     let ready = 0;
 
     for (const partId of getHullParts(hullId)) {
-      const gradeNow = getPartGrade(state, hullId, partId);
-      const bonus = getPartBonus(state, hullId, partId);
-      // The component's total so far, beside its heading
-      setText(part(section, "total-" + partId),
-        bonus > 0 ? `+${formatPercent(bonus)} ${SHIP_PARTS[partId].says}` : "Stock");
+      const slot = byId(`slot-${hullId}-${partId}`);
+      const gradeNow = getPartGrade(state, hullId, partId);   // 0 = stock
+      let slotReady = 0;                                      // ready boxes in this slot
 
       for (let grade = 1; findUpgrade(hullId, partId, grade); grade++) {
         const upgrade = findUpgrade(hullId, partId, grade);
-        const row = byId("component-" + upgrade.id);
-        const button = part(row, "buy");
-        const reason = part(row, "reason");
+        const box = byId("component-" + upgrade.id);
         total++;
 
+        // Work out which of the three states this box is in
+        let boxState;
+        let reasonText = "";
         if (grade <= gradeNow) {
-          // Already fitted
+          boxState = "fitted";
           fitted++;
-          row.classList.add("owned");
-          row.classList.remove("blocked", "ready");
-          setText(button, "Fitted");
-          button.disabled = true;
-          setText(reason, "");
-          continue;
+        } else {
+          const check = canBuyShipUpgrade(state, upgrade.id);
+          if (check.ok) {
+            boxState = "ready";
+            if (owned) {
+              slotReady++;
+              readyIds.push(upgrade.id);
+            }
+          } else {
+            boxState = "locked";
+            reasonText = check.reason;   // e.g. "Needs Mining 12."
+          }
         }
 
-        row.classList.remove("owned");
-        const check = canBuyShipUpgrade(state, upgrade.id);
-        // Only the next grade can be bought; later ones say what
-        // comes first.
-        setText(button, grade === gradeNow + 1 ? "Buy" : "Locked");
-        button.disabled = !check.ok;
-        row.classList.toggle("blocked", !check.ok);
-        row.classList.toggle("ready", check.ok);
-        setText(reason, check.ok ? "" : check.reason);
-        if (check.ok && owned) {
-          ready++;
-          readyIds.push(upgrade.id);
-        }
+        // Exactly one of the three state classes is switched on.
+        // toggle(name, true/false) adds or removes a class.
+        box.classList.toggle("fitted", boxState === "fitted");
+        box.classList.toggle("ready", boxState === "ready");
+        box.classList.toggle("locked", boxState === "locked");
+
+        // The little label top-right: a tick when fitted, nothing
+        // otherwise (the Buy button or reason says the rest).
+        setText(part(box, "mark"), boxState === "fitted" ? "✓ Fitted" : "");
+        setText(part(box, "reason"), reasonText);
+        // The Buy button only shows on a box you can buy now
+        part(box, "buy").hidden = boxState !== "ready";
+        part(box, "buy").disabled = boxState !== "ready";
       }
+
+      // The slot's summary line, e.g. "Mk II · +30% mining rate"
+      const bonus = getPartBonus(state, hullId, partId);
+      const gradeName = gradeNow > 0 ? findUpgrade(hullId, partId, gradeNow).gradeName : "";
+      setText(part(slot, "status"),
+        gradeNow > 0 ? `${gradeName} · +${formatPercent(bonus)} ${SHIP_PARTS[partId].says}` : "Stock");
+      setText(part(slot, "ready"), slotReady > 0 ? "Ready to buy" : "");
+      slot.classList.toggle("has-ready", slotReady > 0);
+
+      ready += slotReady;
     }
 
     // e.g. "3 of 9 fitted · 1 ready to buy"

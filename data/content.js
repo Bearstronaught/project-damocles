@@ -938,7 +938,7 @@ export const SHIP_PARTS = {
 //   hull, part, grade (1-3), skill + level needed, credits,
 //   costs (products, {} for none), bonus (0.15 = +15%)
 // The name is built here, e.g. "Prospector drill Mk II".
-const GRADE_NAMES = { 1: "Mk I", 2: "Mk II", 3: "Mk III" };
+const GRADE_NAMES = { 1: "Mk I", 2: "Mk II", 3: "Mk III", 4: "Mk IV", 5: "Mk V" };
 export const SHIP_UPGRADES = {};
 for (const [id, upgrade] of Object.entries(BALANCE.shipUpgrades)) {
   SHIP_UPGRADES[id] = {
