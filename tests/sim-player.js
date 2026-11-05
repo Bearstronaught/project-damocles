@@ -519,10 +519,21 @@ export function runRefinery(state, keep, now) {
     if (slot > 0) {
       // Keep the current recipe unless another metal is clearly
       // emptier, so slots don't flip back and forth every minute
-      const emptiest = otherMetals.sort((a, b) => fullness(a) - fullness(b))[0];
+      // (Only a metal that's actually SHORT counts: below what's
+      // kept for it. Fixed 5 Nov: every kept metal used to count,
+      // even fully stocked ones, so a spare slot never reached
+      // bestXpRecipe and osmiridium piled up unsmelted all game.)
+      const short = otherMetals.filter((metal) => fullness(metal) < 1);
+      const emptiest = short.sort((a, b) => fullness(a) - fullness(b))[0];
       const currentId = current && current.recipeId;
       recipe = emptiest || bestXpRecipe(state, canMake) || (canMake("nickel_bar") ? "nickel_bar" : "iron_bar");
       if (currentId && otherMetals.includes(currentId) && fullness(currentId) < 1) recipe = currentId;
+      // A slot pointed at a metal with no ore for a batch would just
+      // sit idle (found 5 Nov: all four slots waited on nickel bars
+      // with 42 t of nickel ore while osmiridium piled up). Slot 1
+      // keeps waiting for the short metal; the others do something
+      // useful meanwhile.
+      if (!hasOreFor(state, recipe)) recipe = bestXpRecipe(state, canMake) || recipe;
     }
     if (current && (current.recipeId === recipe || current.toll !== undefined)) continue;
     if (setRecipe(state, slot, recipe, now)) {
@@ -530,6 +541,16 @@ export function runRefinery(state, keep, now) {
     }
   }
   return lines;
+}
+
+
+// -------------------------------------------------------------
+// hasOreFor(state, recipeId)
+// True if the hold has enough ore for one batch of this recipe,
+// e.g. iridium bars need 60 t of osmiridium.
+// -------------------------------------------------------------
+function hasOreFor(state, recipeId) {
+  return Object.entries(RECIPES[recipeId].inputs).every(([oreId, tonnes]) => (state.inventory[oreId] || 0) >= tonnes);
 }
 
 
@@ -546,8 +567,7 @@ function bestXpRecipe(state, canMake) {
   let best = null;
   for (const [recipeId, recipe] of Object.entries(RECIPES)) {
     if (recipeId === "iron_bar" || !canMake(recipeId)) continue;
-    const hasOre = Object.entries(recipe.inputs).every(([oreId, tonnes]) => (state.inventory[oreId] || 0) >= tonnes);
-    if (!hasOre) continue;
+    if (!hasOreFor(state, recipeId)) continue;
     const xpPerSecond = recipe.xp / recipe.seconds;
     if (!best || xpPerSecond > best.xpPerSecond) best = { recipeId, xpPerSecond };
   }
@@ -772,9 +792,9 @@ export function extraShopping(state, now, swaps) {
   //   two Excavators  (2 + 2 points) -> one Deep-core barge (4) (added 4 Nov)
   // "keepAtLeast": how many of the small hull to keep anyway. One
   // Prospector stays for the Ice moon, which bigger hulls can't work.
-  for (const { from, to, keepAtLeast } of SWAP_STEPS) {
+  for (const step of SWAP_STEPS) {
     if (swaps.length > 0) break;
-    const option = swapOption(state, now, swaps, from, to, keepAtLeast);
+    const option = swapOption(state, now, swaps, step);
     if (option) options.push(option);
   }
   return options;
@@ -788,27 +808,46 @@ export function extraShopping(state, now, swaps) {
 // existed, so once barges arrived nothing ever retired the small
 // hulls, and the casual player kept 6 Prospectors all game.)
 // One Prospector is always kept, for the Ice moon.
+// Each step also says which skill unlocks "to", and how to tell
+// whether one "to" beats the "from" hulls it replaces (worthIt).
+//   Mining: it earns more credits an hour than all of them.
+//   Freight (added 5 Nov): a Hauler carries more than the Couriers
+//   it replaces, AND goods are being sold at Anvil for want of
+//   room (otherwise more carrying is worth nothing). Two Couriers
+//   go for one Hauler, in the same 2 points.
+const mining = (from, to, count) => (state) => minerValuePerHour(state, to) > count * minerValuePerHour(state, from);
+const freight = (from, to, count) => (state) =>
+  carryPerHour(state, to) > count * carryPerHour(state, from) &&
+  Object.keys(homeSalesPerHour(state)).length > 0;
 const SWAP_STEPS = [
-  { from: "prospector", to: "excavator", keepAtLeast: 1 },
-  { from: "prospector", to: "deep_core_barge", keepAtLeast: 1 },
-  { from: "excavator", to: "deep_core_barge", keepAtLeast: 0 },
+  { from: "prospector", to: "excavator", keepAtLeast: 1, skill: "mining", worthIt: mining },
+  { from: "prospector", to: "deep_core_barge", keepAtLeast: 1, skill: "mining", worthIt: mining },
+  { from: "excavator", to: "deep_core_barge", keepAtLeast: 0, skill: "mining", worthIt: mining },
+  { from: "courier", to: "hauler", keepAtLeast: 0, skill: "trade", worthIt: freight },
 ];
 
 // -------------------------------------------------------------
-// swapOption(state, now, swaps, from, to, keepAtLeast)
+// swapOption(state, now, swaps, step)
 // One swap for the shopping list, or null if it doesn't make
 // sense yet: "to" isn't unlocked, there are spare points to just
-// buy one, it wouldn't earn more than the two it replaces, or
-// there aren't enough "from" barges to sell.
+// buy one, it wouldn't beat the hulls it replaces, its workshop
+// goods aren't in the hold, or there aren't enough "from" hulls
+// to sell. "step" is one entry of SWAP_STEPS.
 // -------------------------------------------------------------
-function swapOption(state, now, swaps, from, to, keepAtLeast) {
+function swapOption(state, now, swaps, step) {
+  const { from, to, keepAtLeast, skill, worthIt } = step;
   // How many "from" hulls make room for one "to": its points ÷ theirs
   //   e.g. a barge (4 points) for Prospectors (1 point each) -> 4
   const count = pointsFor(to) / pointsFor(from);
-  const unlocked = getLevel(state, "mining") >= SHIP_TYPES[to].unlockLevel;
+  const unlocked = getLevel(state, skill) >= SHIP_TYPES[to].unlockLevel;
   const outOfPoints = getCommandFree(state) < pointsFor(to);
-  // Worth it only if the one big hull out-earns all the ones it replaces
-  const better = minerValuePerHour(state, to) > count * minerValuePerHour(state, from);
+  // Worth it only if the one big hull beats all the ones it replaces
+  // (see SWAP_STEPS for what "beats" means for each kind)
+  const better = worthIt(from, to, count)(state);
+  // Workshop goods the new hull costs (the Hauler's plating and
+  // coils) must be in the hold already: the sale only raises credits.
+  const goodsReady = Object.entries(SHIP_TYPES[to].costs || {}).every(([itemId, tonnes]) => (state.inventory[itemId] || 0) >= tonnes);
+  if (!goodsReady) return null;
   const sellable = state.ships.filter((ship) => ship.type === from && !getCharter(state, ship.id));
   // Somewhere to build it: a barge needs the heavy slipway (5 Nov).
   // Without this the player would recall ships it can't replace.
