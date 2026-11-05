@@ -2409,7 +2409,8 @@ main {
    ================================================================ */
 
 /* Hardpoint markers on a ship drawing: a dashed ring for a stock
-   part, a solid teal ring with I / II / III for the Mk fitted. */
+   part, a solid green ring with I / II / III for the Mk fitted
+   (green = fitted everywhere, matching the component boxes). */
 .schematic .hardpoint circle {
   fill: var(--bg);
   stroke-width: 1.4;
@@ -2421,11 +2422,11 @@ main {
 }
 
 .schematic .hardpoint.fitted circle {
-  stroke: var(--teal);
+  stroke: var(--fitted);
 }
 
 .schematic .hardpoint text {
-  fill: var(--teal);
+  fill: var(--fitted);
   font-size: 8px;
   font-weight: 700;
   text-anchor: middle;      /* centre the numeral on the point */
@@ -2498,23 +2499,17 @@ main {
 }
 
 /* ---- Ship component slots (drill, cargo hold, drive...) ---- */
-/* One collapsible slot inside a hull's section */
+/* One slot inside a hull's section: a heading row, then its boxes */
 .slot-group {
   border-top: 1px solid var(--line);
 }
 
-.slot-summary {
+.slot-head {
   display: flex;
   align-items: center;
   flex-wrap: wrap;             /* on a phone, the status drops below the name */
   gap: 4px 12px;
   padding: 8px 0;
-  cursor: pointer;
-  list-style: none;            /* no default triangle */
-}
-
-.slot-summary::-webkit-details-marker {
-  display: none;
 }
 
 .slot-name {
@@ -2544,24 +2539,6 @@ main {
 
 .slot-ready:empty {
   display: none;
-}
-
-/* The slot's own open/close arrow. It's set here, after the
-   "More +" rule, so an open HULL section doesn't flip the arrows
-   of the slots inside it. (":not([open])" also makes these rules
-   outrank the hull's "Less −" rule, which would otherwise win.) */
-.slot-group:not([open]) .expand-hint::after,
-.slot-group[open] .expand-hint::after {
-  content: "▸";
-  font-size: 12px;
-  letter-spacing: 0;
-}
-.slot-group[open] .expand-hint::after {
-  content: "▾";
-}
-.slot-summary:hover .expand-hint::after,
-.slot-summary:hover .slot-name {
-  color: var(--amber);
 }
 
 /* The grade boxes, side by side. auto-fill fits as many 150px+
@@ -2662,11 +2639,8 @@ main {
     grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
   }
   .slot-status {
-    order: 3;                  /* move it after "Ready to buy" and the arrow */
+    order: 3;                  /* move it after "Ready to buy" */
     flex-basis: 100%;          /* and give it the whole line */
-  }
-  .slot-summary .expand-hint {
-    margin-left: auto;         /* keep the arrow on the right */
   }
 }
 
@@ -2708,7 +2682,7 @@ main {
 }
 
 .parts-list li.fitted .part-grade {
-  color: var(--teal);
+  color: var(--fitted);     /* same green as fitted boxes and rings */
 }
 
 

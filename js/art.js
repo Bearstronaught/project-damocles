@@ -195,7 +195,7 @@ const HARDPOINTS = {
 };
 
 // Roman numerals for the grade inside a marker.
-const GRADE_MARKS = { 1: "I", 2: "II", 3: "III" };
+const GRADE_MARKS = { 1: "I", 2: "II", 3: "III", 4: "IV", 5: "V" };
 
 
 // -------------------------------------------------------------

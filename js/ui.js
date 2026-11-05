@@ -3149,13 +3149,15 @@ export function formatDuration(ms) {
 // SHIP COMPONENTS (on the Shipyard tab)
 // -------------------------------------------------------------
 // The upgrades in ship-upgrades.js, shown to players as "ship
-// components". Three layers, each one collapsible:
+// components". One collapsible section per hull type; inside
+// it, every slot is always shown (Dan, 5 Nov: a second layer of
+// opening and closing was too many clicks):
 //
-//   Prospector                       5 of 9 fitted · 1 ready   <- hull type
-//     ▸ Drill    Mk II · +30% mining rate · 1 ready             <- slot
-//         [ Mk I ✓ ] [ Mk II ✓ ] [ Mk III  Buy ] [ Mk IV ] ...  <- grade boxes
-//     ▸ Cargo hold   Stock
-//     ▸ Drive        Mk I · +10% speed
+//   Prospector                       5 of 9 fitted · 1 ready   <- hull type (collapsible)
+//     Drill    Mk II · +30% mining rate        READY TO BUY    <- slot heading
+//       [ Mk I ✓ ] [ Mk II ✓ ] [ Mk III  Buy ] [ Mk IV ] ...   <- grade boxes
+//     Cargo hold   Stock
+//       [ Mk I ] [ Mk II ] [ Mk III ]
 //
 // Each grade is a box, coloured by its state:
 //   fitted   green, with a tick         - already bought
@@ -3200,19 +3202,17 @@ function buildComponents(actions) {
 
     for (const partId of parts) {
       // --- Layer 2: one slot (drill, cargo hold, drive...) ---
-      // Its own <details>, so each slot opens on its own. The
-      // summary line says where the slot is up to, so you can
-      // see that without opening it.
-      const slot = document.createElement("details");
+      // A heading row saying where the slot is up to, with its
+      // grade boxes underneath, always visible.
+      const slot = document.createElement("div");
       slot.className = "slot-group";
       slot.id = `slot-${hullId}-${partId}`;   // e.g. "slot-prospector-drill"
       slot.innerHTML = `
-        <summary class="slot-summary">
+        <div class="slot-head">
           <span class="slot-name">${SHIP_PARTS[partId].name}</span>
           <span class="slot-status" data-part="status"></span>
           <span class="slot-ready" data-part="ready"></span>
-          <span class="expand-hint" aria-hidden="true"></span>
-        </summary>
+        </div>
         <div class="grade-grid"></div>
       `;
       const grid = slot.querySelector(".grade-grid");
@@ -3249,7 +3249,6 @@ function buildComponents(actions) {
         grid.appendChild(box);
       }
 
-      rememberOpenState(slot);
       body.appendChild(slot);
     }
     rememberOpenState(section);
