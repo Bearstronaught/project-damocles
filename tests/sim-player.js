@@ -172,6 +172,12 @@ export function chooseMiningField(state, ship) {
       return job && job.type === "mining" && FIELDS[job.fieldId] && FIELDS[job.fieldId].yields === oreId;
     }).length;
     if (incoming >= 2) continue;                               // two barges on it is plenty
+    // Large hulls stay on the field kept for their size (Dan, 5 Nov).
+    // A Deep-core barge on a belt earns a quarter of the Mining XP and
+    // far less money; before this fix the active player parked 2 of its
+    // 4 barges on the belts for good and fell behind the casual player.
+    // A real player keeps smaller ships on the belts for iron and nickel.
+    if (SHIP_TYPES[ship.type].size === "large" || SHIP_TYPES[ship.type].size === "capital") break;
     const fieldId = Object.keys(FIELDS).find((id) => FIELDS[id].yields === oreId && isFieldUnlocked(state, id) &&
       canHullWorkField(ship.type, id));                        // only a field this barge can work
     if (fieldId) return fieldId;
@@ -203,8 +209,14 @@ export function rebalanceMiners(state, now) {
     // Recall a barge from another field (not a chartered one)
     // (only one whose hull can work that field: no point recalling
     // a Deep-core barge for iron ore it can't mine)
-    const job = miningJobs.find((j) => j.fieldId !== fieldId && !getCharter(state, j.shipId) &&
-      canHullWorkField(state.ships.find((s) => s.id === j.shipId).type, fieldId));
+    // (and never a large or capital hull: they stay on their own field,
+    // see chooseMiningField; Dan, 5 Nov)
+    const job = miningJobs.find((j) => {
+      const typeId = state.ships.find((s) => s.id === j.shipId).type;
+      const size = SHIP_TYPES[typeId].size;
+      return j.fieldId !== fieldId && !getCharter(state, j.shipId) &&
+        canHullWorkField(typeId, fieldId) && size !== "large" && size !== "capital";
+    });
     if (!job) continue;
     recallJob(state, job.id, now);
     lines.push(`recalled a barge to send it for ${ITEMS[oreId].name.toLowerCase()} (refinery short)`);
