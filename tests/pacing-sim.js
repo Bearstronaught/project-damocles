@@ -66,7 +66,7 @@ import { startHaulJob } from "../js/jobs.js";
 import {
   stockToKeep, sellAtHome, runRefinery, runWorkshop, extraShopping,
   finishSwaps, shipsInSwaps, minerValuePerHour,
-  chooseMiningField, rebalanceMiners,
+  chooseMiningField, rebalanceMiners, wantsFirstCourier,
 } from "./sim-player.js";
 
 const MINUTE = 60 * 1000;
@@ -334,6 +334,9 @@ export function simulate(hours, untilMiningLevel, hourly = null, explore = true,
         options.push({ cost: getNextUpgradeCost(state), buy: () => buyUpgrade(state), text: "command upgrade" });
       } else if (excavatorsBetter) {
         // (no Prospectors on the list)
+      } else if (realistic && wantsFirstCourier(state) && getCommandFree(state) <= 1) {
+        // (no Prospector: the last free command point is kept for
+        // the first Courier, see wantsFirstCourier in sim-player.js)
       } else if (canBuyShip(state, "prospector").ok) {
         options.push({ cost: getShipPrice(state, "prospector"), buy: () => orderShip(state, "prospector", now), text: "Prospector #" + (state.ships.filter((s) => s.type === "prospector").length + countOrdered(state, "prospector") + 1) });
       } else if (canBuyShip(state, "prospector").reason === "Not enough command points" && canBuyUpgrade(state).ok) {

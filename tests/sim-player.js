@@ -599,6 +599,26 @@ export function runWorkshop(state, keep, now, away = false) {
 
 
 // -------------------------------------------------------------
+// wantsFirstCourier(state)
+// True while the player owns no Courier (and has none on order).
+// Found 5 Nov: the player only bought a Courier when it out-earned
+// a mining ship in CREDITS per command point. The two are almost
+// level (about 36,000 cr an hour each around hour 10), so whether
+// a Courier ever got bought swung on a few hundred credits: the
+// active player's first came at hour 26, the casual player's on
+// day 4.5. A real player buys the first Courier because it opens
+// a whole new skill (Trade), the same way it buys the Pathfinder,
+// so the first one is bought as soon as possible and skips the
+// value test. Later Couriers still have to earn their place.
+// pacing-sim.js also keeps one command point free for it, so
+// Prospectors don't fill every point first.
+// -------------------------------------------------------------
+export function wantsFirstCourier(state) {
+  return count(state, "courier") === 0;
+}
+
+
+// -------------------------------------------------------------
 // extraShopping(state, now, swaps)
 // More things for the shopping list, on top of what the simple
 // player buys (Prospectors, their parts, command upgrades, the
@@ -645,7 +665,9 @@ export function extraShopping(state, now, swaps) {
         minerPerPoint = Math.max(minerPerPoint, minerValuePerHour(state, big) / pointsFor(big));
       }
     }
-    if (courierPerPoint >= minerPerPoint) {
+    // The FIRST Courier is bought for its own sake (see
+    // wantsFirstCourier), so it skips the value test.
+    if (wantsFirstCourier(state) || courierPerPoint >= minerPerPoint) {
       options.push({ cost: getShipPrice(state, "courier"), buy: () => orderShip(state, "courier", now), text: "Courier #" + (count(state, "courier") + 1) });
     }
   }
