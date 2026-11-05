@@ -4823,6 +4823,19 @@ test("Welcome back: long lists show the biggest three, largest first, then a cou
   assert.equal(largestFirst({ a: 1 }).more, 0);             // nothing left off
 });
 
+
+test("Ready surveys: none are flagged until the player owns a scout (Dan, 5 Nov)", () => {
+  // Why: a brand-new save was told "Survey ready to launch: Inner
+  // Belt survey" before it could even buy a Pathfinder. The same
+  // open survey, with and without a scout:
+  const noScout = newGame();
+  assert.equal(getTargetStatus(noScout, "inner_belt_survey"), "available");   // it IS open...
+  assert.deepEqual(getReadySurveys(noScout), []);                             // ...but not flagged
+
+  const withScout = gameWithScout();
+  assert.deepEqual(getReadySurveys(withScout), ["inner_belt_survey"]);        // flagged once a scout exists
+});
+
 // -------------------------------------------------------------
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) {

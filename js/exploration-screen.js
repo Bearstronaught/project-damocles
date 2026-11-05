@@ -184,7 +184,8 @@ export function renderExploration(state) {
 
     // The tab's dot: a survey ready to launch that hasn't been
     // launched yet.
-    if (status === "available" && !launched && !scout) {
+    // No scout owned: no dot (Dan, 5 Nov - same rule as getReadySurveys).
+    if (hasScout && status === "available" && !launched && !scout) {
       ready["target:" + targetId] = 1;
     }
   }

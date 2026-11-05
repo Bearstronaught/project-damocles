@@ -158,13 +158,31 @@ export function getScoutOnTarget(state, targetId) {
 }
 
 // -------------------------------------------------------------
+// ownsScout(state)
+// True if the player owns at least one scout (a Pathfinder so
+// far). Ships still on a slipway don't count: they can't fly yet.
+// -------------------------------------------------------------
+export function ownsScout(state) {
+  return state.ships.some((ship) => SHIP_TYPES[ship.type].role === "scout");
+}
+
+// -------------------------------------------------------------
 // getReadySurveys(state)
 // Surveys the player could launch right now: open, not launched
 // yet, and no scout already on the way. In list order, e.g.
 //   ["ice_moon", "wreck_2"]
-// These light the Exploration tab's dot and the "ready" banner.
+// These light the Exploration tab's dot, the "ready" banner and
+// the welcome-back report's Needs attention.
+//
+// With no scout owned, nothing is "ready" (Dan, 5 Nov): telling a
+// new player to launch a survey before they can buy a scout is
+// misleading. Once the first Pathfinder arrives, every open survey
+// becomes ready at once, and the usual "Survey ready" banner says so.
 // -------------------------------------------------------------
 export function getReadySurveys(state) {
+  if (!ownsScout(state)) {
+    return [];   // no scout yet: nothing to flag
+  }
   return Object.keys(SURVEY_TARGETS).filter((targetId) =>
     getTargetStatus(state, targetId) === "available"
     && !isLaunched(state, targetId)
