@@ -34,6 +34,7 @@ import {
 import { getLevel, isFieldUnlocked, canHullWorkField } from "../js/skills.js";
 import { getTripPlan, getHaulPlan, getJobForShip, recallJob } from "../js/jobs.js";
 import { getPrice, sellAll } from "../js/trade.js";
+import { getHubPrice } from "../js/market.js";
 import { setBond } from "../js/bonded.js";
 import { orderShip, getShipPrice, canBuyShip, getSellValue, canSellShip, sellShip } from "../js/shipyard.js";
 import { getBerthFor, isBerthOpen, countOrdered } from "../js/slipway.js";
@@ -273,7 +274,9 @@ export function courierValuePerHour(state) {
 
   // Biggest gain per tonne first
   const flow = oreFlowPerHour(state);
-  const gain = (oreId) => getPrice(oreId, "hub") - getPrice(oreId, "home");
+  // Today's Last Post price, glut and all (market.js), as a player
+  // reading the cargo table would see it
+  const gain = (oreId) => getHubPrice(state, oreId, state.simulatedUpTo) - getPrice(oreId, "home");
   for (const oreId of Object.keys(flow).sort((a, b) => gain(b) - gain(a))) {
     let tonnes = flow[oreId];
     const takenAlready = Math.min(tonnes, alreadyCarried);   // the other Couriers' share
@@ -377,7 +380,9 @@ export function sellAtHome(state, keep, wanted) {
 
   // 3. Sell, most valuable at Last Post first, so the freighters'
   //    allowance goes on the goods that gain most from the trip
-  const byHubPrice = Object.keys(ITEMS).sort((a, b) => getPrice(b, "hub") - getPrice(a, "hub"));
+  //    (by today's price there, glut included: market.js)
+  const hubNow = (itemId) => getHubPrice(state, itemId, state.simulatedUpTo);
+  const byHubPrice = Object.keys(ITEMS).sort((a, b) => hubNow(b) - hubNow(a));
   let earned = 0;
   for (const itemId of byHubPrice) {
     if (wanted.has(itemId)) continue;

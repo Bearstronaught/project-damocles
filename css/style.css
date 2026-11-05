@@ -1587,6 +1587,15 @@ main {
   color: var(--teal);
 }
 
+/* Under a Last Post price that's down from a glut (market.js):
+   a small "−12%" on its own line, like the bonded note */
+.glut-note {
+  display: block;
+  font-size: 10px;
+  color: var(--amber);
+  opacity: 0.85;
+}
+
 .cargo-table tr.empty td {
   color: var(--steel-dim);
 }

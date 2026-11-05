@@ -906,6 +906,15 @@ export const HUB = {
   ...BALANCE.hub,
 };
 
+// LAST POST'S MARKET (Dan, 5 Nov; js/market.js). From the balance
+// sheet (Settings tab):
+//   absorbCredits   how much of any one good, in credits at its full
+//                   hub price, Last Post takes before that good's price
+//                   is down to Anvil's (times the belt independents'
+//                   reputation tier size, x1 to x4)
+//   halfLifeHours   how fast a glut wears off: it halves this often
+export const MARKET = BALANCE.market;
+
 // LEVEL PERKS for Mining and Trade (balance sheet, Settings tab).
 // Refining and Manufacturing have theirs in REFINERY and WORKSHOP
 // (speedPerLevel). Each counts from level 1, so level 1 = +0%.

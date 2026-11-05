@@ -12,18 +12,23 @@
 // distance flown (TRADE.tonneMinutesPerXp in content.js).
 // Selling at the home dock earns credits but no Trade XP.
 //
-// Later, each station will have its own supply and demand
-// (design doc: "Markets"), and that logic will live here too.
+// The hub's prices are LIVING (Dan, 5 Nov): selling a lot of one
+// good there pushes its price down for a while. That logic lives in
+// market.js; this file asks it what each sale pays. The home dock
+// stays at fixed prices.
 // =============================================================
 
 import { ITEMS, TRADE, HUB } from "../data/content.js";
 import { addXp, getTradeHubPerk } from "./skills.js";
 import { getSellable } from "./bonded.js";
+import { sellIntoMarket, getHubPrice } from "./market.js";
 
 
 // -------------------------------------------------------------
 // getPrice(itemId, market)
-// What one unit sells for. market is "home" or "hub".
+// The NORMAL price of one tonne: market is "home" or "hub".
+// For the hub that's the full price with no glut; today's actual
+// hub price is getHubPrice in market.js.
 // -------------------------------------------------------------
 export function getPrice(itemId, market) {
   const item = ITEMS[itemId];
@@ -99,7 +104,7 @@ export function sellEverything(state) {
 
 
 // -------------------------------------------------------------
-// sellAtHub(state, cargo, xpShare)
+// sellAtHub(state, cargo, xpShare, now)
 // Sells a freighter's cargo at the MERCHANT HUB.
 // cargo lists what the ship carried, e.g.
 //   { iron_ore: 400, nickel_ore: 200 }   (tonnes)
@@ -107,18 +112,22 @@ export function sellEverything(state) {
 // freighters are flying too (1 = all of it; see jobs.js).
 // The goods have already left the home hold when the ship was
 // loaded, so this only pays out - it doesn't touch the hold.
+// "now" is when the sale happens: Last Post's price depends on how
+// much has been sold there lately (market.js).
 // The Trade level perk adds to the whole sale: at Trade 10
 // (+4.5%), a 4,800 cr cargo pays 5,016 cr. It uses the level
 // BEFORE this sale's XP is added.
 // Returns { credits, xp, tonnes, newLevels }.
 // -------------------------------------------------------------
-export function sellAtHub(state, cargo, xpShare = 1) {
+export function sellAtHub(state, cargo, xpShare = 1, now = state.simulatedUpTo) {
   let value = 0;
   let tonnes = 0;
 
   // Object.entries gives pairs: ["iron_ore", 40]
+  // Each item is sold into Last Post's market, which pays the
+  // average price as that item's glut rises (market.js).
   for (const [itemId, amount] of Object.entries(cargo)) {
-    value += amount * getPrice(itemId, "hub");
+    value += sellIntoMarket(state, itemId, amount, now);
     tonnes += amount;
   }
 
@@ -137,15 +146,14 @@ export function sellAtHub(state, cargo, xpShare = 1) {
 
 
 // -------------------------------------------------------------
-// getCargoValue(state, market)
+// getCargoValue(state)
 // What everything in the home hold that can be SOLD is worth at
-// one market ("home" by default, or "hub"). Bonded stock isn't
-// for sale, so it isn't counted.
+// the home dock. Bonded stock isn't for sale, so it isn't counted.
 // -------------------------------------------------------------
-export function getCargoValue(state, market = "home") {
+export function getCargoValue(state) {
   let total = 0;
   for (const itemId of Object.keys(ITEMS)) {
-    total += getSellable(state, itemId) * getPrice(itemId, market);
+    total += getSellable(state, itemId) * getPrice(itemId, "home");
   }
   return total;
 }

@@ -11,6 +11,7 @@
 
 import { createClock } from "./clock.js";
 import { createContracts } from "./contracts.js";
+import { createMarket } from "./market.js";
 
 
 // The version number of the save format.
@@ -35,7 +36,7 @@ import { createContracts } from "./contracts.js";
 //   Version 16: the contracts board, and running totals (stats)
 //   Version 17: reputation kept per faction, contracts name theirs
 //   Version 18: Diplomacy skill, ice, charters replace quotas
-export const SAVE_VERSION = 20;
+export const SAVE_VERSION = 21;
 
 
 // -------------------------------------------------------------
@@ -120,6 +121,10 @@ export function createNewGame() {
 
     // The number the NEXT slipway order will get ("order-1").
     nextOrderNumber: 1,
+
+    // LAST POST'S MARKET (market.js): how much of each good has
+    // been sold there lately, e.g. { iron_ore: { tonnes, at } }.
+    market: createMarket(),
 
     // XP in each skill. Levels are worked out from XP (skills.js).
     skills: {

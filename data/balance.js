@@ -139,6 +139,7 @@ export const BALANCE = {
   fleetXpExponent: 0.4,
   trade: { tonneMinutesPerXp: 15 },
   hub: { travelSeconds: 180 },
+  market: { absorbCredits: 20000000, halfLifeHours: 6 },
   levelPerks: { miningDrillPerLevel: 0.005, tradeHubPricePerLevel: 0.005 },
   refinery: { slotLevels: [1, 10, 25], speedPerLevel: 0.005, openAtMiningLevel: 8 },
   workshop: { openAtRefiningLevel: 8, slotLevels: [1, 12, 35], queueLevels: [8, 25], baseQueue: 3, maxOrderBatches: 20, speedPerLevel: 0.005, standingPerSlot: 2 },

@@ -22,7 +22,7 @@
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import { VERSION } from "../js/version.js";
-import { SHIP_TYPES, ITEMS, COMMAND, FIELDS, HULL_SIZES, HUB } from "../data/content.js";
+import { SHIP_TYPES, ITEMS, COMMAND, FIELDS, HULL_SIZES, HUB, MARKET } from "../data/content.js";
 import { BALANCE } from "../data/balance.js";
 import { createNewGame, SAVE_VERSION } from "../js/state.js";
 import { getMiningXpShare, startMiningJob, startHaulJob, getJobForShip, processJobs, cancelJob, recallJob, resumeJob, getJobProgress, getJobPhase, getTripPlan, getHaulPlan, loadCargo } from "../js/jobs.js";
@@ -48,6 +48,7 @@ import { isBoardOpen, getTier, getReputation, getSubjects, getProgress, canHandI
 import { getMaxOrderBatches, addStandingOrder, removeStandingOrder, getStandingOrders } from "../js/workshop.js";
 import { XP_TABLE, getLevelForXp, getLevel, getLevelProgress, addXp, isShipTypeUnlocked, MAX_LEVEL } from "../js/skills.js";
 import { canBuyShip, buyShipInstantly, canSellShip, sellShip, getSellValue, renameShip, getShipPrice, orderShip } from "../js/shipyard.js";
+import { getHubPrice, getGlut, getAbsorb, quoteSale, sellIntoMarket, getPriceShare } from "../js/market.js";
 import { BERTHS, getBerthFor, getBuilding, getOrders, cancelBuild, getTimeUntilReady, getBuildMs } from "../js/slipway.js";
 import { getCommandCapacity, getCommandUsed, getNextUpgradeCost, buyUpgrade } from "../js/command.js";
 import { isFieldUnlocked, canHullWorkField, getFirstFieldFor, getHullRuleText } from "../js/skills.js";
@@ -86,7 +87,10 @@ let passed = 0;
 let failed = 0;
 
 // A tiny helper: runs one test and prints PASS or FAIL.
+// It puts Last Post's market settings back afterwards, in case the
+// test changed them (see flatHubPrices below).
 function test(name, testFunction) {
+  const marketBefore = { ...MARKET };
   try {
     testFunction();
     console.log("PASS  " + name);
@@ -95,7 +99,17 @@ function test(name, testFunction) {
     console.log("FAIL  " + name);
     console.log("      " + error.message);
     failed++;
+  } finally {
+    Object.assign(MARKET, marketBefore);
   }
+}
+
+// flatHubPrices()
+// For tests written before living markets (5 Nov) that check pay
+// or Trade XP, not the market: makes Last Post absorb any amount,
+// so every sale gets the full hub price. Undone after the test.
+function flatHubPrices() {
+  MARKET.absorbCredits = Infinity;
 }
 
 // The Mining level that unlocks the Excavator, read from the
@@ -317,6 +331,7 @@ test("A big home sale never levels Trade", () => {
 });
 
 test("Selling at the hub: 600 t iron pays 4,800 cr and 120 Trade XP", () => {
+  flatHubPrices();   // checks pay and XP, not the market
   const state = newGame();
   const sale = sellAtHub(state, { iron_ore: 600 });
   assert.equal(sale.credits, 4800);
@@ -327,6 +342,7 @@ test("Selling at the hub: 600 t iron pays 4,800 cr and 120 Trade XP", () => {
 });
 
 test("The hub takes mixed cargo and doesn't touch the home hold", () => {
+  flatHubPrices();   // checks pay and XP, not the market
   const state = newGame();
   state.inventory.iron_ore = 990;                    // stays at home
   const sale = sellAtHub(state, { nickel_ore: 200, iron_ore: 400 });
@@ -940,7 +956,6 @@ test("Selling everything sells every item and adds it all up", () => {
   state.inventory.nickel_ore = 10;
   const expected = 10 * ITEMS.iron_ore.sellPrice + 10 * ITEMS.nickel_ore.sellPrice;
   assert.equal(getCargoValue(state), expected);
-  assert.equal(getCargoValue(state, "hub"), 10 * 8 + 10 * 19);
   const sale = sellEverything(state);
   assert.equal(sale.credits, expected);
   assert.equal(sale.xp, 0);                          // home sales earn no XP
@@ -1073,6 +1088,7 @@ test("Constant runs still wait when the hold is empty", () => {
 });
 
 test("Two Couriers flying at once each keep 66% of their Trade XP", () => {
+  flatHubPrices();   // checks pay and XP, not the market
   const state = gameWithCourier("full");
   state.credits = getShipPrice(state, "courier");
   buyShipInstantly(state, "courier");                     // ship-3
@@ -1103,6 +1119,7 @@ test("A Courier waiting at home for ore doesn't reduce the flying one's XP", () 
 });
 
 test("Paid at the END of trading: 4,800 cr and 120 Trade XP for 600 t iron", () => {
+  flatHubPrices();   // checks pay and XP, not the market
   const state = gameWithCourier();
   state.inventory.iron_ore = 600;
   startHaulJob(state, "ship-2", START);
@@ -1153,6 +1170,7 @@ test("Recall before selling puts the cargo back in the home hold", () => {
 });
 
 test("Recall after selling keeps the money and returns nothing", () => {
+  flatHubPrices();   // checks pay and XP, not the market
   const state = gameWithCourier();
   state.inventory.iron_ore = 600;
   const job = startHaulJob(state, "ship-2", START);
@@ -1244,6 +1262,7 @@ test("Barges + Courier: ticking for 2 hours equals one 2-hour jump", () => {
 });
 
 test("Offline: an hour away with a barge and a Courier sells at the hub", () => {
+  flatHubPrices();   // checks pay and XP, not the market
   const state = gameWithCourier("full");
   startMiningJob(state, "ship-1", "inner_belt", START);
   startHaulJob(state, "ship-2", START);
@@ -1542,6 +1561,7 @@ test("Courier recalled on the way out: no sale, cargo back only when it docks", 
 });
 
 test("Courier recalled while selling: finishes the sale, then flies home", () => {
+  flatHubPrices();   // checks pay and XP, not the market
   const state = gameWithCourier();
   state.inventory.iron_ore = 600;
   const job = startHaulJob(state, "ship-2", START);
@@ -3040,6 +3060,7 @@ test("Perks: the Mining perk shortens only the mining part of a trip", () => {
 });
 
 test("Perks: a Trade 21 Courier sells 600 t iron at the hub for 5,280 cr (4,800 + 10%)", () => {
+  flatHubPrices();   // checks pay and XP, not the market
   const state = gameWithCourier();
   state.skills.trade.xp = XP_TABLE[21];
   state.inventory.iron_ore = 600;
@@ -4834,6 +4855,134 @@ test("Ready surveys: none are flagged until the player owns a scout (Dan, 5 Nov)
 
   const withScout = gameWithScout();
   assert.deepEqual(getReadySurveys(withScout), ["inner_belt_survey"]);        // flagged once a scout exists
+});
+
+// =============================================================
+// LIVING MARKETS (Dan, 5 Nov): Last Post's prices sag with a glut
+// =============================================================
+
+test("Market: Last Post's price falls in a straight line with glut, down to Anvil's price and no lower", () => {
+  // Why: the core rule. The floor matters most: a hub run must
+  // never pay less than selling at home (Dan, 5 Nov).
+  const state = newGame();
+  const item = ITEMS.iron_ore;
+  const absorb = getAbsorb(state, "iron_ore");
+  assert.equal(absorb, MARKET.absorbCredits / item.hubPrice);       // tier x1
+  assert.equal(getHubPrice(state, "iron_ore", START), item.hubPrice); // nothing sold yet
+  sellIntoMarket(state, "iron_ore", absorb / 2, START);
+  assert.ok(Math.abs(getHubPrice(state, "iron_ore", START) - (item.hubPrice + item.sellPrice) / 2) < 1e-9);
+  sellIntoMarket(state, "iron_ore", absorb * 5, START);             // flooded
+  assert.equal(getHubPrice(state, "iron_ore", START), item.sellPrice);
+  assert.equal(getHubPrice(state, "nickel_ore", START), ITEMS.nickel_ore.hubPrice);   // each good has its own glut
+});
+
+test("Market: one 600 t sale pays the same as six 100 t sales", () => {
+  // Why: the average-price rule. Without it, splitting loads (or
+  // constant-run freighters) would dodge the glut.
+  const big = newGame(), small = newGame();
+  const once = sellIntoMarket(big, "nickel_bar", 600, START);
+  let split = 0;
+  for (let i = 0; i < 6; i++) split += sellIntoMarket(small, "nickel_bar", 100, START);
+  assert.ok(Math.abs(once - split) < 1e-6, `${once} vs ${split}`);
+  assert.ok(once < 600 * ITEMS.nickel_bar.hubPrice);                // the glut bit
+  // ...and the quote says the same without selling anything
+  assert.ok(Math.abs(quoteSale(newGame(), "nickel_bar", 600, START) - once) < 1e-6);
+});
+
+test("Market: a sale that runs past the floor pays the slope, then Anvil's price", () => {
+  // Why: the two-part sum in quoteSale is the trickiest maths here.
+  const state = newGame();
+  const item = ITEMS.iron_ore;
+  const absorb = getAbsorb(state, "iron_ore");
+  const credits = quoteSale(state, "iron_ore", absorb * 2, START);
+  const slope = absorb * (item.hubPrice + item.sellPrice) / 2;      // first half: average of the two
+  const flat = absorb * item.sellPrice;                              // second half: Anvil's price
+  assert.ok(Math.abs(credits - (slope + flat)) < 1e-6);
+});
+
+test("Market: a glut halves every half-life, offline or not", () => {
+  // Why: recovery is one formula of time, so time away recovers the
+  // market exactly as time played does.
+  const state = newGame();
+  sellIntoMarket(state, "iron_ore", 1000, START);
+  const halfLife = MARKET.halfLifeHours * HOUR_MS;
+  assert.ok(Math.abs(getGlut(state, "iron_ore", START + halfLife) - 500) < 1e-9);
+  assert.ok(Math.abs(getGlut(state, "iron_ore", START + 2 * halfLife) - 250) < 1e-9);
+  assert.equal(getGlut(state, "iron_ore", START - HOUR_MS), 1000);  // clock set back: no change
+});
+
+test("Market: better reputation with the belt independents lets Last Post absorb more", () => {
+  // Why: Dan's choice (5 Nov) - Last Post's appetite grows with the
+  // same tiers that make their contracts bigger.
+  const state = newGame();
+  const before = getAbsorb(state, "iron_ore");
+  state.contracts.reputation.independents = 1500;                   // Partner, x4
+  assert.equal(getAbsorb(state, "iron_ore"), before * REPUTATION_TIERS[4].size);
+});
+
+test("Market: Anvil's prices never move, however much is sold at Last Post", () => {
+  // Why: Anvil is the Ledger, the safety net (Dan, 5 Nov).
+  const state = newGame();
+  sellIntoMarket(state, "iron_ore", 1_000_000, START);
+  state.inventory.iron_ore = 100;
+  assert.equal(sellAll(state, "iron_ore").credits, 100 * ITEMS.iron_ore.sellPrice);
+});
+
+test("Market: Trade XP for a hub run doesn't depend on the price", () => {
+  // Why: Trade XP is tonnes x distance (29 Oct); a glut must cut
+  // credits only, never levelling.
+  const fresh = newGame(), flooded = newGame();
+  sellIntoMarket(flooded, "iron_ore", 1_000_000, START);
+  const a = sellAtHub(fresh, { iron_ore: 600 }, 1, START);
+  const b = sellAtHub(flooded, { iron_ore: 600 }, 1, START);
+  assert.equal(a.xp, b.xp);
+  assert.ok(b.credits < a.credits);
+});
+
+test("Market: freighters load the good Last Post pays most for today, not the one that's normally dearest", () => {
+  // Why: loading by live price spreads cargo across goods on its own,
+  // which is what a player would do.
+  const state = newGame();
+  state.inventory.nickel_ore = 600;
+  state.inventory.iron_ore = 600;
+  sellIntoMarket(state, "nickel_ore", getAbsorb(state, "nickel_ore") * 10, START);   // nickel crashed to 12
+  assert.ok(getHubPrice(state, "nickel_ore", START) > getHubPrice(state, "iron_ore", START));   // 12 > 8: still dearer
+  assert.deepEqual(loadCargo(state, 600, "full", START), { nickel_ore: 600 });   // a floor of 12 still beats iron's 8
+  // ...but here the order flips: wiring coils are normally dearer
+  // than nickel bars (74 vs 54), but crashed to their floor (46)
+  // they drop below them, so the nickel bars go first.
+  const other = newGame();
+  other.inventory.wiring_coils = 600;
+  other.inventory.nickel_bar = 600;
+  assert.deepEqual(loadCargo(other, 600, "full", START), { wiring_coils: 600 });   // fresh market
+  other.inventory.wiring_coils = 600;
+  sellIntoMarket(other, "wiring_coils", getAbsorb(other, "wiring_coils") * 10, START);
+  assert.deepEqual(loadCargo(other, 600, "full", START), { nickel_bar: 600 });
+  assert.ok(getPriceShare(other, "wiring_coils", START) < 1);
+});
+
+test("Market: an hour of hub runs away gives the same credits and glut as an hour played", () => {
+  // Why: the engine's promise, now that every sale changes a price.
+  const play = (step) => {
+    const state = gameWithCourier("constant");
+    state.simulatedUpTo = START;
+    state.inventory.iron_ore = 20_000;
+    startHaulJob(state, "ship-2", START);
+    for (let t = START + step; t <= START + HOUR_MS; t += step) advanceTo(state, t);
+    return [Math.round(state.credits * 1000), Math.round(getGlut(state, "iron_ore", START + HOUR_MS) * 1000)].join("|");
+  };
+  assert.equal(play(250), play(HOUR_MS));
+});
+
+test("Save: a version 20 save gets an untouched market", () => {
+  // Why: older saves have no market; they should start at full prices.
+  const old = newGame();
+  delete old.market;
+  old.version = 20;
+  const state = parseSave(JSON.stringify(old));
+  assert.equal(state.version, SAVE_VERSION);
+  assert.deepEqual(state.market, { glut: {} });
+  assert.equal(getHubPrice(state, "iron_ore", START), ITEMS.iron_ore.hubPrice);
 });
 
 // -------------------------------------------------------------

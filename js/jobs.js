@@ -71,6 +71,7 @@ import { FIELDS, SHIP_TYPES, ITEMS, HUB, FLEET_XP_EXPONENT, HULL_SIZES } from ".
 import { addItem, findShip } from "./state.js";
 import { addXp, isFieldUnlocked, canHullWorkField, getFirstFieldFor } from "./skills.js";
 import { sellAtHub } from "./trade.js";
+import { getHubPrice } from "./market.js";
 import { startWaitingBatches, finishBatch } from "./refinery.js";
 import { startWaitingOrders, finishWorkshopBatch } from "./workshop.js";
 import { getSellable } from "./bonded.js";
@@ -609,7 +610,7 @@ export function getOreInHold(state) {
 
 
 // -------------------------------------------------------------
-// loadCargo(state, capacity, mode)
+// loadCargo(state, capacity, mode, now)
 // Takes goods out of the home hold to fill a freighter, MOST
 // VALUABLE FIRST (by hub price), so the best goods always go.
 // Bonded stock is left behind.
@@ -618,15 +619,18 @@ export function getOreInHold(state) {
 //   "full" mode:     not enough ore to fill the whole hold
 //   "constant" mode: no ore at all
 // -------------------------------------------------------------
-export function loadCargo(state, capacity, mode) {
+export function loadCargo(state, capacity, mode, now) {
   const available = getOreInHold(state);
 
   if (available === 0) return null;
   if (mode === "full" && available < capacity) return null;
 
-  // Item IDs sorted by hub price, highest first.
+  // Item IDs sorted by Last Post's price RIGHT NOW, highest first,
+  // so a good it's sick of drops down the list (market.js). Without
+  // a time (some tests), the normal hub prices are used.
   // (sort compares two items at a time: b - a puts bigger first)
-  const byValue = Object.keys(ITEMS).sort((a, b) => ITEMS[b].hubPrice - ITEMS[a].hubPrice);
+  const price = (itemId) => now === undefined ? ITEMS[itemId].hubPrice : getHubPrice(state, itemId, now);
+  const byValue = Object.keys(ITEMS).sort((a, b) => price(b) - price(a));
 
   const cargo = {};
   let space = capacity;
@@ -657,7 +661,7 @@ function departWaitingFreighters(state, time) {
 
     const ship = findShip(state, job.shipId);
     const capacity = getShipStats(state, ship.type).cargoCapacity;
-    const cargo = loadCargo(state, capacity, ship.haulMode || "full");
+    const cargo = loadCargo(state, capacity, ship.haulMode || "full", time);
 
     if (cargo) {
       job.status = "travelling";
@@ -1056,7 +1060,7 @@ function runEvent(state, job, time) {
   // --- A freighter finishes trading at the hub: get paid ---
   if (job.type === "haul" && !job.sold) {
     // Credits, plus Trade XP for the haul times this freighter's share
-    const sale = sellAtHub(state, job.cargo, getFreightXpShare(state));
+    const sale = sellAtHub(state, job.cargo, getFreightXpShare(state), time);
     const cargo = job.cargo;
     job.sold = true;
     job.cargo = null;                           // the hold is empty now

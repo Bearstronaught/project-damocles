@@ -17,7 +17,7 @@
 // flicker and sometimes swallow clicks.)
 // =============================================================
 
-import { ITEMS, ITEM_GROUPS, SHIP_TYPES, FIELDS, SKILLS, HULL_SIZES, COMMAND, HUB, HOME, HAUL_MODES, RECIPES, REFINERY, WORKSHOP_RECIPES, WORKSHOP, UPGRADES, SHIP_UPGRADES, SHIP_PARTS, SURVEY_TARGETS, CONTRACTS, KM_PER_SECOND_AT_SPEED_1 } from "../data/content.js";
+import { ITEMS, ITEM_GROUPS, SHIP_TYPES, FIELDS, SKILLS, HULL_SIZES, COMMAND, HUB, HOME, MARKET, HAUL_MODES, RECIPES, REFINERY, WORKSHOP_RECIPES, WORKSHOP, UPGRADES, SHIP_UPGRADES, SHIP_PARTS, SURVEY_TARGETS, CONTRACTS, KM_PER_SECOND_AT_SPEED_1 } from "../data/content.js";
 import { isOwned, canBuyIndustryUpgrade, getUpgradeLines } from "./upgrades.js";
 import { gameNow, SPEEDS } from "./clock.js";
 import { getShipStats, getHullParts, getPartGrade, getPartBonus, getNextUpgrade, canBuyShipUpgrade, getUpgradeName, getHullShortName, findUpgrade, getBonusUpTo, getShipGrades, getPendingRefits } from "./ship-upgrades.js";
@@ -26,6 +26,7 @@ import { getLevel, getLevelProgress, isShipTypeUnlocked, isFieldUnlocked, getFie
 import { canBuyShip, canSellShip, getSellValue, getShipPrice, MAX_NAME_LENGTH } from "./shipyard.js";
 import { getShipPoints, getCommandCapacity, getCommandUsed, getNextUpgradeCost, canBuyUpgrade } from "./command.js";
 import { getCargoValue, getTradeXp } from "./trade.js";
+import { getHubPrice, getPriceShare, quoteSale } from "./market.js";
 import { getBond, getSellable } from "./bonded.js";
 import { getShipArt } from "./art.js";
 import { setupNavigation, navAlert, setScreenOpen } from "./nav.js";
@@ -781,7 +782,9 @@ function freighterTripTable(state, typeId, grades) {
   const perk = getTradeHubPerk(state);
 
   const goodsRows = Object.entries(ITEMS).map(([itemId, item]) => {
-    const hubCredits = Math.round(plan.capacity * item.hubPrice * (1 + perk));
+    // What one full load would fetch at Last Post today, glut included
+    // (market.js). state.simulatedUpTo is "now" in game time.
+    const hubCredits = Math.round(quoteSale(state, itemId, plan.capacity, state.simulatedUpTo) * (1 + perk));
     const homeCredits = plan.capacity * item.sellPrice;
     return `
       <tr>
@@ -1053,7 +1056,12 @@ function buildCargoTable(actions) {
           <span class="bonded-note" data-part="bonded" hidden></span>
         </td>
         <td class="cargo-price">${item.sellPrice}</td>
-        <td class="cargo-price cargo-hub">${item.hubPrice}</td>
+        <td class="cargo-price cargo-hub">
+          <!-- Last Post's price today (market.js), with how far it's
+               below normal on a small line under it when it is -->
+          <span data-part="hub">${item.hubPrice}</span>
+          <span class="glut-note" data-part="glut" hidden></span>
+        </td>
         <td data-part="value">0 cr</td>
         <td><button class="btn btn-small" data-part="sell">Sell</button></td>
       `;
@@ -1869,7 +1877,7 @@ export function render(state, now) {
   // Stat blocks first: the shipyard and fleet then dim the rows
   // inside them, so the rows must exist.
   renderStatsBoxes(state);
-  renderCargo(state);
+  renderCargo(state, now);
   renderStatusStrip(state, now);
   renderFleet(state, now);
   renderRoleGroups(state, now);
@@ -1995,7 +2003,7 @@ function showStock(row, amount, bond) {
 }
 
 // Credits and the cargo hold
-function renderCargo(state) {
+function renderCargo(state, now) {
   byId("credits").textContent = formatNumber(state.credits) + " cr";
 
   for (const [itemId, item] of Object.entries(ITEMS)) {
@@ -2013,6 +2021,19 @@ function renderCargo(state) {
     // Short form ("2.4M cr") so big values fit the narrow panel.
     part(row, "value").textContent = formatCreditsShort(sellable * item.sellPrice);
     part(row, "sell").disabled = sellable === 0;
+
+    // Last Post's price today: lower while it's glutted with this
+    // good (market.js). Under it, e.g. "−12%" while it recovers.
+    const share = getPriceShare(state, itemId, now);
+    setText(part(row, "hub"), formatPrice(getHubPrice(state, itemId, now)));
+    const glut = part(row, "glut");
+    const glutted = share < 0.995;            // ignore a tiny leftover glut
+    glut.hidden = !glutted;
+    if (glutted) setText(glut, `−${Math.round((1 - share) * 100)}%`);
+    row.querySelector(".cargo-hub").title = glutted
+      ? `${HUB.name} has had a lot of this lately, so it pays less. The glut halves every ${MARKET.halfLifeHours} hours. It never pays less than ${HOME.name}.`
+      : `${HUB.name} pays the full price for this today.`;
+
     // Dim rows for items you have none of
     row.classList.toggle("empty", amount === 0);
 
@@ -2030,9 +2051,9 @@ function renderCargo(state) {
 
   // The note under the table, with the Trade perk once it's earned.
   const perk = getTradeHubPerk(state);
-  const note = `Selling here is instant at the home price. ${HUB.name} pays the hub price` +
+  const note = `Selling here is instant at the home price, which never changes. ${HUB.name} pays the hub price` +
     (perk > 0 ? ` (+${formatPercent(perk)} from your Trade level)` : "") +
-    `, but needs a freighter to haul the goods there. Only freighters earn Trade XP.`;
+    `, but needs a freighter to haul the goods there, and its price for a good drops for a while after a lot of it arrives. Only freighters earn Trade XP.`;
   if (byId("hub-note").textContent !== note) byId("hub-note").textContent = note;
 
   // Each section's header: its total tonnes, and on the Command
@@ -3101,6 +3122,17 @@ export function formatXp(xp) {
 }
 
 // 75000 ms -> "1m 15s";  9000 ms -> "9s"
+// -------------------------------------------------------------
+// formatPrice(credits)
+// A price per tonne: whole credits from 10 up ("54"), one decimal
+// below that so a small drop still shows ("7.4"), but never a
+// pointless ".0" ("8", not "8.0").
+// -------------------------------------------------------------
+export function formatPrice(credits) {
+  if (credits >= 10) return String(Math.round(credits));
+  return credits.toFixed(1).replace(/\.0$/, "");   // "8.0" -> "8"
+}
+
 export function formatDuration(ms) {
   const totalSeconds = Math.ceil(ms / 1000);
   const hours = Math.floor(totalSeconds / 3600);
