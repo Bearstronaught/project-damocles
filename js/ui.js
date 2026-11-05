@@ -17,11 +17,12 @@
 // flicker and sometimes swallow clicks.)
 // =============================================================
 
-import { ITEMS, ITEM_GROUPS, SHIP_TYPES, FIELDS, SKILLS, HULL_SIZES, COMMAND, HUB, HOME, MARKET, HAUL_MODES, RECIPES, REFINERY, WORKSHOP_RECIPES, WORKSHOP, UPGRADES, SHIP_UPGRADES, SHIP_PARTS, SURVEY_TARGETS, CONTRACTS, KM_PER_SECOND_AT_SPEED_1 } from "../data/content.js";
+import { ITEMS, ITEM_GROUPS, SHIP_TYPES, FIELDS, SKILLS, HULL_SIZES, COMMAND, HUB, HOME, MARKET, HAUL_MODES, RECIPES, REFINERY, WORKSHOP_RECIPES, WORKSHOP, UPGRADES, SHIP_UPGRADES, SHIP_PARTS, SURVEY_TARGETS, CONTRACTS, KM_PER_SECOND_AT_SPEED_1, LOGISTICS } from "../data/content.js";
 import { isOwned, canBuyIndustryUpgrade, getUpgradeLines } from "./upgrades.js";
 import { gameNow, SPEEDS } from "./clock.js";
 import { getShipStats, getHullParts, getPartGrade, getPartBonus, getNextUpgrade, canBuyShipUpgrade, getUpgradeName, getHullShortName, findUpgrade, getBonusUpTo, getShipGrades, getPendingRefits } from "./ship-upgrades.js";
-import { getJobForShip, getJobPhase, getTripPlan, getHaulPlan, getOreInHold, getMiningXpShare } from "./jobs.js";
+import { getJobForShip, getJobPhase, getTripPlan, getHaulPlan, getOreInHold, getMiningXpShare, getManagedLeaveTime } from "./jobs.js";
+import { hasLogisticsOffice } from "./logistics.js";
 import { getLevel, getLevelProgress, isShipTypeUnlocked, isFieldUnlocked, getFieldRequirement, getMiningDrillPerk, getTradeHubPerk, getLevelPerk, canHullWorkField, getHullRuleText } from "./skills.js";
 import { canBuyShip, canSellShip, getSellValue, getShipPrice, MAX_NAME_LENGTH } from "./shipyard.js";
 import { getShipPoints, getCommandCapacity, getCommandUsed, getNextUpgradeCost, canBuyUpgrade } from "./command.js";
@@ -1511,11 +1512,13 @@ function buildWorkshop(actions) {
 
 
 // The buildings with upgrades, in screen order, and their names.
-// The Shipyard frame holds the heavy slipway (Dan, 5 Nov).
+// The Shipyard frame holds the heavy slipway (Dan, 5 Nov), and the
+// Logistics frame the Logistics office and its rules (5 Nov).
 const UPGRADE_BUILDINGS = {
   refinery: "Refinery",
   workshop: "Workshop",
   shipyard: "Shipyard",
+  logistics: "Logistics",
 };
 
 // -------------------------------------------------------------
@@ -1589,9 +1592,84 @@ function buildUpgrades(actions) {
       }
       groupBody.appendChild(frame);
     }
+    // The Logistics frame also holds the office's rules, shown
+    // once the office is bought (see renderLogisticsRules).
+    if (building === "logistics") groupBody.appendChild(buildLogisticsRules(actions));
     rememberOpenState(group);
     list.appendChild(group);
   }
+}
+
+
+// -------------------------------------------------------------
+// buildLogisticsRules(actions)
+// The Logistics office's settings (logistics.js), as one sentence
+// the player fills in:
+//   "Freighters leave when the hold can fill them [100%], or after
+//    waiting [20 min], whichever comes first. [x] Stagger part loads"
+// The dropdowns offer the choices in LOGISTICS (content.js).
+// Hidden until the office is owned.
+// -------------------------------------------------------------
+function buildLogisticsRules(actions) {
+  const box = document.createElement("div");
+  box.className = "component-block logistics-rules";
+  box.id = "logistics-rules";
+  box.hidden = true;
+
+  // <option> lists for the two dropdowns
+  const fillOptions = LOGISTICS.fillChoices
+    .map((p) => `<option value="${p}">${p}%</option>`).join("");
+  const waitOptions = LOGISTICS.waitChoices
+    .map((m) => `<option value="${m}">${m} min</option>`).join("");
+
+  box.innerHTML = `
+    <h3 class="sub-title">Departure rules</h3>
+    <p class="upgrade-desc">
+      Freighters leave when the hold can fill them to
+      <select class="dest-select" data-part="fill" aria-label="Fill level to leave at">${fillOptions}</select>
+      or after waiting
+      <select class="dest-select" data-part="wait" aria-label="Longest wait before leaving">${waitOptions}</select>,
+      whichever comes first. A full hold's worth always leaves at once.
+    </p>
+    <label class="upgrade-desc logistics-stagger">
+      <input type="checkbox" data-part="stagger">
+      Stagger part loads, so freighters don't all leave together
+    </label>
+  `;
+
+  // Changing a setting: the select's value is text, so Number() turns
+  // "75" into 75 before it's checked against the allowed choices.
+  part(box, "fill").addEventListener("change", (event) => {
+    actions.setLogisticsRule("fillPercent", Number(event.target.value));
+  });
+  part(box, "wait").addEventListener("change", (event) => {
+    actions.setLogisticsRule("waitMinutes", Number(event.target.value));
+  });
+  part(box, "stagger").addEventListener("change", (event) => {
+    actions.setLogisticsRule("stagger", event.target.checked);
+  });
+  return box;
+}
+
+
+// -------------------------------------------------------------
+// renderLogisticsRules(state)
+// Shows the rules once the office is owned, and keeps the
+// controls matching the save. A control the player is using right
+// now is left alone, so a redraw never snatches it from them.
+// -------------------------------------------------------------
+function renderLogisticsRules(state) {
+  const box = byId("logistics-rules");
+  box.hidden = !hasLogisticsOffice(state);
+  if (box.hidden) return;
+
+  const rules = state.logistics;
+  const fill = part(box, "fill");
+  const wait = part(box, "wait");
+  const stagger = part(box, "stagger");
+  if (document.activeElement !== fill) fill.value = String(rules.fillPercent);
+  if (document.activeElement !== wait) wait.value = String(rules.waitMinutes);
+  if (document.activeElement !== stagger) stagger.checked = rules.stagger;
 }
 
 
@@ -1611,6 +1689,10 @@ function renderUpgrades(state) {
   // The heavy slipway is paid in workshop products, so the
   // Shipyard frame appears with the workshop.
   byId("upgrades-shipyard").hidden = !isWorkshopOpen(state);
+  // So is the Logistics office (hull plating), so the same goes
+  // for the Logistics frame.
+  byId("upgrades-logistics").hidden = !isWorkshopOpen(state);
+  renderLogisticsRules(state);
 
   let owned = 0;
   let ready = 0;   // can be bought right now (and its group is showing)
@@ -2311,10 +2393,14 @@ function renderFreighterCard(state, ship, card, now) {
   const job = getJobForShip(state, ship.id);
   const capacity = getShipStats(state, ship.type).cargoCapacity;
   const mode = ship.haulMode || "full";
+  const managed = hasLogisticsOffice(state);
   renderSpecs(state, ship, card);
 
-  // Highlight the chosen haul mode.
-  for (const modeButton of part(card, "modes").querySelectorAll(".dest-btn")) {
+  // Highlight the chosen haul mode. With the Logistics office the
+  // office's rules decide instead, so the two buttons are hidden.
+  const picker = part(card, "modes");
+  picker.hidden = managed;
+  for (const modeButton of picker.querySelectorAll(".dest-btn")) {
     modeButton.classList.toggle("selected", modeButton.dataset.mode === mode);
   }
 
@@ -2354,9 +2440,13 @@ function renderFreighterCard(state, ship, card, now) {
   if (phase.phase === "waiting") {
     // Say what it's waiting for, so the player knows why it's idle.
     const ore = getOreInHold(state);
-    text = mode === "full"
-      ? `Waiting for a full hold — ${formatTonnes(Math.min(ore, capacity))} of ${formatTonnes(capacity)} ready`
-      : `Waiting for ore to load`;
+    if (managed) {
+      text = managedWaitingText(state, job, ship, capacity, ore, now);
+    } else {
+      text = mode === "full"
+        ? `Waiting for a full hold — ${formatTonnes(Math.min(ore, capacity))} of ${formatTonnes(capacity)} ready`
+        : `Waiting for ore to load`;
+    }
   }
   if (phase.phase === "loading") text = `Loading ${formatTonnes(tonnes)} at ${HOME.name} — leaves in ${timeLeft}`;
   if (phase.phase === "outbound") text = `Hauling ${formatTonnes(tonnes)} to ${HUB.name} — arrives in ${timeLeft}`;
@@ -2367,6 +2457,30 @@ function renderFreighterCard(state, ship, card, now) {
   status.textContent = text;
   button.textContent = job.recall ? "Resume" : "Recall";
   card.classList.add("busy", "phase-" + phase.phase);
+}
+
+
+// -------------------------------------------------------------
+// managedWaitingText(state, job, ship, capacity, ore, now)
+// What a waiting freighter says once the Logistics office manages
+// it, so the player can see which rule it's waiting on:
+//   "Waiting for goods to load"                (nothing to take)
+//   "Leaving now — 600 t ready"                (it's about to go)
+//   "Waiting — 200 t of 600 t ready, leaves in 12m 30s by the
+//    20 min rule" (or "...by the stagger" when that's what's
+//    holding it back)
+// -------------------------------------------------------------
+function managedWaitingText(state, job, ship, capacity, ore, now) {
+  const leaveAt = getManagedLeaveTime(state, job, ship, capacity);
+  if (leaveAt === null) return "Waiting for goods to load";
+  const ready = `${formatTonnes(Math.min(ore, capacity))} of ${formatTonnes(capacity)} ready`;
+  if (leaveAt <= now) return `Leaving now — ${ready}`;
+
+  // Which rule is it waiting on? If its own wait ends after the
+  // leave time, it's the stagger; otherwise the wait rule.
+  const waitEnds = job.startedAt + state.logistics.waitMinutes * 60 * 1000;
+  const why = leaveAt > waitEnds ? "after the stagger gap" : `by the ${state.logistics.waitMinutes} min rule`;
+  return `Waiting — ${ready}, leaves in ${formatDuration(leaveAt - now)} ${why}`;
 }
 
 

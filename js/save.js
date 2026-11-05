@@ -13,6 +13,7 @@ import { RULES, SHIP_TYPES } from "../data/content.js";
 import { SAVE_VERSION, createExploration } from "./state.js";
 import { createContracts } from "./contracts.js";
 import { createMarket } from "./market.js";
+import { createLogistics } from "./logistics.js";
 import { getTripPlan } from "./jobs.js";
 import { advanceTo } from "./simulation.js";
 import { createClock } from "./clock.js";
@@ -506,7 +507,16 @@ function upgradeSave(state) {
     state.version = 21;
   }
 
-  // (Future: if (state.version === 21) { ...; state.version = 22; })
+  // --- Version 21 -> 22: the Logistics office ---
+  // The office (Trade 15) manages freighters by a few rules kept
+  // in state.logistics. Older saves get the default rules; they
+  // only matter once the office is bought.
+  if (state.version === 21) {
+    state.logistics = createLogistics();
+    state.version = 22;
+  }
+
+  // (Future: if (state.version === 22) { ...; state.version = 23; })
 
   if (state.version > SAVE_VERSION) {
     // A save from a NEWER version of the game than this one.

@@ -33,6 +33,7 @@ import { getUnlocksAtLevel, getFieldUnlocksAtLevel, isFieldUnlocked, canHullWork
 import { setRecipe, getRefineJob, getRecipeUnlocksAtLevel, getSlotUnlocksAtLevel } from "./refinery.js";
 import { addOrder, cancelOrder, getWorkshopJob, getWorkshopRecipeUnlocksAtLevel, getWorkshopSlotUnlocksAtLevel, isQueueUnlockLevel, getQueueLimit, addStandingOrder, removeStandingOrder, getStandingOrders } from "./workshop.js";
 import { buyIndustryUpgrade, getUpgradeUnlocksAtLevel } from "./upgrades.js";
+import { setLogisticsRule } from "./logistics.js";
 import { buyShipUpgrade, getShipUpgradeUnlocksAtLevel, getUpgradeName, getPendingRefits } from "./ship-upgrades.js";
 import { getLevelPerk } from "./skills.js";
 import { startScoutJob, canScoutGo, chooseNextTarget, getTarget, getTargetUnlocksAtLevel, isExplorationOpen, DEEP_SCAN_ID,
@@ -256,6 +257,15 @@ const actions = {
     refresh();
   },
 
+  // Changes one of the Logistics office's rules, e.g.
+  // ("fillPercent", 75). The engine checks waiting freighters
+  // against the new rule straight away, on the next refresh.
+  setLogisticsRule(rule, value) {
+    const result = setLogisticsRule(state, rule, value);
+    if (!result.ok) addLog(`Logistics rule not changed: ${result.reason}`, "trade");
+    refresh();
+  },
+
   // Gives a refinery slot a recipe, or switches it off (null).
   setRecipe(slot, recipeId) {
     const before = getRefineJob(state, slot);
@@ -331,7 +341,7 @@ const actions = {
     const result = buyIndustryUpgrade(state, upgradeId);
     if (result.ok) {
       const upgrade = UPGRADES[upgradeId];
-      addLog(`Upgrade installed: ${upgrade.name}. ${upgrade.description}`, { refinery: "refine", workshop: "make", shipyard: "fleet" }[upgrade.building]);
+      addLog(`Upgrade installed: ${upgrade.name}. ${upgrade.description}`, { refinery: "refine", workshop: "make", shipyard: "fleet", logistics: "trade" }[upgrade.building]);
     }
     refresh();
     return result;

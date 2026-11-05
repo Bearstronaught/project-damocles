@@ -64,6 +64,7 @@ export const BALANCE = {
     precision_tooling_3: { building: 'workshop', skill: 'manufacturing', level: 40, requires: 'precision_tooling_2', costs: { thruster_assembly: 300 }, credits: 400000, effect: 'workshopSpeed', value: 0.1 },
     control_centre: { building: 'workshop', skill: 'manufacturing', level: 30, requires: null, costs: { thruster_assembly: 120, cargo_pod: 120 }, credits: 300000, effect: 'standingOrders', value: 1 },
     heavy_slipway: { building: 'shipyard', skill: 'mining', level: 30, requires: null, costs: { structural_frames: 300 }, credits: 1000000, effect: 'heavySlipway', value: 1 },
+    logistics_office: { building: 'logistics', skill: 'trade', level: 15, requires: null, costs: { hull_plating: 40 }, credits: 40000, effect: 'logistics', value: 1 },
   },
   shipUpgrades: {
     prospector_drill_1: { hull: 'prospector', part: 'drill', grade: 1, skill: 'mining', level: 2, credits: 3000, costs: {}, bonus: 0.15 },

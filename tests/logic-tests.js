@@ -49,6 +49,8 @@ import { getMaxOrderBatches, addStandingOrder, removeStandingOrder, getStandingO
 import { XP_TABLE, getLevelForXp, getLevel, getLevelProgress, addXp, isShipTypeUnlocked, MAX_LEVEL } from "../js/skills.js";
 import { canBuyShip, buyShipInstantly, canSellShip, sellShip, getSellValue, renameShip, getShipPrice, orderShip } from "../js/shipyard.js";
 import { getHubPrice, getGlut, getAbsorb, quoteSale, sellIntoMarket, getPriceShare } from "../js/market.js";
+import { createLogistics, hasLogisticsOffice, getLeaveTime, getStaggerGapMs, setLogisticsRule } from "../js/logistics.js";
+import { LOGISTICS } from "../data/content.js";
 import { BERTHS, getBerthFor, getBuilding, getOrders, cancelBuild, getTimeUntilReady, getBuildMs } from "../js/slipway.js";
 import { getCommandCapacity, getCommandUsed, getNextUpgradeCost, buyUpgrade } from "../js/command.js";
 import { isFieldUnlocked, canHullWorkField, getFirstFieldFor, getHullRuleText } from "../js/skills.js";
@@ -4988,6 +4990,170 @@ test("Save: a version 20 save gets an untouched market", () => {
   assert.equal(state.version, SAVE_VERSION);
   assert.deepEqual(state.market, { glut: {} });
   assert.equal(getHubPrice(state, "iron_ore", START), ITEMS.iron_ore.hubPrice);
+});
+
+// -------------------------------------------------------------
+// THE LOGISTICS OFFICE (logistics.js; Trade 15, Dan, 5 Nov)
+// -------------------------------------------------------------
+
+// A game with the office bought and "count" Couriers on hub runs
+// from START, plus "tonnes" of nickel ore in the hold. Returns the
+// game and a function that tells when each Courier left.
+function officeGame(count, tonnes, rules = {}) {
+  const state = newGame();
+  state.simulatedUpTo = START;
+  state.upgrades.logistics_office = true;
+  Object.assign(state.logistics, rules);
+  const ids = [];
+  for (let i = 0; i < count; i++) {
+    state.credits = 10_000_000;
+    ids.push(buyShipInstantly(state, "courier").id);
+  }
+  state.credits = 0;
+  state.inventory.nickel_ore = tonnes;
+  for (const id of ids) startHaulJob(state, id, START);
+  // Each Courier's first departure, in minutes after START
+  // (null = it hasn't left), read from the job's start time.
+  const departures = {};
+  const watch = () => {
+    for (const job of state.jobs) {
+      if (job.type === "haul" && job.status === "travelling" && departures[job.shipId] === undefined) {
+        departures[job.shipId] = (job.startedAt - START) / MINUTE;
+      }
+    }
+  };
+  watch();
+  return { state, ids, departures, watch };
+}
+
+test("Logistics office: opens at Trade 15 for 40 t hull plating and 40,000 cr", () => {
+  // Why: the level and price Dan set (Trade 15 since 5 Nov, was 10).
+  const office = UPGRADES.logistics_office;
+  assert.equal(office.skill, "trade");
+  assert.equal(office.level, 15);
+  assert.deepEqual(office.costs, { hull_plating: 40 });
+  assert.equal(office.credits, 40000);
+  const state = newGame();
+  state.inventory.hull_plating = 40;
+  state.credits = 40000;
+  devSetLevel(state, "trade", 14);
+  assert.equal(canBuyIndustryUpgrade(state, "logistics_office").ok, false);
+  devSetLevel(state, "trade", 15);
+  assert.equal(buyIndustryUpgrade(state, "logistics_office").ok, true);
+  assert.equal(hasLogisticsOffice(state), true);
+});
+
+test("Logistics office: a new game starts with the default rules (100%, 20 min, staggered)", () => {
+  // Why: so a freshly bought office behaves like Full loads with a 20-minute limit.
+  assert.deepEqual(newGame().logistics, { fillPercent: 100, waitMinutes: 20, stagger: true, lastDepartureAt: null });
+  assert.deepEqual(createLogistics().fillPercent, LOGISTICS.defaultFillPercent);
+});
+
+test("Logistics office: leave time follows the rules (nothing, full hold, fill rule, wait)", () => {
+  // Why: the one function that both decides and schedules departures.
+  // A 600 t Courier, waiting since START, fill 75%, wait 20 min, no other departures.
+  const state = newGame();
+  Object.assign(state.logistics, { fillPercent: 75, waitMinutes: 20 });
+  const job = { startedAt: START };
+  const at = (tonnes) => getLeaveTime(state, job, 600, tonnes, 7 * MINUTE, 1);
+  assert.equal(at(0), null);                         // nothing to take: wait for goods
+  assert.equal(at(600), START);                      // a full hold's worth: go now
+  assert.equal(at(450), START);                      // exactly 75%: go now
+  assert.equal(at(449), START + 20 * MINUTE);        // just under: wait out the 20 minutes
+});
+
+test("Logistics office: the stagger gap is a round trip divided by the freighters on runs", () => {
+  // Why: Dan's 1 Nov design, freighters spread out instead of leaving together.
+  const state = newGame();
+  assert.equal(getStaggerGapMs(state, 7 * MINUTE, 3), 7 * MINUTE / 3);
+  assert.equal(getStaggerGapMs(state, 7 * MINUTE, 1), 0);   // nobody to spread out from
+  state.logistics.stagger = false;
+  assert.equal(getStaggerGapMs(state, 7 * MINUTE, 3), 0);
+});
+
+test("Logistics office: a part load waits out the wait rule, then leaves with it", () => {
+  // Why: the wait rule must fire on its own, with no new ore arriving.
+  const { state, ids, departures, watch } = officeGame(1, 400);   // 400 t: under 100% of 600
+  advanceTo(state, START + 19 * MINUTE); watch();
+  assert.equal(departures[ids[0]], undefined);       // still waiting at 19 minutes
+  advanceTo(state, START + 21 * MINUTE); watch();
+  assert.equal(departures[ids[0]], 20);              // left at exactly 20
+  assert.deepEqual(getJobForShip(state, ids[0]).cargo, { nickel_ore: 400 });
+});
+
+test("Logistics office: full loads leave together, the part load staggers", () => {
+  // Why: staggering is for part loads only; holding back a full
+  // freighter would just leave ore sitting at home.
+  const { state, ids, departures, watch } = officeGame(3, 1500, { fillPercent: 25 });
+  // (Checked at 3 minutes: by 10 the third would be home again.)
+  advanceTo(state, START + 3 * MINUTE); watch();
+  assert.equal(departures[ids[0]], 0);               // 600 t, full: now
+  assert.equal(departures[ids[1]], 0);               // 600 t, full: now too
+  const gap = getHaulPlan(state, "courier").durationMs / 3 / MINUTE;
+  assert.ok(Math.abs(departures[ids[2]] - gap) < 1e-9, `third left at ${departures[ids[2]]}, expected ${gap}`);
+});
+
+test("Logistics office: without staggering, the part load leaves at once by the fill rule", () => {
+  // Why: the stagger switch must really switch it off.
+  const { state, ids, departures, watch } = officeGame(3, 1500, { fillPercent: 25, stagger: false });
+  advanceTo(state, START + MINUTE); watch();
+  assert.deepEqual(ids.map((id) => departures[id]), [0, 0, 0]);
+});
+
+test("Logistics office: shortening the wait sends a freighter now, never back in time", () => {
+  // Why: a freighter that has waited 15 minutes must not leave
+  // "10 minutes ago" when the wait is cut to 5 (its sale would come early).
+  const { state, ids, departures, watch } = officeGame(1, 400, { waitMinutes: 60 });
+  advanceTo(state, START + 15 * MINUTE); watch();
+  assert.equal(departures[ids[0]], undefined);
+  assert.equal(setLogisticsRule(state, "waitMinutes", 5).ok, true);
+  advanceTo(state, START + 15 * MINUTE + 250); watch();
+  assert.ok(departures[ids[0]] >= 15, `left at ${departures[ids[0]]} minutes`);
+});
+
+test("Logistics office: rules only take the values the Industry tab offers, and need the office", () => {
+  // Why: a bad value from an edited save or a bug can't stall freighters.
+  const state = newGame();
+  assert.equal(setLogisticsRule(state, "fillPercent", 75).ok, false);   // no office yet
+  state.upgrades.logistics_office = true;
+  assert.equal(setLogisticsRule(state, "fillPercent", 75).ok, true);
+  assert.equal(setLogisticsRule(state, "fillPercent", 33).ok, false);
+  assert.equal(setLogisticsRule(state, "waitMinutes", 0).ok, false);
+  assert.equal(setLogisticsRule(state, "stagger", "yes").ok, false);
+  assert.equal(state.logistics.fillPercent, 75);
+});
+
+test("Logistics office: without it, freighters keep their Full loads habit", () => {
+  // Why: the office must change nothing until it's bought.
+  const state = gameWithCourier("full");
+  state.simulatedUpTo = START;
+  state.inventory.nickel_ore = 400;
+  startHaulJob(state, "ship-2", START);
+  advanceTo(state, START + 2 * HOUR);
+  assert.equal(getJobForShip(state, "ship-2").status, "waiting");   // still waiting for 600 t
+});
+
+test("Logistics office: two hours of managed hub runs away match two hours played", () => {
+  // Why: the engine's promise. The office adds timer events, so
+  // tiny ticks and one big jump must give the same result.
+  const play = (step) => {
+    const { state } = officeGame(3, 0, { fillPercent: 50, waitMinutes: 5 });
+    // A Prospector mining keeps ore trickling in, so the rules matter.
+    startMiningJob(state, "ship-1", "inner_belt", START);
+    for (let t = START + step; t <= START + 2 * HOUR; t += step) advanceTo(state, t);
+    return [Math.round(state.credits), state.skills.trade.xp.toFixed(3), state.logistics.lastDepartureAt].join("|");
+  };
+  assert.equal(play(250), play(2 * HOUR));
+});
+
+test("Save: a version 21 save gets the Logistics office's default rules", () => {
+  // Why: older saves have no state.logistics.
+  const old = newGame();
+  delete old.logistics;
+  old.version = 21;
+  const state = parseSave(JSON.stringify(old));
+  assert.equal(state.version, SAVE_VERSION);
+  assert.deepEqual(state.logistics, createLogistics());
 });
 
 // -------------------------------------------------------------

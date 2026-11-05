@@ -12,6 +12,7 @@
 import { createClock } from "./clock.js";
 import { createContracts } from "./contracts.js";
 import { createMarket } from "./market.js";
+import { createLogistics } from "./logistics.js";
 
 
 // The version number of the save format.
@@ -36,7 +37,11 @@ import { createMarket } from "./market.js";
 //   Version 16: the contracts board, and running totals (stats)
 //   Version 17: reputation kept per faction, contracts name theirs
 //   Version 18: Diplomacy skill, ice, charters replace quotas
-export const SAVE_VERSION = 21;
+//   Version 19: surveys announced once each
+//   Version 20: ships are built on slipways
+//   Version 21: Last Post's living market
+//   Version 22: the Logistics office's settings (logistics.js)
+export const SAVE_VERSION = 22;
 
 
 // -------------------------------------------------------------
@@ -125,6 +130,12 @@ export function createNewGame() {
     // LAST POST'S MARKET (market.js): how much of each good has
     // been sold there lately, e.g. { iron_ore: { tonnes, at } }.
     market: createMarket(),
+
+    // THE LOGISTICS OFFICE's rules (logistics.js): how full a
+    // freighter must be to leave, how long it waits at most, and
+    // whether part loads are staggered. Only used once the office
+    // is built (Trade 15).
+    logistics: createLogistics(),
 
     // XP in each skill. Levels are worked out from XP (skills.js).
     skills: {

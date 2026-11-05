@@ -602,6 +602,11 @@ export const UPGRADES = {
     description: "A second berth beside the slipway, big enough for large hulls. Large hulls build here, so they never hold up the small and medium ones.",
     ...BALANCE.upgrades.heavy_slipway,
   },
+  logistics_office: {
+    name: "Logistics office",
+    description: "Freighters are managed: each leaves once the hold can fill it to a set level, or after a set wait, and part loads are staggered so they don't all leave together. Set the rules on the Industry tab.",
+    ...BALANCE.upgrades.logistics_office,
+  },
 };
 
 
@@ -955,6 +960,22 @@ for (const [id, upgrade] of Object.entries(BALANCE.shipUpgrades)) {
 export const HAUL_MODES = {
   full: { name: "Full loads" },
   constant: { name: "Constant runs" },
+};
+
+
+// -------------------------------------------------------------
+// THE LOGISTICS OFFICE's settings (logistics.js; Dan, 1 Nov).
+// Once it's built, every freighter leaves when the hold can fill
+// it to fillPercent, or after waitMinutes, whichever comes first.
+// The choices are what the Industry tab's dropdowns offer; the
+// defaults are what a new office starts with: full loads, but
+// never more than 20 minutes waiting for them.
+// -------------------------------------------------------------
+export const LOGISTICS = {
+  fillChoices: [25, 50, 75, 100],        // % of the hold
+  waitChoices: [5, 10, 20, 30, 60],      // minutes
+  defaultFillPercent: 100,
+  defaultWaitMinutes: 20,
 };
 
 

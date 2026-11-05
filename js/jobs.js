@@ -25,7 +25,8 @@
 //
 // A HAUL run (freighters) is a loop:
 //   WAITING   docked at home until there's ore to load
-//             (a full hold, or any ore at all - see HAUL_MODES)
+//             (a full hold, or any ore at all - see HAUL_MODES;
+//             with the Logistics office, its rules - logistics.js)
 //   LOADING   move the cargo aboard (it leaves the hold at the start)
 //   OUTBOUND  fly the cargo to the merchant hub
 //   TRADING   unload at the hub and sell (paid at the END of this)
@@ -72,6 +73,7 @@ import { addItem, findShip } from "./state.js";
 import { addXp, isFieldUnlocked, canHullWorkField, getFirstFieldFor } from "./skills.js";
 import { sellAtHub } from "./trade.js";
 import { getHubPrice } from "./market.js";
+import { hasLogisticsOffice, getLeaveTime } from "./logistics.js";
 import { startWaitingBatches, finishBatch } from "./refinery.js";
 import { startWaitingOrders, finishWorkshopBatch } from "./workshop.js";
 import { getSellable } from "./bonded.js";
@@ -666,6 +668,30 @@ export function hasMarketDesk(state) {
 
 
 // -------------------------------------------------------------
+// getManagedLeaveTime(state, job, ship, capacity)
+// With the Logistics office: when this waiting freighter may
+// leave, going by the home hold right now, or null if it must
+// wait for more goods. A thin wrapper that gathers what
+// logistics.js needs: the tonnes it could take, its round trip,
+// and how many freighters share the stagger.
+// Used both to decide (departWaitingFreighters) and to schedule
+// the moment it will be decided (findNextEvent), so the two can
+// never disagree.
+// -------------------------------------------------------------
+export function getManagedLeaveTime(state, job, ship, capacity) {
+  const available = getOreInHold(state);
+  const roundTripMs = getHaulPlan(state, ship.type).durationMs;
+  const freightersOnRuns = state.jobs.filter((j) => j.type === "haul").length;
+  const leaveAt = getLeaveTime(state, job, capacity, available, roundTripMs, freightersOnRuns);
+  if (leaveAt === null) return null;
+  // Never in time already played: if the player shortens the wait
+  // after a freighter has waited longer than that, it leaves now,
+  // not "15 minutes ago" (which would bring its sale forward).
+  return Math.max(leaveAt, state.simulatedUpTo);
+}
+
+
+// -------------------------------------------------------------
 // departWaitingFreighters(state, time)
 // Every freighter waiting at home checks whether it can load
 // up now. Those that can, leave at "time".
@@ -673,12 +699,26 @@ export function hasMarketDesk(state) {
 // waiting for the same ore, the one bought first goes first.
 // -------------------------------------------------------------
 function departWaitingFreighters(state, time) {
+  const managed = hasLogisticsOffice(state);
+
   for (const job of state.jobs) {
     if (job.type !== "haul" || job.status !== "waiting") continue;
 
     const ship = findShip(state, job.shipId);
     const capacity = getShipStats(state, ship.type).cargoCapacity;
-    const cargo = loadCargo(state, capacity, ship.haulMode || "full", time);
+
+    let cargo;
+    if (managed) {
+      // The Logistics office decides (logistics.js): only leave once
+      // its rules allow, then take whatever fits ("constant" loading
+      // takes any amount, up to a full hold).
+      const leaveAt = getManagedLeaveTime(state, job, ship, capacity);
+      cargo = (leaveAt !== null && leaveAt <= time) ? loadCargo(state, capacity, "constant", time) : null;
+      if (cargo) state.logistics.lastDepartureAt = time;   // the next one staggers from here
+    } else {
+      // No office: the freighter's own habit, Full loads or Constant runs.
+      cargo = loadCargo(state, capacity, ship.haulMode || "full", time);
+    }
 
     if (cargo) {
       job.status = "travelling";
@@ -923,7 +963,9 @@ function startWaitingAll(state, time) {
 //   Refinery or workshop job: the current batch finishing
 //   A slipway build:  the hull finishing (slipway.js)
 //   Waiting freighters, refinery slots and workshop slots have
-//   no event - they wait for goods.
+//   no event - they wait for goods. (Except a freighter managed by
+//   the Logistics office: leaving when its wait runs out is an
+//   event, see getManagedLeaveTime.)
 // -------------------------------------------------------------
 function findNextEvent(state, now) {
   let best = null;
@@ -941,6 +983,14 @@ function findNextEvent(state, now) {
       time = (job.sold || job.noSale)
         ? job.startedAt + job.durationMs                  // docks back home
         : job.startedAt + (job.loadMs || 0) + job.outboundMs + job.tradeMs;   // sells at the hub
+    } else if (job.type === "haul" && job.status === "waiting" && hasLogisticsOffice(state)) {
+      // With the Logistics office, a waiting freighter can leave on
+      // a timer (its wait running out, or its stagger gap passing)
+      // with no new goods arriving, so that moment is an event too.
+      // null = nothing to take yet: it waits for goods, as before.
+      const ship = findShip(state, job.shipId);
+      time = getManagedLeaveTime(state, job, ship, getShipStats(state, ship.type).cargoCapacity);
+      if (time === null) continue;
     } else {
       continue;   // waiting, or a job type we don't know
     }
@@ -989,6 +1039,15 @@ function runEvent(state, job, time) {
   // --- A scout docks: its find and Exploration XP ---
   if (job.type === "scout") {
     return finishScoutTrip(state, job);
+  }
+
+  // --- A freighter's Logistics office timer runs out ---
+  // Nothing happens here: straight after every event, the engine
+  // lets waiting freighters leave (startWaitingAll), and this one's
+  // rules now say it may. (Without this check it would fall into
+  // the "sells at the hub" branch below with nothing aboard.)
+  if (job.type === "haul" && job.status === "waiting") {
+    return null;
   }
 
   // --- A mining trip finishes: unload ore, earn Mining XP ---
