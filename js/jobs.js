@@ -625,11 +625,16 @@ export function loadCargo(state, capacity, mode, now) {
   if (available === 0) return null;
   if (mode === "full" && available < capacity) return null;
 
-  // Item IDs sorted by Last Post's price RIGHT NOW, highest first,
-  // so a good it's sick of drops down the list (market.js). Without
-  // a time (some tests), the normal hub prices are used.
+  // Item IDs sorted by hub price, highest first.
+  // As standard, freighters go by the NORMAL hub price and don't
+  // notice a glut at Last Post: they keep loading the dearest good
+  // even while it's selling cheap there. (A player can still bond a
+  // glutted good to keep it home.) With the market desk, they load
+  // by Last Post's price RIGHT NOW instead, so a glutted good drops
+  // down the list (Dan, 5 Nov: an unlock, not standard).
   // (sort compares two items at a time: b - a puts bigger first)
-  const price = (itemId) => now === undefined ? ITEMS[itemId].hubPrice : getHubPrice(state, itemId, now);
+  const watchMarket = hasMarketDesk(state) && now !== undefined;
+  const price = (itemId) => watchMarket ? getHubPrice(state, itemId, now) : ITEMS[itemId].hubPrice;
   const byValue = Object.keys(ITEMS).sort((a, b) => price(b) - price(a));
 
   const cargo = {};
@@ -645,6 +650,18 @@ export function loadCargo(state, capacity, mode, now) {
     }
   }
   return cargo;
+}
+
+
+// -------------------------------------------------------------
+// hasMarketDesk(state)
+// True if freighters load by Last Post's live prices (see loadCargo).
+// The market desk will be a Logistics office upgrade (Dan, 5 Nov);
+// the office isn't built yet, so for now nothing in the game sets
+// this, and freighters always go by the normal hub prices.
+// -------------------------------------------------------------
+export function hasMarketDesk(state) {
+  return state.upgrades.market_desk === true;
 }
 
 

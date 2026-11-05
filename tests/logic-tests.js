@@ -4939,26 +4939,31 @@ test("Market: Trade XP for a hub run doesn't depend on the price", () => {
   assert.ok(b.credits < a.credits);
 });
 
-test("Market: freighters load the good Last Post pays most for today, not the one that's normally dearest", () => {
-  // Why: loading by live price spreads cargo across goods on its own,
-  // which is what a player would do.
+test("Market: as standard, freighters load by the normal hub price and ignore a glut", () => {
+  // Why: Dan (5 Nov) - market-aware loading is an unlock (the market
+  // desk, coming with the Logistics office), not standard. Wiring
+  // coils are normally dearer than nickel bars (74 vs 54), so they
+  // go first even when Last Post has crashed them to 46.
   const state = newGame();
-  state.inventory.nickel_ore = 600;
-  state.inventory.iron_ore = 600;
-  sellIntoMarket(state, "nickel_ore", getAbsorb(state, "nickel_ore") * 10, START);   // nickel crashed to 12
-  assert.ok(getHubPrice(state, "nickel_ore", START) > getHubPrice(state, "iron_ore", START));   // 12 > 8: still dearer
-  assert.deepEqual(loadCargo(state, 600, "full", START), { nickel_ore: 600 });   // a floor of 12 still beats iron's 8
-  // ...but here the order flips: wiring coils are normally dearer
-  // than nickel bars (74 vs 54), but crashed to their floor (46)
-  // they drop below them, so the nickel bars go first.
-  const other = newGame();
-  other.inventory.wiring_coils = 600;
-  other.inventory.nickel_bar = 600;
-  assert.deepEqual(loadCargo(other, 600, "full", START), { wiring_coils: 600 });   // fresh market
-  other.inventory.wiring_coils = 600;
-  sellIntoMarket(other, "wiring_coils", getAbsorb(other, "wiring_coils") * 10, START);
-  assert.deepEqual(loadCargo(other, 600, "full", START), { nickel_bar: 600 });
-  assert.ok(getPriceShare(other, "wiring_coils", START) < 1);
+  state.inventory.wiring_coils = 600;
+  state.inventory.nickel_bar = 600;
+  sellIntoMarket(state, "wiring_coils", getAbsorb(state, "wiring_coils") * 10, START);
+  assert.ok(getHubPrice(state, "wiring_coils", START) < getHubPrice(state, "nickel_bar", START));
+  assert.deepEqual(loadCargo(state, 600, "full", START), { wiring_coils: 600 });
+});
+
+test("Market: with the market desk, freighters load what Last Post pays most for today", () => {
+  // Why: the unlock must actually change the order. Same hold as
+  // above, but the crashed wiring coils now drop below the nickel bars.
+  const state = newGame();
+  state.upgrades.market_desk = true;     // the upgrade itself isn't in the game yet
+  state.inventory.wiring_coils = 600;
+  state.inventory.nickel_bar = 600;
+  assert.deepEqual(loadCargo(state, 600, "full", START), { wiring_coils: 600 });   // fresh market: list order
+  state.inventory.wiring_coils = 600;
+  sellIntoMarket(state, "wiring_coils", getAbsorb(state, "wiring_coils") * 10, START);
+  assert.deepEqual(loadCargo(state, 600, "full", START), { nickel_bar: 600 });
+  assert.ok(getPriceShare(state, "wiring_coils", START) < 1);
 });
 
 test("Market: an hour of hub runs away gives the same credits and glut as an hour played", () => {
