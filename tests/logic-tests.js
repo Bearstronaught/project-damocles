@@ -3096,10 +3096,48 @@ test("Components: every hull's parts - barges get a drill, freighters don't", ()
   assert.equal(getUpgradeName(SHIP_UPGRADES.prospector_drill_2), "Prospector drill Mk II");
 });
 
-test("Components: Mk I is credits only, Mk II and III also need workshop products", () => {
+test("Components: Mk I is credits only on small and medium hulls; everything else also needs goods", () => {
+  // Why: Mk I on a small or medium hull is meant as a cheap early goal.
+  // Large hulls arrive in the late game, so every grade also costs goods:
+  // the barge's parts are paid in iridium bars, the deep core's own
+  // output (Dan, 5 Nov).
   for (const upgrade of Object.values(SHIP_UPGRADES)) {
     const hasGoods = Object.keys(upgrade.costs).length > 0;
-    assert.equal(hasGoods, upgrade.grade > 1, upgrade.hull + " " + upgrade.part + " " + upgrade.grade);
+    const size = SHIP_TYPES[upgrade.hull].size;
+    const shouldHaveGoods = upgrade.grade > 1 || size === "large" || size === "capital";
+    assert.equal(hasGoods, shouldHaveGoods, upgrade.hull + " " + upgrade.part + " " + upgrade.grade);
+  }
+});
+
+test("Components: the Deep-core barge stays two grades behind the Excavator, keeping 1.15x to 1.35x per command point", () => {
+  // Why: the agreed rule (Dan, 5 Nov). A stock barge is priced to beat an
+  // Excavator with Mk II parts by about 25%. Parts add the same % to both
+  // hulls, so the barge's Mk I has to wait until just after the
+  // Excavator's Mk III, or the barge runs away to about 1.8x and the
+  // Excavator stops being worth keeping. Checked at every Mining level
+  // from 30 to 60, each hull with every part it has unlocked by then.
+  const perPoint = (state, typeId, fieldId) => {
+    const plan = getTripPlan(state, typeId, fieldId);
+    const credits = getShipStats(state, typeId).cargoCapacity * ITEMS[FIELDS[fieldId].yields].sellPrice;
+    return credits * (HOUR_MS / plan.durationMs) / HULL_SIZES[SHIP_TYPES[typeId].size].commandPoints;
+  };
+  // Every grade a hull has unlocked by this level, e.g. { drill: 3, hold: 2, drive: 2 }
+  const gradesAt = (hullId, level) => {
+    const grades = {};
+    for (const upgrade of Object.values(SHIP_UPGRADES)) {
+      if (upgrade.hull === hullId && upgrade.level <= level) {
+        grades[upgrade.part] = Math.max(grades[upgrade.part] || 0, upgrade.grade);
+      }
+    }
+    return grades;
+  };
+  for (let level = 30; level <= 60; level++) {
+    const state = newGame();
+    state.skills.mining.xp = XP_TABLE[level];
+    state.shipUpgrades.excavator = gradesAt("excavator", level);
+    state.shipUpgrades.deep_core_barge = gradesAt("deep_core_barge", level);
+    const ratio = perPoint(state, "deep_core_barge", "deep_core") / perPoint(state, "excavator", "outer_belt");
+    assert.ok(ratio > 1.15 && ratio < 1.35, `Mining ${level}: barge earns ${ratio.toFixed(2)}x an Excavator per point`);
   }
 });
 

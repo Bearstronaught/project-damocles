@@ -14,6 +14,12 @@
 //   Mk II   credits plus workshop components
 //   Mk III  credits plus workshop assemblies
 //
+// Large hulls are the exception: every grade also costs goods. The
+// Deep-core barge's parts are paid in iridium bars, the deep core's
+// own output, and each one unlocks just after the Excavator's part
+// two grades above it, so the barge keeps its ~25% lead per command
+// point instead of running away (Dan, 5 Nov).
+//
 // Each grade adds its bonus to the part's stat, and grades add
 // up: three drill grades at +15% each = +45% mining rate.
 //
