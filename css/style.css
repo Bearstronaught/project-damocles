@@ -3949,6 +3949,45 @@ body.nav-collapsed .nav-heading {
 .sy-row.is-met .sy-value { color: var(--factions); }
 .sy-row.is-short .sy-value { color: var(--amber); }
 
+/* =============================================================
+   SLIPWAYS (Dan, 5 Nov): the Slipways readout on the Shipyard
+   screen. One block per berth; each order is a row with its name,
+   time and Cancel, and the one being built has a thin progress
+   bar under it.
+   ============================================================= */
+.sy-berth + .sy-berth { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line); }
+.sy-berth-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.sy-berth .price-note { margin: 4px 0 8px; }
+.sy-order { flex-wrap: wrap; align-items: center; }
+.sy-order-name { flex: 1 1 auto; color: #e6eef4; }
+.sy-order.is-queued .sy-order-name { color: #a9bccb; }
+.sy-order .sy-value { flex: 0 0 auto; }
+/* The bar takes a whole line of its own under the row's text */
+.sy-order-bar {
+  flex: 1 0 100%;
+  height: 3px;
+  background: var(--line);
+  overflow: hidden;
+}
+.sy-order-bar > span {
+  display: block;
+  height: 100%;
+  width: 0;
+  background: var(--teal);
+}
+/* A quiet button: an outline, for Cancel (it refunds, so it isn't
+   dangerous, but it shouldn't shout either) */
+.btn.btn-quiet {
+  background: transparent;
+  border-color: var(--line-strong);
+  color: #a9bccb;
+}
+.btn.btn-quiet:hover { color: #e6eef4; border-color: var(--ships); }
+
+/* While a hull is being built the cradle's build line is solid
+   teal, and the size line reads the hull being built */
+.shipyard-view.is-building .sy-line { stroke-dasharray: none; }
+
 /* On a phone the size line's words are drawn bigger */
 @container (max-width: 640px) {
   .shipyard-view .sy-size { font-size: 28px; }

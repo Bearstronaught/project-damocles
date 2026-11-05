@@ -36,6 +36,15 @@
 // the hull tiles below the cradle (removed) now sits in the
 // readouts, for the hull in the cradle.
 //
+// BUILDING (Dan, 5 Nov). Ships are built on a slipway over time
+// (slipway.js). While a hull is being built, the cradle shows THAT
+// hull filling in from the stern as the build runs, with the time
+// left in the status line - the build on the picked hull's own
+// berth first, else any berth that's busy. With nothing building,
+// the cradle goes back to showing the picked hull lit up as far as
+// it's paid for. The Slipways readout lists every order, with
+// Cancel (a full refund).
+//
 // ART: today the cradle draws the code-drawn hulls from art.js,
 // looked up by name (hull_prospector and so on). When the bought
 // sprites can go on the public site, the same name can point at a
@@ -43,13 +52,17 @@
 // will then fill in row by row with the freighter builder.
 // =============================================================
 
-import { SHIP_TYPES, HULL_SIZES, ITEMS, SKILLS } from "../data/content.js";
+import { SHIP_TYPES, HULL_SIZES, ITEMS, SKILLS, UPGRADES } from "../data/content.js";
 import { getShipPrice, canBuyShip, countOwned } from "./shipyard.js";
+import { BERTHS, getBerthFor, isBerthOpen, getOrders, getBuilding, getBuildProgressOf,
+         getTimeUntilReady, getQueueWaitMs, getBuildMs, countOrdered } from "./slipway.js";
+import { canBuyIndustryUpgrade } from "./upgrades.js";
+import { gameNow } from "./clock.js";
 import { isShipTypeUnlocked } from "./skills.js";
 import { getShipPoints, getCommandFree } from "./command.js";
 import { getShipArt, getSchematic } from "./art.js";
 import { getHullGrades, getShipStats, getHullShortName } from "./ship-upgrades.js";
-import { formatNumber, formatTonnes, formatSpeed, tripTable } from "./ui.js";
+import { formatNumber, formatTonnes, formatSpeed, formatDuration, tripTable } from "./ui.js";
 import { make, setText } from "./svg.js";
 
 
@@ -223,10 +236,14 @@ export function setupShipyardView(getState, actions) {
     stats: document.getElementById("sy-stats"),
     trips: document.getElementById("sy-trips"),
     tripsTag: document.getElementById("sy-trips-tag"),
+    berths: document.getElementById("sy-berths"),
+    berthsTag: document.getElementById("sy-slipways-tag"),
+    berthMessage: document.getElementById("sy-berth-message"),
   };
   let picked = loadPick();
   const pickButtons = {};
   let lastNeeds = "";
+  let lastBerths = "";       // which orders the Slipways readout shows, to know when to rebuild it
   let lastStats = "";
   let lastTrips = "";        // the trip table's HTML last time it was drawn
   let tripsCheckedAt = 0;    // when (ms) the trip table was last worked out
@@ -234,6 +251,23 @@ export function setupShipyardView(getState, actions) {
 
   els.build.addEventListener("click", () => {
     if (picked) actions.buyShip(picked);
+  });
+
+  // The Slipways readout's buttons: Cancel on an order, or Buy on
+  // the heavy slipway. One listener for the whole area, because
+  // the rows are rebuilt as orders come and go.
+  els.berths.addEventListener("click", (event) => {
+    const cancel = event.target.closest("[data-cancel]");
+    if (cancel) {
+      actions.cancelBuild(cancel.dataset.cancel);
+      setText(els.berthMessage, "");
+      return;
+    }
+    const buy = event.target.closest("[data-buy-upgrade]");
+    if (buy) {
+      const result = actions.buyIndustryUpgrade(buy.dataset.buyUpgrade);
+      setText(els.berthMessage, result && !result.ok ? result.reason : "");
+    }
   });
 
   function frame() {
@@ -285,41 +319,69 @@ export function setupShipyardView(getState, actions) {
       }
     }
 
+    // ----- What the cradle shows: a hull being built, if there is
+    //       one (the picked hull's own berth first), else the
+    //       picked hull lit up as far as it's paid for -----
+    const gameTime = gameNow(state);
+    const pickedBerth = getBerthFor(picked);
+    const active = (pickedBerth && getBuilding(state, pickedBerth))
+      || Object.keys(BERTHS).map((berthId) => getBuilding(state, berthId)).find(Boolean)
+      || null;
+    const shownId = active ? active.type : picked;
+    const shownType = SHIP_TYPES[shownId];
+
     // ----- The hull drawing: redrawn only when the hull or its
     //       fitted components change -----
-    const grades = getHullGrades(state, picked);
+    const grades = getHullGrades(state, shownId);
     const gradesKey = JSON.stringify(grades);
-    if (view.shownHull !== picked || view.shownGrades !== gradesKey) {
-      view.ghost.innerHTML = innerOf(getSchematic(type.art));
-      view.built.innerHTML = innerOf(getShipArt(type.art, grades));
-      view.shownHull = picked;
+    if (view.shownHull !== shownId || view.shownGrades !== gradesKey) {
+      view.ghost.innerHTML = innerOf(getSchematic(shownType.art));
+      view.built.innerHTML = innerOf(getShipArt(shownType.art, grades));
+      view.shownHull = shownId;
       view.shownGrades = gradesKey;
     }
 
-    // ----- How far it's built -----
-    const progress = getBuildProgress(state, picked);
+    // ----- How far it's built: the real build, or the savings -----
+    const progress = active ? getBuildProgressOf(active, gameTime) : getBuildProgress(state, picked);
     const edge = HULL_X + HULL_W * progress;     // where the build line sits
     view.clipRect.setAttribute("width", edge.toFixed(1));
     view.line.setAttribute("x1", edge.toFixed(1));
     view.line.setAttribute("x2", edge.toFixed(1));
-    const complete = progress >= 1;
+    const complete = !active && progress >= 1;
     svg.classList.toggle("is-complete", complete);
+    svg.classList.toggle("is-building", Boolean(active));
 
+    const shownPoints = getShipPoints(shownId);
+    setText(view.size, `${HULL_SIZES[shownType.size].name.toUpperCase()} HULL · ${shownPoints} COMMAND PT${shownPoints === 1 ? "" : "S"}`);
     const points = getShipPoints(picked);
-    setText(view.size, `${HULL_SIZES[type.size].name.toUpperCase()} HULL · ${points} COMMAND PT${points === 1 ? "" : "S"}`);
 
     // ----- Status line, card and button -----
     const check = canBuyShip(state, picked);
     const price = getShipPrice(state, picked);
-    setText(els.status, complete ? "Ready to build" : `Assembly ${Math.floor(progress * 100)}%`);
+    if (active) {
+      const left = Math.max(0, active.startedAt + active.durationMs - gameTime);
+      setText(els.status, `Building ${getHullShortName(active.type)} · ${formatDuration(left)} left`);
+    } else {
+      setText(els.status, complete ? "Ready to build" : `Assembly ${Math.floor(progress * 100)}%`);
+    }
     setText(els.name, type.name);
-    setText(els.tag, `${SKILLS[type.skill].name} · ${countOwned(state, picked)} owned`);
+    // e.g. "Mining · 2 owned · 1 on order"
+    const onOrder = countOrdered(state, picked);
+    setText(els.tag, `${SKILLS[type.skill].name} · ${countOwned(state, picked)} owned` + (onOrder > 0 ? ` · ${onOrder} on order` : ""));
     setText(els.desc, type.description);
     setText(els.build, price === null ? "Not sold" : `Build · ${formatNumber(price)} cr`);
     els.build.disabled = !check.ok;
     let note;
-    if (check.ok) note = `Uses ${points} of your ${getCommandFree(state)} free command points.`;
-    else if (check.reason === "Not enough command points") note = `Needs ${points} command points; you have ${getCommandFree(state)} free.`;
+    if (check.ok) {
+      // When it would be ready: straight away on a free berth, or
+      // behind whatever is already there.
+      const wait = getQueueWaitMs(state, pickedBerth, gameTime);
+      const when = wait > 0
+        ? `Joins the queue: ready in ${formatDuration(wait + getBuildMs(picked))}.`
+        : `Builds in ${formatDuration(getBuildMs(picked))}.`;
+      note = `${when} Uses ${points} of your ${getCommandFree(state)} free command points.`;
+    }
+    else if (check.reason === "Not enough command points") note = `Needs ${points} command points; you have ${getCommandFree(state)} free. Ships on order count too.`;
     else if (check.reason === "Not enough credits") note = `${formatNumber(price - state.credits)} cr to go.`;
     else note = check.reason;
     setText(els.note, note);
@@ -333,12 +395,21 @@ export function setupShipyardView(getState, actions) {
       met: n.have >= n.need,
     }));
     needs.push({ label: "Command points", text: `${getCommandFree(state)} free / ${points}`, met: getCommandFree(state) >= points });
+    // A berth to build it on (large hulls need the heavy slipway)
+    if (pickedBerth === null) {
+      needs.push({ label: "Berth", text: "Shipyard station", met: false });
+    } else if (!isBerthOpen(state, pickedBerth)) {
+      needs.push({ label: "Berth", text: `${BERTHS[pickedBerth].name}: not built`, met: false });
+    }
     const needsKey = JSON.stringify(needs);
     if (needsKey !== lastNeeds) {
       lastNeeds = needsKey;
       els.needs.innerHTML = "";
       for (const need of needs) els.needs.appendChild(row(need.label, need.text, need.met ? "is-met" : "is-short"));
     }
+
+    // ----- The Slipways readout -----
+    lastBerths = drawBerths(state, gameTime, els, lastBerths);
 
     // ----- Stats, per command point against a same-job hull -----
     const other = compareWith(picked);
@@ -379,6 +450,117 @@ export function setupShipyardView(getState, actions) {
     }
   }
   requestAnimationFrame(frame);
+}
+
+// -------------------------------------------------------------
+// drawBerths(state, now, els, lastKey)
+// The Slipways readout: one block per berth with its status and
+// its orders. The rows are rebuilt only when the orders change
+// (or the heavy slipway's state does); the times and bars inside
+// them are updated every frame. Returns the key it drew, so the
+// next frame can tell whether anything changed.
+// -------------------------------------------------------------
+function drawBerths(state, now, els, lastKey) {
+  // What's on the slipways, as a short key: berth, order and
+  // whether it has started, plus whether each berth is open.
+  const key = Object.keys(BERTHS).map((berthId) =>
+    berthId + ":" + isBerthOpen(state, berthId) + ":" +
+    getOrders(state, berthId).map((o) => o.id + (o.startedAt === null ? "q" : "b")).join(",")
+  ).join("|");
+
+  if (key !== lastKey) {
+    els.berths.innerHTML = "";
+    for (const [berthId, berth] of Object.entries(BERTHS)) {
+      const block = document.createElement("div");
+      block.className = "sy-berth";
+      const sizes = berth.sizes.map((size) => HULL_SIZES[size].name.toLowerCase()).join(" and ");
+
+      // Heading: the berth's name and its state ("Idle", "Building")
+      const head = document.createElement("h3");
+      head.className = "sub-title sy-berth-head";
+      head.innerHTML = `<span>${berth.name}</span><span class="component-total" data-berth-status="${berthId}"></span>`;
+      block.appendChild(head);
+
+      if (!isBerthOpen(state, berthId)) {
+        // Not built yet: what it's for, and how to get it
+        const upgrade = UPGRADES[berth.upgrade];
+        const goods = Object.entries(upgrade.costs)
+          .map(([itemId, tonnes]) => `${formatTonnes(tonnes)} ${ITEMS[itemId].name.toLowerCase()}`);
+        const cost = [...goods, formatNumber(upgrade.credits) + " cr"].join(" + ");
+        const text = document.createElement("p");
+        text.className = "price-note";
+        text.textContent = `Builds ${sizes} hulls. Opens at ${SKILLS[upgrade.skill].name} ${upgrade.level}: ${cost}.`;
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "btn btn-small";
+        button.dataset.buyUpgrade = berth.upgrade;
+        button.dataset.berthBuy = berthId;
+        button.textContent = `Build the ${berth.name.toLowerCase()}`;
+        block.append(text, button);
+      } else {
+        const orders = getOrders(state, berthId);
+        if (orders.length === 0) {
+          const text = document.createElement("p");
+          text.className = "price-note";
+          text.textContent = `Builds ${sizes} hulls. Nothing on order.`;
+          block.appendChild(text);
+        }
+        const list = document.createElement("ul");
+        list.className = "sy-list";
+        for (const order of orders) {
+          const item = document.createElement("li");
+          item.className = "sy-row sy-order" + (order.startedAt === null ? " is-queued" : " is-building");
+          item.innerHTML = `
+            <span class="sy-order-name">${getHullShortName(order.type)}</span>
+            <span class="sy-value" data-order-time="${order.id}"></span>
+            <button class="btn btn-small btn-quiet" type="button" data-cancel="${order.id}"
+                    aria-label="Cancel the ${getHullShortName(order.type)} order, full refund">Cancel</button>
+            ${order.startedAt === null ? "" : `<span class="sy-order-bar"><span data-order-bar="${order.id}"></span></span>`}
+          `;
+          list.appendChild(item);
+        }
+        block.appendChild(list);
+      }
+      els.berths.appendChild(block);
+    }
+  }
+
+  // ----- Every frame: times, bars and statuses -----
+  let ordersTotal = 0;
+  for (const berthId of Object.keys(BERTHS)) {
+    const status = els.berths.querySelector(`[data-berth-status="${berthId}"]`);
+    const orders = getOrders(state, berthId);
+    ordersTotal += orders.length;
+    if (!isBerthOpen(state, berthId)) {
+      setText(status, "Not built");
+    } else if (orders.length === 0) {
+      setText(status, "Idle");
+    } else {
+      setText(status, orders.length === 1 ? "Building" : `Building · ${orders.length - 1} queued`);
+    }
+
+    // The heavy slipway's Buy button: only pressable when it can be bought
+    const buy = els.berths.querySelector(`[data-berth-buy="${berthId}"]`);
+    if (buy) {
+      const check = canBuyIndustryUpgrade(state, BERTHS[berthId].upgrade);
+      buy.disabled = !check.ok;
+      buy.title = check.ok ? "" : check.reason;
+    }
+
+    for (const order of orders) {
+      const time = els.berths.querySelector(`[data-order-time="${order.id}"]`);
+      if (order.startedAt === null) {
+        setText(time, `ready in ${formatDuration(getTimeUntilReady(state, order.id, now))}`);
+      } else {
+        const left = Math.max(0, order.startedAt + order.durationMs - now);
+        setText(time, `${formatDuration(left)} left`);
+        const bar = els.berths.querySelector(`[data-order-bar="${order.id}"]`);
+        if (bar) bar.style.width = (getBuildProgressOf(order, now) * 100).toFixed(1) + "%";
+      }
+    }
+  }
+  setText(els.berthsTag, ordersTotal === 0 ? "Nothing on order" : `${ordersTotal} on order`);
+  return key;
 }
 
 // One readout row: a label on the left, a value on the right

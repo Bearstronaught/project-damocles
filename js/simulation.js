@@ -106,4 +106,11 @@ function shiftJobs(state, ms) {
   for (const job of state.jobs) {
     job.startedAt += ms;
   }
+  // Hulls being built on a slipway too (slipway.js); queued ones
+  // haven't started, so they have no time to move.
+  for (const order of state.builds) {
+    if (order.startedAt !== null) {
+      order.startedAt += ms;
+    }
+  }
 }

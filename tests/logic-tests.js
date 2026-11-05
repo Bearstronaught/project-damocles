@@ -46,7 +46,8 @@ import { SURVEY_TARGETS, DEEP_SCAN, CONTRACT_KINDS, CONTRACTS, CONTRACT_FACTIONS
 import { isBoardOpen, getTier, getReputation, getSubjects, getProgress, canHandIn, handInContract, lendSlot, discardContract, checkContracts, charterShip, canCharter, getCharter, getContractXp, getSlotCount as getBoardSlotCount } from "../js/contracts.js";
 import { getMaxOrderBatches, addStandingOrder, removeStandingOrder, getStandingOrders } from "../js/workshop.js";
 import { XP_TABLE, getLevelForXp, getLevel, getLevelProgress, addXp, isShipTypeUnlocked, MAX_LEVEL } from "../js/skills.js";
-import { canBuyShip, buyShip, canSellShip, sellShip, getSellValue, renameShip, getShipPrice } from "../js/shipyard.js";
+import { canBuyShip, buyShipInstantly, canSellShip, sellShip, getSellValue, renameShip, getShipPrice, orderShip } from "../js/shipyard.js";
+import { BERTHS, getBerthFor, getBuilding, getOrders, cancelBuild, getTimeUntilReady, getBuildMs } from "../js/slipway.js";
 import { getCommandCapacity, getCommandUsed, getNextUpgradeCost, buyUpgrade } from "../js/command.js";
 import { isFieldUnlocked, canHullWorkField, getFirstFieldFor, getHullRuleText } from "../js/skills.js";
 import { getRoleGroups, describeGroup, getShipActivity } from "../js/fleet-groups.js";
@@ -488,7 +489,7 @@ test("The Excavator is locked one XP short of its Mining level", () => {
   state.credits = 1_000_000;
   assert.equal(isShipTypeUnlocked(state, "excavator"), false);
   assert.deepEqual(canBuyShip(state, "excavator"), { ok: false, reason: "Locked" });
-  assert.equal(buyShip(state, "excavator"), null);
+  assert.equal(buyShipInstantly(state, "excavator"), null);
   assert.equal(state.credits, 1_000_000);   // no money taken
 });
 
@@ -500,7 +501,7 @@ test("Unlocked but 1 cr short: can't buy, and the reason says why", () => {
 test("Buying an Excavator takes its price and adds 'Second Wind' as ship-2", () => {
   const cost = SHIP_TYPES.excavator.cost;
   const state = gameWithExcavator(cost + 2500);
-  const ship = buyShip(state, "excavator");
+  const ship = buyShipInstantly(state, "excavator");
   assert.equal(state.credits, 2500);
   assert.equal(state.ships.length, 2);
   assert.equal(ship.id, "ship-2");
@@ -511,7 +512,7 @@ test("Buying an Excavator takes its price and adds 'Second Wind' as ship-2", () 
 test("A second Prospector can be bought from the start, for 8,000 cr", () => {
   const state = newGame();
   state.credits = 8000;
-  const ship = buyShip(state, "prospector");
+  const ship = buyShipInstantly(state, "prospector");
   assert.ok(ship);
   assert.equal(ship.type, "prospector");
   assert.equal(state.credits, 0);
@@ -523,11 +524,11 @@ test("Six Prospectors fill the 6 starting command points", () => {
   const state = newGame();
   state.credits = 1_000_000;                         // plenty, so only points can stop us
   for (let i = 0; i < 5; i++) {
-    assert.ok(buyShip(state, "prospector"), "Prospector " + (i + 2));
+    assert.ok(buyShipInstantly(state, "prospector"), "Prospector " + (i + 2));
   }
   const before = state.credits;
   assert.deepEqual(canBuyShip(state, "prospector"), { ok: false, reason: "Not enough command points" });
-  assert.equal(buyShip(state, "prospector"), null);
+  assert.equal(buyShipInstantly(state, "prospector"), null);
   assert.equal(state.credits, before);               // the 7th wasn't charged
 });
 
@@ -542,7 +543,7 @@ test("A second Prospector takes about half an hour of mining to afford", () => {
 
 test("Two ships with different trip lengths each pay out on their own timer", () => {
   const state = gameWithExcavator(SHIP_TYPES.excavator.cost);
-  buyShip(state, "excavator");
+  buyShipInstantly(state, "excavator");
   startMiningJob(state, "ship-1", "inner_belt", START);
   startMiningJob(state, "ship-2", "inner_belt", START);
 
@@ -616,7 +617,7 @@ test("A new game has 6 command points, 1 used by the Prospector", () => {
 
 test("An Excavator uses 2 points: Prospector + 1 Excavator = 3 of 4", () => {
   const state = gameWithExcavator(SHIP_TYPES.excavator.cost);
-  buyShip(state, "excavator");
+  buyShipInstantly(state, "excavator");
   assert.equal(getCommandUsed(state), 3);
 });
 
@@ -624,10 +625,10 @@ test("A third Excavator is blocked by command, even with the money", () => {
   // Prospector 1 + Excavator 2 + Excavator 2 = 5 of 6 points: a third
   // (2 more) doesn't fit. Excavators cost 60,000 then 96,000.
   const state = gameWithExcavator(60000 + 96000 + 500000);
-  assert.ok(buyShip(state, "excavator"));
-  assert.ok(buyShip(state, "excavator"));
+  assert.ok(buyShipInstantly(state, "excavator"));
+  assert.ok(buyShipInstantly(state, "excavator"));
   assert.deepEqual(canBuyShip(state, "excavator"), { ok: false, reason: "Not enough command points" });
-  assert.equal(buyShip(state, "excavator"), null);
+  assert.equal(buyShipInstantly(state, "excavator"), null);
   assert.equal(state.credits, 500000);               // no money taken for the third
 });
 
@@ -678,10 +679,10 @@ test("Expanding command makes room for the third Excavator", () => {
   // Excavators 60,000 + 96,000, upgrade 80,000, third Excavator
   // 153,600 (60,000 x 1.6 x 1.6)
   const state = gameWithExcavator(60000 + 96000 + 80000 + 153600);
-  buyShip(state, "excavator");
-  buyShip(state, "excavator");
+  buyShipInstantly(state, "excavator");
+  buyShipInstantly(state, "excavator");
   buyUpgrade(state);
-  assert.ok(buyShip(state, "excavator"));
+  assert.ok(buyShipInstantly(state, "excavator"));
   assert.equal(getCommandUsed(state), 7);
   assert.equal(getCommandCapacity(state), 8);
   assert.equal(state.credits, 0);
@@ -696,9 +697,9 @@ test("Each Prospector costs 60% more than the last: 8,000, 12,800, 20,480", () =
   const state = newGame();                     // owns the starter
   state.credits = 1_000_000;
   assert.equal(getShipPrice(state, "prospector"), 8000);
-  buyShip(state, "prospector");
+  buyShipInstantly(state, "prospector");
   assert.equal(getShipPrice(state, "prospector"), 12800);
-  buyShip(state, "prospector");
+  buyShipInstantly(state, "prospector");
   assert.equal(getShipPrice(state, "prospector"), 20480);
   // What was taken matches the prices shown: 8,000 + 12,800
   assert.equal(state.credits, 1_000_000 - 8000 - 12800);
@@ -706,8 +707,8 @@ test("Each Prospector costs 60% more than the last: 8,000, 12,800, 20,480", () =
 
 test("Each ship type has its own price ladder", () => {
   const state = gameWithExcavator(1_000_000);
-  buyShip(state, "prospector");
-  buyShip(state, "prospector");
+  buyShipInstantly(state, "prospector");
+  buyShipInstantly(state, "prospector");
   // Owning 3 Prospectors doesn't make the first Excavator dearer
   assert.equal(getShipPrice(state, "excavator"), SHIP_TYPES.excavator.cost);
 });
@@ -715,8 +716,8 @@ test("Each ship type has its own price ladder", () => {
 test("Selling a ship makes the next one of that type cheaper again", () => {
   const state = newGame();
   state.credits = 1_000_000;
-  buyShip(state, "prospector");                      // ship-2
-  buyShip(state, "prospector");                      // ship-3
+  buyShipInstantly(state, "prospector");                      // ship-2
+  buyShipInstantly(state, "prospector");                      // ship-3
   assert.equal(getShipPrice(state, "prospector"), 20480);
   sellShip(state, "ship-3");
   assert.equal(getShipPrice(state, "prospector"), 12800);
@@ -724,11 +725,11 @@ test("Selling a ship makes the next one of that type cheaper again", () => {
 
 test("Buying a ship and selling it straight back loses half the price", () => {
   const state = gameWithExcavator(1_000_000);
-  buyShip(state, "excavator");                       // pays 60,000
+  buyShipInstantly(state, "excavator");                       // pays 60,000
   const price = getShipPrice(state, "excavator");    // the 2nd costs 96,000
   buyUpgrade(state);                                 // room for the 2nd
   const before = state.credits;
-  const ship = buyShip(state, "excavator");
+  const ship = buyShipInstantly(state, "excavator");
   sellShip(state, ship.id);
   assert.equal(before - state.credits, price / 2);
 });
@@ -743,7 +744,7 @@ function fleetMining(ships) {
   const state = newGame();
   state.credits = 1e9;
   state.commandUpgrades = COMMAND.maxUpgrades;      // room for a big fleet
-  for (let i = 1; i < ships; i++) buyShip(state, "prospector");
+  for (let i = 1; i < ships; i++) buyShipInstantly(state, "prospector");
   for (const ship of state.ships) startMiningJob(state, ship.id, "inner_belt", START);
   return state;
 }
@@ -766,7 +767,7 @@ test("Fleet XP counts command points: a lone Excavator keeps 66%, like each of t
   state.credits = 1e9;
   state.skills.mining.xp = 1e7;                     // Mining 15+: Excavators unlocked
   state.commandUpgrades = COMMAND.maxUpgrades;
-  const excavator = buyShip(state, "excavator");
+  const excavator = buyShipInstantly(state, "excavator");
   startMiningJob(state, excavator.id, "inner_belt", START);
   close(getMiningXpShare(state), 0.660);            // 2 points: same as two Prospectors
   startMiningJob(state, "ship-1", "inner_belt", START);
@@ -776,7 +777,7 @@ test("Fleet XP counts command points: a lone Excavator keeps 66%, like each of t
 test("A docked ship doesn't count: only ships out mining share the XP", () => {
   const state = newGame();
   state.credits = 1e9;
-  buyShip(state, "prospector");                     // ship-2 stays docked
+  buyShipInstantly(state, "prospector");                     // ship-2 stays docked
   startMiningJob(state, "ship-1", "inner_belt", START);
   assert.equal(getMiningXpShare(state), 1);
 });
@@ -818,17 +819,17 @@ test("A ship sells for half of what it would cost to buy back", () => {
   const state = gameWithExcavator(1_000_000);
   // Only the starter Prospector: buying it back (owning 0) costs 5,000
   assert.equal(getSellValue(state, "prospector"), 2500);
-  buyShip(state, "prospector");
+  buyShipInstantly(state, "prospector");
   // Owning 2: buying one back (owning 1) costs 8,000
   assert.equal(getSellValue(state, "prospector"), 4000);
-  buyShip(state, "excavator");
+  buyShipInstantly(state, "excavator");
   // One Excavator: buying it back costs 60,000
   assert.equal(getSellValue(state, "excavator"), 30000);
 });
 
 test("Selling a docked ship pays out and frees its command points", () => {
   const state = gameWithExcavator(SHIP_TYPES.excavator.cost);
-  buyShip(state, "excavator");
+  buyShipInstantly(state, "excavator");
   const earned = sellShip(state, "ship-2");
   assert.equal(earned, SHIP_TYPES.excavator.cost / 2);
   assert.equal(state.credits, SHIP_TYPES.excavator.cost / 2);
@@ -838,7 +839,7 @@ test("Selling a docked ship pays out and frees its command points", () => {
 
 test("A ship can't be sold mid-trip", () => {
   const state = gameWithExcavator(SHIP_TYPES.excavator.cost);
-  buyShip(state, "excavator");
+  buyShipInstantly(state, "excavator");
   startMiningJob(state, "ship-2", "inner_belt", START);
   assert.deepEqual(canSellShip(state, "ship-2"), { ok: false, reason: "Ship is busy" });
   assert.equal(sellShip(state, "ship-2"), 0);
@@ -853,9 +854,9 @@ test("Your last ship can't be sold", () => {
 
 test("Ship IDs are never reused after a sale", () => {
   const state = gameWithExcavator(SHIP_TYPES.excavator.cost * 2);
-  buyShip(state, "excavator");             // ship-2
+  buyShipInstantly(state, "excavator");             // ship-2
   sellShip(state, "ship-2");
-  const next = buyShip(state, "excavator");
+  const next = buyShipInstantly(state, "excavator");
   assert.equal(next.id, "ship-3");
 });
 
@@ -1003,7 +1004,7 @@ const HUB_SALE = HAUL.loadMs + HAUL.outboundMs + HAUL.tradeMs;
 function gameWithCourier(mode = "full") {
   const state = newGame();
   state.credits = SHIP_TYPES.courier.cost;       // the Courier is open from Trade 1
-  const courier = buyShip(state, "courier");
+  const courier = buyShipInstantly(state, "courier");
   courier.haulMode = mode;
   return state;
 }
@@ -1011,7 +1012,7 @@ function gameWithCourier(mode = "full") {
 test("The Courier is open from the start (Trade 1) and costs 50,000 cr", () => {
   const state = newGame();
   state.credits = 1_000_000;
-  const ship = buyShip(state, "courier");
+  const ship = buyShipInstantly(state, "courier");
   assert.equal(state.credits, 1_000_000 - 50000);
   assert.equal(ship.haulMode, "full");           // starts on full loads
   assert.equal(ship.destination, undefined);     // freighters don't mine
@@ -1073,7 +1074,7 @@ test("Constant runs still wait when the hold is empty", () => {
 test("Two Couriers flying at once each keep 66% of their Trade XP", () => {
   const state = gameWithCourier("full");
   state.credits = getShipPrice(state, "courier");
-  buyShip(state, "courier");                     // ship-3
+  buyShipInstantly(state, "courier");                     // ship-3
   state.inventory.iron_ore = 1200;               // a full load each
   startHaulJob(state, "ship-2", START);
   startHaulJob(state, "ship-3", START);
@@ -1091,7 +1092,7 @@ test("Two Couriers flying at once each keep 66% of their Trade XP", () => {
 test("A Courier waiting at home for ore doesn't reduce the flying one's XP", () => {
   const state = gameWithCourier("full");
   state.credits = getShipPrice(state, "courier");
-  buyShip(state, "courier");                     // ship-3, will wait: no ore left for it
+  buyShipInstantly(state, "courier");                     // ship-3, will wait: no ore left for it
   state.inventory.iron_ore = 600;
   startHaulJob(state, "ship-2", START);
   startHaulJob(state, "ship-3", START);
@@ -1174,7 +1175,7 @@ test("Switching a waiting Courier to constant runs sends it off", () => {
 test("Two Couriers waiting for ore: the one bought first loads first", () => {
   const state = gameWithCourier("full");
   state.credits = getShipPrice(state, "courier");
-  buyShip(state, "courier");                     // ship-3
+  buyShipInstantly(state, "courier");                     // ship-3
   const first = startHaulJob(state, "ship-2", START);
   const second = startHaulJob(state, "ship-3", START);
   state.inventory.iron_ore = 600;                // only one load
@@ -1216,8 +1217,8 @@ test("Barges + Courier: ticking for 2 hours equals one 2-hour jump", () => {
   const setup = () => {
     const state = gameWithCourier("full");
     state.credits = 1_000_000;
-    buyShip(state, "prospector");                // ship-3
-    buyShip(state, "prospector");                // ship-4
+    buyShipInstantly(state, "prospector");                // ship-3
+    buyShipInstantly(state, "prospector");                // ship-4
     state.credits = 0;                           // count only what's earned
     startMiningJob(state, "ship-1", "inner_belt", START);
     startMiningJob(state, "ship-3", "inner_belt", START + 7 * SECOND);
@@ -1423,7 +1424,7 @@ test("Names over 24 characters are refused; exactly 24 is fine", () => {
 test("Two ships can't share a name (capitals don't count as different)", () => {
   const state = newGame();
   state.credits = getShipPrice(state, "prospector");
-  buyShip(state, "prospector");                       // "Second Wind"
+  buyShipInstantly(state, "prospector");                       // "Second Wind"
   const result = renameShip(state, "ship-1", "SECOND WIND");
   assert.equal(result.ok, false);
   assert.match(result.reason, /already has that name/);
@@ -1630,7 +1631,7 @@ test("A recalled ship's trip survives a save and time away", () => {
 function gameWithMixedFleet() {
   const state = gameWithCourier();          // ship-1 Prospector, ship-2 Courier
   state.credits = 100_000;
-  buyShip(state, "prospector");             // ship-3
+  buyShipInstantly(state, "prospector");             // ship-3
   return state;
 }
 
@@ -1653,8 +1654,8 @@ test("Ships are sorted into Mining then Freight, in the order they were bought",
 test("Summary matches the design doc example: 3 ships, 2 working, 1 docked", () => {
   const state = newGame();
   state.credits = 100_000;
-  buyShip(state, "prospector");
-  buyShip(state, "prospector");
+  buyShipInstantly(state, "prospector");
+  buyShipInstantly(state, "prospector");
   startMiningJob(state, "ship-1", "inner_belt", START);
   startMiningJob(state, "ship-2", "inner_belt", START);
   const [mining] = getRoleGroups(state, START + SECOND);
@@ -1948,10 +1949,10 @@ function busyEmpire() {
   state.skills.exploration.xp = XP_TABLE[12];
   state.credits = 10_000_000;
   state.commandUpgrades = 5;
-  buyShip(state, "prospector");                  // ship-2
-  buyShip(state, "excavator");                   // ship-3
-  buyShip(state, "courier").haulMode = "constant";   // ship-4
-  buyShip(state, "courier").haulMode = "full";       // ship-5
+  buyShipInstantly(state, "prospector");                  // ship-2
+  buyShipInstantly(state, "excavator");                   // ship-3
+  buyShipInstantly(state, "courier").haulMode = "constant";   // ship-4
+  buyShipInstantly(state, "courier").haulMode = "full";       // ship-5
   startMiningJob(state, "ship-1", "inner_belt", START);
   startMiningJob(state, "ship-2", "outer_belt", START);
   startMiningJob(state, "ship-3", "inner_belt", START);
@@ -1965,8 +1966,8 @@ function busyEmpire() {
   // launched every one up front: each is picked up once it opens.
   state.milestones.firstSale = true;
   for (const targetId of Object.keys(SURVEY_TARGETS)) state.exploration.launched[targetId] = true;
-  buyShip(state, "pathfinder");                  // ship-6
-  buyShip(state, "pathfinder");                  // ship-7
+  buyShipInstantly(state, "pathfinder");                  // ship-6
+  buyShipInstantly(state, "pathfinder");                  // ship-7
   startScoutJob(state, "ship-6", "inner_belt_survey", START);
   startScoutJob(state, "ship-7", "ice_moon", START);   // locked: refused...
   startScoutJob(state, "ship-7", "deep_scan", START);  // ...so it deep scans
@@ -2228,7 +2229,7 @@ test("Offline: a queue of 3 orders drains while away, then the slot sits idle", 
 test("The workshop gets metal before a freighter does", () => {
   const state = gameWithWorkshop();
   state.credits = SHIP_TYPES.courier.cost;
-  buyShip(state, "courier").haulMode = "constant";          // would take anything in the hold
+  buyShipInstantly(state, "courier").haulMode = "constant";          // would take anything in the hold
   startHaulJob(state, "ship-2", START);                     // nothing to haul yet: waits
   addOrder(state, 0, "hull_plating", 1, START);             // waits for bars too
   state.inventory.iron_bar = 30;                            // 30 t of bars appear...
@@ -3240,7 +3241,7 @@ test("Components: one purchase fits ships bought later too", () => {
   state.skills.mining.xp = XP_TABLE[3];
   state.credits = 1_000_000;
   buyShipUpgrade(state, "prospector_hold_1");
-  buyShip(state, "prospector");                       // bought after the component
+  buyShipInstantly(state, "prospector");                       // bought after the component
   const job = startMiningJob(state, "ship-2", "inner_belt", START);
   assert.equal(job.orePerTrip, 138);
 });
@@ -3382,7 +3383,7 @@ function gameWithScout() {
   const state = newGame();
   state.credits = 100_000;
   state.milestones.firstSale = true;
-  buyShip(state, "pathfinder");
+  buyShipInstantly(state, "pathfinder");
   return state;
 }
 
@@ -3391,13 +3392,13 @@ test("Exploration: the Pathfinder and the tab unlock with the first sale, not be
   state.credits = 100_000;
   assert.equal(isShipTypeUnlocked(state, "pathfinder"), false);
   assert.equal(isExplorationOpen(state), false);
-  assert.equal(buyShip(state, "pathfinder"), null);       // can't buy it yet
+  assert.equal(buyShipInstantly(state, "pathfinder"), null);       // can't buy it yet
 
   state.inventory.iron_ore = 10;
   sellAll(state, "iron_ore");                             // the first sale
   assert.equal(isShipTypeUnlocked(state, "pathfinder"), true);
   assert.equal(isExplorationOpen(state), true);
-  assert.ok(buyShip(state, "pathfinder"));
+  assert.ok(buyShipInstantly(state, "pathfinder"));
 });
 
 test("Exploration: a survey trip is fly out, scan, fly back, timed by drive speed", () => {
@@ -3540,7 +3541,7 @@ test("Exploration: locked targets and out-of-order wreck stages are refused", ()
 
 test("Exploration: two scouts never survey the same target", () => {
   const state = gameWithScout();
-  buyShip(state, "pathfinder");                           // ship-3
+  buyShipInstantly(state, "pathfinder");                           // ship-3
   startScoutJob(state, "ship-2", "inner_belt_survey", START);
   assert.equal(startScoutJob(state, "ship-3", "inner_belt_survey", START), null);
   // The next best thing for ship-3 at Exploration 1 is a deep scan
@@ -3613,7 +3614,7 @@ test("Exploration: recalled on the way out, then resumed, it carries on to its t
 
 test("Exploration: two scouts share XP by the fleet rule", () => {
   const state = gameWithScout();
-  buyShip(state, "pathfinder");
+  buyShipInstantly(state, "pathfinder");
   for (const id of Object.keys(SURVEY_TARGETS)) state.exploration.surveyed[id] = true;
   const job = startScoutJob(state, "ship-2", DEEP_SCAN_ID, START);
   startScoutJob(state, "ship-3", DEEP_SCAN_ID, START);
@@ -3786,7 +3787,7 @@ test("Charter: a ship already working starts its charter from its next departure
 test("Charter: a chartered ship can't be sold, re-chartered or lent twice", () => {
   const state = gameWithBoard();
   state.credits = 100000;
-  buyShip(state, "prospector");
+  buyShipInstantly(state, "prospector");
   forceCharter(state, "inner_belt", 200);
   charterShip(state, 0, "ship-1");
   assert.equal(canSellShip(state, "ship-1").ok, false);
@@ -4169,7 +4170,7 @@ test("Manual surveys: a launched survey that isn't open yet is picked up once it
 
 test("Manual surveys: two scouts never take the same launched survey", () => {
   const state = gameWithScout();
-  buyShip(state, "pathfinder");                                     // ship-3
+  buyShipInstantly(state, "pathfinder");                                     // ship-3
   launchSurvey(state, "inner_belt_survey");
   startScoutJob(state, "ship-2", chooseNextTarget(state, "ship-2"), START);
   assert.equal(chooseNextTarget(state, "ship-3"), DEEP_SCAN_ID);
@@ -4344,7 +4345,8 @@ function gameWithShip(level, typeId) {
   state.skills.mining.xp = XP_TABLE[level];
   state.credits = 10_000_000;
   state.commandUpgrades = 10;                 // plenty of command points
-  const ship = buyShip(state, typeId);
+  state.upgrades.heavy_slipway = true;        // large hulls need it (Dan, 5 Nov)
+  const ship = buyShipInstantly(state, typeId);
   return [state, ship.id];
 }
 
@@ -4463,7 +4465,7 @@ test("Charters: no deep-core charter without a barge to lend, and an Excavator c
   assert.ok(fields.includes("ice_moon"));
   state.credits = 10_000_000;
   state.commandUpgrades = 10;
-  const excavator = buyShip(state, "excavator");
+  const excavator = buyShipInstantly(state, "excavator");
   forceCharter(state, "ice_moon", 200);
   const check = canCharter(state, 0, excavator.id);
   assert.equal(check.ok, false);
@@ -4509,7 +4511,7 @@ test("Per-hull Mining XP: the barge earns a quarter, the Prospector and Excavato
   // so it keeps 2 ^ (0.4 - 1), about 66%, of its trip's XP
   state.skills.mining.xp = XP_TABLE[15];
   state.credits = 1_000_000;
-  const excavator = buyShip(state, "excavator");
+  const excavator = buyShipInstantly(state, "excavator");
   const before = state.skills.mining.xp;
   const job = startMiningJob(state, excavator.id, "inner_belt", START);
   processJobs(state, START + job.durationMs);
@@ -4530,6 +4532,196 @@ test("Per-hull Mining XP: a Deep-core barge earns more XP per hour on the deep c
   for (const belt of ["inner_belt", "outer_belt"]) {
     assert.ok(perHour("deep_core") > perHour(belt), `deep core ${Math.round(perHour("deep_core"))} XP/h vs ${belt} ${Math.round(perHour(belt))}`);
   }
+});
+
+
+// =============================================================
+// SLIPWAYS AND BUILD TIMES (Dan, 4 and 5 Nov)
+// =============================================================
+
+// A game ready to order ships: plenty of credits and command
+// points, at the given Mining level, with the clock at START.
+function shipyardGame(miningLevel = 1) {
+  const state = newGame();
+  state.skills.mining.xp = XP_TABLE[miningLevel];
+  state.credits = 50_000_000;
+  state.commandUpgrades = 10;
+  state.simulatedUpTo = START;
+  return state;
+}
+
+test("Slipway: an ordered ship isn't in the fleet until its build time has passed", () => {
+  // Why: the whole point of build times. A ship that appears at
+  // once, or never, would both be bugs the player feels at once.
+  const state = shipyardGame();
+  const order = orderShip(state, "prospector", START);
+  assert.ok(order);
+  assert.equal(state.ships.length, 1);                              // only the starter
+  assert.equal(getBuildMs("prospector"), HULL_SIZES.small.buildSeconds * 1000);
+  processJobs(state, START + getBuildMs("prospector") - 1);          // 1 ms early
+  assert.equal(state.ships.length, 1);
+  const results = processJobs(state, START + getBuildMs("prospector"));
+  assert.equal(state.ships.length, 2);                              // launched, on time
+  assert.equal(state.builds.length, 0);
+  assert.equal(results.filter((r) => r.kind === "built").length, 1);
+  assert.ok(!getJobForShip(state, state.ships[1].id));              // docked, awaiting orders
+});
+
+test("Slipway: the build times are small 2 min, medium 20 min, large 3 h, capital a day", () => {
+  // Why: these are Dan's agreed starting values (4 Nov); a typo in
+  // the balance sheet would quietly change every build.
+  assert.equal(HULL_SIZES.small.buildSeconds, 120);
+  assert.equal(HULL_SIZES.medium.buildSeconds, 1200);
+  assert.equal(HULL_SIZES.large.buildSeconds, 3 * 3600);
+  assert.equal(HULL_SIZES.capital.buildSeconds, 24 * 3600);
+});
+
+test("Slipway: the price counts ships on order, so queueing can't dodge the 60% growth", () => {
+  // Why: without this, three Prospectors queued at once would all
+  // cost the first one's price (Dan, 5 Nov).
+  const state = shipyardGame();
+  const first = getShipPrice(state, "prospector");
+  orderShip(state, "prospector", START);
+  assert.equal(getShipPrice(state, "prospector"), Math.round(first * BALANCE.shipPriceGrowth));
+  orderShip(state, "prospector", START);
+  assert.equal(getShipPrice(state, "prospector"), Math.round(first * BALANCE.shipPriceGrowth ** 2));
+});
+
+test("Slipway: an order holds its command points from the moment it's placed", () => {
+  // Why: Dan's rule (4 Nov) - otherwise you could order more ships
+  // than the cap allows and have them all arrive at once.
+  const state = shipyardGame(15);                                   // the Excavator's level
+  state.commandUpgrades = 0;                                        // 6 points, 1 used by the starter
+  orderShip(state, "excavator", START);                             // 2 more
+  assert.equal(getCommandUsed(state), 3);
+  orderShip(state, "excavator", START);                             // 2 more = 5
+  orderShip(state, "prospector", START);                            // 1 more = 6, full
+  assert.deepEqual(canBuyShip(state, "prospector"), { ok: false, reason: "Not enough command points" });
+});
+
+test("Slipway: orders on one berth build one after another, with no gap between", () => {
+  // Why: one berth builds one hull at a time; the next should start
+  // the moment the last one launches, offline too.
+  const state = shipyardGame(15);
+  const a = orderShip(state, "excavator", START);
+  const b = orderShip(state, "prospector", START);
+  assert.equal(a.startedAt, START);
+  assert.equal(b.startedAt, null);                                  // queued
+  assert.equal(getTimeUntilReady(state, b.id, START), getBuildMs("excavator") + getBuildMs("prospector"));
+  processJobs(state, START + getBuildMs("excavator"));
+  assert.equal(b.startedAt, START + getBuildMs("excavator"));        // starts as A launches
+  processJobs(state, START + getBuildMs("excavator") + getBuildMs("prospector"));
+  assert.equal(state.ships.length, 3);
+});
+
+test("Slipway: a large hull needs the heavy slipway, and builds there without blocking small hulls", () => {
+  // Why: Dan's fix for a 3-hour barge holding up a 2-minute
+  // Prospector (5 Nov): large hulls get a berth of their own.
+  const state = shipyardGame(30);
+  assert.equal(getBerthFor("deep_core_barge"), "heavy");
+  assert.equal(getBerthFor("prospector"), "slipway");
+  assert.equal(getBerthFor("excavator"), "slipway");
+  assert.deepEqual(canBuyShip(state, "deep_core_barge"), { ok: false, reason: "Needs the heavy slipway" });
+  state.upgrades.heavy_slipway = true;
+  const barge = orderShip(state, "deep_core_barge", START);
+  const pro = orderShip(state, "prospector", START);
+  assert.equal(barge.startedAt, START);
+  assert.equal(pro.startedAt, START);                               // its own berth: no wait
+  processJobs(state, START + getBuildMs("prospector"));
+  assert.ok(state.ships.some((s) => s.type === "prospector" && s.id !== "ship-1"));
+  assert.ok(!state.ships.some((s) => s.type === "deep_core_barge"));  // still building
+});
+
+test("Slipway: no berth at Anvil builds capital hulls", () => {
+  // Why: capitals need a dedicated shipyard station (Dan, 5 Nov).
+  // No capital hull exists yet, so check the berths themselves.
+  for (const berth of Object.values(BERTHS)) {
+    assert.ok(!berth.sizes.includes("capital"));
+  }
+});
+
+test("Slipway: cancelling refunds in full, queued or mid-build, and the next order starts", () => {
+  // Why: Dan's rule (5 Nov). A cancel must never lose money, and
+  // must not leave the berth idle with orders waiting.
+  const state = shipyardGame(15);
+  const before = state.credits;
+  const a = orderShip(state, "excavator", START);
+  const b = orderShip(state, "prospector", START);
+  const half = START + getBuildMs("excavator") / 2;
+  assert.ok(cancelBuild(state, a.id, half));                        // half built
+  assert.equal(b.startedAt, half);                                  // the next starts now
+  assert.ok(cancelBuild(state, b.id, half));                        // just started
+  assert.equal(state.credits, before);                              // every credit back
+  assert.equal(state.builds.length, 0);
+  assert.equal(getCommandUsed(state), 1);                           // points freed too
+  assert.equal(cancelBuild(state, "order-999", half), null);        // no such order
+});
+
+test("Slipway: an hour of builds away gives the same fleet as an hour played", () => {
+  // Why: the engine's promise. Builds are events like any other, so
+  // tiny ticks and one big jump must end in the same place.
+  const play = (step) => {
+    const state = shipyardGame(15);
+    orderShip(state, "excavator", START);
+    orderShip(state, "prospector", START);
+    orderShip(state, "pathfinder", START);
+    for (let t = START + step; t <= START + HOUR_MS; t += step) advanceTo(state, t);
+    return state.ships.map((s) => s.type + ":" + s.id).join(",") + "|" + state.builds.length;
+  };
+  assert.equal(play(250), play(HOUR_MS));
+});
+
+test("Slipway: a clock set backwards slides a build back instead of freezing it", () => {
+  // Why: the clock guard (Technical safeguards) moves every job;
+  // a build must keep exactly the time it had left.
+  const state = shipyardGame();
+  const order = orderShip(state, "prospector", START);
+  advanceTo(state, START + 60_000);                                  // a minute in
+  advanceTo(state, START);                                          // clock wound back a minute
+  assert.equal(order.startedAt, START - 60_000);
+  advanceTo(state, START + 60_000);                                  // a minute later: done
+  assert.equal(state.ships.length, 2);
+});
+
+test("Save: a version 19 save gets an empty slipway, and a barge owner gets the heavy slipway free", () => {
+  // Why: barges were bought before the heavy slipway existed, so
+  // their owners shouldn't be locked out of building more.
+  const old = shipyardGame(30);
+  old.upgrades.heavy_slipway = true;
+  buyShipInstantly(old, "deep_core_barge");
+  delete old.upgrades.heavy_slipway;
+  delete old.builds;
+  delete old.nextOrderNumber;
+  old.version = 19;
+  const state = parseSave(JSON.stringify(old));
+  assert.equal(state.version, SAVE_VERSION);
+  assert.deepEqual(state.builds, []);
+  assert.equal(state.nextOrderNumber, 1);
+  assert.equal(isOwned(state, "heavy_slipway"), true);
+  // ...and without a barge, no free slipway
+  const plain = newGame();
+  delete plain.builds;
+  plain.version = 19;
+  assert.equal(isOwned(parseSave(JSON.stringify(plain)), "heavy_slipway"), false);
+});
+
+test("Heavy slipway: opens at Mining 30 and is paid in structural frames and credits, nothing later", () => {
+  // Why: Dan's choice (5 Nov) - it arrives with the first large hull
+  // and gives Manufacturing a use, but only frames (Manufacturing 10):
+  // the simulator showed thruster assemblies (Manufacturing 20)
+  // locking a casual player out of barges for a week.
+  const upgrade = UPGRADES.heavy_slipway;
+  assert.equal(upgrade.skill, "mining");
+  assert.equal(upgrade.level, 30);
+  assert.deepEqual(Object.keys(upgrade.costs), ["structural_frames"]);
+  assert.ok(upgrade.credits > 0);
+  const state = shipyardGame(29);
+  state.inventory.structural_frames = 10_000;
+  state.inventory.thruster_assembly = 10_000;
+  assert.equal(canBuyIndustryUpgrade(state, "heavy_slipway").ok, false);   // Mining 29
+  state.skills.mining.xp = XP_TABLE[30];
+  assert.ok(buyIndustryUpgrade(state, "heavy_slipway").ok);
+  assert.equal(canBuyShip(state, "deep_core_barge").ok, true);
 });
 
 // -------------------------------------------------------------

@@ -46,6 +46,11 @@ export function getCommandUsed(state) {
   for (const ship of state.ships) {
     used += getShipPoints(ship.type);
   }
+  // Ships on the slipway hold their points from the moment they're
+  // ordered (Dan, 4 Nov), so the cap can never be overbooked.
+  for (const order of state.builds) {
+    used += getShipPoints(order.type);
+  }
   return used;
 }
 

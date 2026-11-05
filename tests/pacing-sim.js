@@ -50,7 +50,8 @@ import { startMiningJob, getJobForShip, getTripPlan } from "../js/jobs.js";
 import { sellAll } from "../js/trade.js";
 import { ITEMS } from "../data/content.js";
 import { getLevel, isFieldUnlocked, canHullWorkField, XP_TABLE } from "../js/skills.js";
-import { buyShip, getShipPrice, canBuyShip } from "../js/shipyard.js";
+import { orderShip, getShipPrice, canBuyShip } from "../js/shipyard.js";
+import { countOrdered } from "../js/slipway.js";
 import { buyUpgrade, getNextUpgradeCost, canBuyUpgrade } from "../js/command.js";
 import { canBuyShipUpgrade, buyShipUpgrade, getPartGrade } from "../js/ship-upgrades.js";
 import { setBond } from "../js/bonded.js";
@@ -290,7 +291,7 @@ export function simulate(hours, untilMiningLevel, hourly = null, explore = true,
     //    (the realistic player first finishes any Excavator swap
     //    whose Prospectors are home)
     if (realistic) {
-      for (const line of finishSwaps(state, swaps)) events.push({ minute, text: line, goal: true });
+      for (const line of finishSwaps(state, swaps, now)) events.push({ minute, text: line, goal: true });
     }
     // While a swap's Prospectors fly home, the player saves for
     // the Excavator and buys nothing else (found 4 Nov: otherwise
@@ -312,10 +313,10 @@ export function simulate(hours, untilMiningLevel, hourly = null, explore = true,
       const bargesBetter = realistic && getLevel(state, "mining") >= SHIP_TYPES[barge].unlockLevel &&
         minerValuePerHour(state, barge) / 4 > minerValuePerHour(state, "excavator") / 2;
       if (bargesBetter && canBuyShip(state, barge).ok) {
-        options.push({ cost: getShipPrice(state, barge), buy: () => buyShip(state, barge), text: "Deep-core barge" });
+        options.push({ cost: getShipPrice(state, barge), buy: () => orderShip(state, barge, now), text: "Deep-core barge" });
       }
       if (!bargesBetter && canBuyShip(state, "excavator").ok) {
-        options.push({ cost: getShipPrice(state, "excavator"), buy: () => buyShip(state, "excavator"), text: "Excavator" });
+        options.push({ cost: getShipPrice(state, "excavator"), buy: () => orderShip(state, "excavator", now), text: "Excavator" });
       }
       // The realistic player stops buying Prospectors once an
       // Excavator earns more per command point (2 points) than a
@@ -334,7 +335,7 @@ export function simulate(hours, untilMiningLevel, hourly = null, explore = true,
       } else if (excavatorsBetter) {
         // (no Prospectors on the list)
       } else if (canBuyShip(state, "prospector").ok) {
-        options.push({ cost: getShipPrice(state, "prospector"), buy: () => buyShip(state, "prospector"), text: "Prospector #" + (state.ships.filter((s) => s.type === "prospector").length + 1) });
+        options.push({ cost: getShipPrice(state, "prospector"), buy: () => orderShip(state, "prospector", now), text: "Prospector #" + (state.ships.filter((s) => s.type === "prospector").length + countOrdered(state, "prospector") + 1) });
       } else if (canBuyShip(state, "prospector").reason === "Not enough command points" && canBuyUpgrade(state).ok) {
         options.push({ cost: getNextUpgradeCost(state), buy: () => buyUpgrade(state), text: "command upgrade" });
       }
@@ -346,9 +347,10 @@ export function simulate(hours, untilMiningLevel, hourly = null, explore = true,
         }
       }
       // One Pathfinder, as soon as it's for sale and affordable
-      const hasScout = state.ships.some((ship) => ship.type === "pathfinder");
+      // (one on the slipway counts: it's on its way)
+      const hasScout = state.ships.some((ship) => ship.type === "pathfinder") || countOrdered(state, "pathfinder") > 0;
       if (explore && !hasScout && canBuyShip(state, "pathfinder").ok) {
-        options.push({ cost: getShipPrice(state, "pathfinder"), buy: () => buyShip(state, "pathfinder"), text: "Pathfinder" });
+        options.push({ cost: getShipPrice(state, "pathfinder"), buy: () => orderShip(state, "pathfinder", now), text: "Pathfinder" });
       }
       if (options.length === 0) break;
       options.sort((a, b) => a.cost - b.cost);

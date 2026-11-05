@@ -26,7 +26,8 @@ import * as playtest from "./playtest.js";
 import { isDevModeOn, setDevMode, watchForSecret } from "./dev-switch.js";
 import { sellAll, sellEverything } from "./trade.js";
 import { setBond } from "./bonded.js";
-import { buyShip, sellShip, renameShip } from "./shipyard.js";
+import { orderShip, sellShip, renameShip } from "./shipyard.js";
+import { cancelBuild, getTimeUntilReady, BERTHS } from "./slipway.js";
 import { buyUpgrade, getCommandCapacity } from "./command.js";
 import { getUnlocksAtLevel, getFieldUnlocksAtLevel, isFieldUnlocked, canHullWorkField } from "./skills.js";
 import { setRecipe, getRefineJob, getRecipeUnlocksAtLevel, getSlotUnlocksAtLevel } from "./refinery.js";
@@ -327,7 +328,7 @@ const actions = {
     const result = buyIndustryUpgrade(state, upgradeId);
     if (result.ok) {
       const upgrade = UPGRADES[upgradeId];
-      addLog(`Upgrade installed: ${upgrade.name}. ${upgrade.description}`, upgrade.building === "refinery" ? "refine" : "make");
+      addLog(`Upgrade installed: ${upgrade.name}. ${upgrade.description}`, { refinery: "refine", workshop: "make", shipyard: "fleet" }[upgrade.building]);
     }
     refresh();
     return result;
@@ -425,12 +426,25 @@ const actions = {
     refresh();
   },
 
+  // Pays for a ship and puts it on the slipway (shipyard.js). It
+  // joins the fleet when the build finishes (see logBuilt below).
   buyShip(shipTypeId) {
-    const ship = buyShip(state, shipTypeId);
-    if (ship) {
-      // The fleet changed, so rebuild the ship cards.
-      buildFleetViews(state, actions);
-      addLog(`${ship.name} (${SHIP_TYPES[ship.type].name}) joins the fleet. Docked at ${HOME.name}, awaiting orders.`, "fleet");
+    const now = gameNow(state);
+    const order = orderShip(state, shipTypeId, now);
+    if (order) {
+      const berth = BERTHS[order.berth].name.toLowerCase();
+      const ready = formatDuration(getTimeUntilReady(state, order.id, now));
+      const queued = order.startedAt === null ? ", queued behind the build already there" : "";
+      addLog(`${SHIP_TYPES[order.type].name} ordered on the ${berth}${queued}. Ready in ${ready}.`, "fleet");
+    }
+    refresh();
+  },
+
+  // Takes an order off the slipway with a full refund (slipway.js).
+  cancelBuild(orderId) {
+    const order = cancelBuild(state, orderId, gameNow(state));
+    if (order) {
+      addLog(`${SHIP_TYPES[order.type].name} order cancelled; ${formatNumber(order.paid.credits)} cr refunded.`, "fleet");
     }
     refresh();
   },
@@ -661,6 +675,12 @@ function tick() {
       continue;
     }
 
+    // A hull finished on a slipway: it joins the fleet.
+    if (result.kind === "built") {
+      logBuilt(result);
+      continue;
+    }
+
     // The contracts board: finished and newly posted contracts.
     if (result.kind === "contract") {
       logContract(result);
@@ -695,6 +715,19 @@ function tick() {
   announceReadyContracts();
   announceReadySurveys();
   render(state, now);
+}
+
+// -------------------------------------------------------------
+// logBuilt(result)
+// A ship finished on a slipway joins the fleet: rebuild the ship
+// cards (the fleet changed) and say so in the log.
+// -------------------------------------------------------------
+function logBuilt(result) {
+  const ship = findShip(state, result.shipId);
+  buildFleetViews(state, actions);
+  if (ship) {
+    addLog(`${ship.name} (${SHIP_TYPES[ship.type].name}) launched from the slipway. Docked at ${HOME.name}, awaiting orders.`, "fleet");
+  }
 }
 
 // -------------------------------------------------------------
@@ -1104,6 +1137,7 @@ function reportOfflineProgress(report, opening = null) {
   const finds = [];      // everything scouts brought home
   let explorationXp = 0;
   const contractsDone = [];  // contracts finished while away
+  const built = [];          // ships finished on the slipways while away
   let contractsPosted = 0;
 
   for (const result of report.results) {
@@ -1127,6 +1161,9 @@ function reportOfflineProgress(report, opening = null) {
       contractsDone.push(result);
     } else if (result.kind === "posted") {
       contractsPosted += 1;
+    } else if (result.kind === "built") {
+      built.push(result);
+      logBuilt(result);   // each new ship also gets its own log line
     } else if (result.kind === "scout") {
       surveys.push(...result.surveys);
       deepScans += result.deepScans;
@@ -1153,6 +1190,10 @@ function reportOfflineProgress(report, opening = null) {
     if (deepScans > 0) parts.push(`ran ${deepScans} deep scan${deepScans === 1 ? "" : "s"}`);
     const found = finds.length > 0 ? `, bringing home ${finds.map(describeFind).join(", ")}` : "";
     message += ` Your scouts ${parts.join(" and ")}${found}, earning ${formatXp(explorationXp)} Exploration XP.`;
+  }
+  if (built.length > 0) {
+    const names = built.map((r) => findShip(state, r.shipId)?.name).filter(Boolean);
+    message += ` The slipway launched ${names.join(", ")}, docked and awaiting orders.`;
   }
   if (contractsDone.length > 0) {
     const paid = contractsDone.reduce((sum, r) => sum + r.credits, 0);

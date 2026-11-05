@@ -66,6 +66,7 @@
 //   }
 // =============================================================
 
+import { getNextBuildEvent, finishBuild } from "./slipway.js";
 import { FIELDS, SHIP_TYPES, ITEMS, HUB, FLEET_XP_EXPONENT, HULL_SIZES } from "../data/content.js";
 import { addItem, findShip } from "./state.js";
 import { addXp, isFieldUnlocked, canHullWorkField, getFirstFieldFor } from "./skills.js";
@@ -850,9 +851,14 @@ export function processJobs(state, now) {
     if (!next) break;   // nothing else is due yet
 
     // A board slot due a new contract, or a job's event
-    const result = next.board !== undefined
-      ? boardEvent(state, next.board)
-      : runEvent(state, next.job, next.time);
+    let result;
+    if (next.board !== undefined) {
+      result = boardEvent(state, next.board);
+    } else if (next.build !== undefined) {
+      result = finishBuild(state, next.build, next.time);   // a new ship joins the fleet
+    } else {
+      result = runEvent(state, next.job, next.time);
+    }
     if (result) {
       results.push(result);
     }
@@ -894,6 +900,7 @@ function startWaitingAll(state, time) {
 //   Scout job:   the trip finishing (scout docks with its find)
 //   Haul job:    selling at the hub, then docking back home
 //   Refinery or workshop job: the current batch finishing
+//   A slipway build:  the hull finishing (slipway.js)
 //   Waiting freighters, refinery slots and workshop slots have
 //   no event - they wait for goods.
 // -------------------------------------------------------------
@@ -923,6 +930,13 @@ function findNextEvent(state, now) {
     if (time <= now && (best === null || time < best.time)) {
       best = { job, time };
     }
+  }
+
+  // A hull finishing on a slipway (slipway.js). On a tie with a
+  // ship's job, the job goes first (strictly earlier only).
+  const build = getNextBuildEvent(state, now);
+  if (build && (best === null || build.time < best.time)) {
+    best = { build: build.order, time: build.time };
   }
 
   // A contracts board slot due a new contract (contracts.js). On a
@@ -1088,8 +1102,9 @@ function mergeResultsByShip(results) {
   const byShip = {};   // shipId -> its merged result
 
   for (const result of results) {
-    // Contracts are never added together: each one is its own line.
-    if (result.kind === "contract" || result.kind === "posted") {
+    // Contracts and finished builds are never added together:
+    // each one is its own line.
+    if (result.kind === "contract" || result.kind === "posted" || result.kind === "built") {
       merged.push(result);
       continue;
     }

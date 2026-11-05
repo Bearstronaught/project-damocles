@@ -1,11 +1,16 @@
 // =============================================================
 // js/shipyard.js
 // -------------------------------------------------------------
-// SHIPYARD: buying and selling ships.
+// SHIPYARD: ordering and selling ships.
+//
+// Since 5 Nov a ship isn't handed over the moment you pay: it's
+// ORDERED, and built on one of Anvil's berths over a few minutes
+// to a few hours (slipway.js has the berths and the queue).
 // =============================================================
 
-import { SHIP_TYPES, SHIP_NAMES, SELL_RATE, SHIP_PRICE_GROWTH } from "../data/content.js";
-import { isShipTypeUnlocked, getFirstFieldFor } from "./skills.js";
+import { SHIP_TYPES, SELL_RATE, SHIP_PRICE_GROWTH, UPGRADES } from "../data/content.js";
+import { isShipTypeUnlocked } from "./skills.js";
+import { getBerthFor, isBerthOpen, countOrdered, placeOrder, launchShip } from "./slipway.js";
 import { getShipPoints, getCommandFree } from "./command.js";
 import { findShip } from "./state.js";
 import { getJobForShip } from "./jobs.js";
@@ -45,9 +50,13 @@ export function getPriceWithOwned(shipTypeId, owned) {
 // -------------------------------------------------------------
 // getShipPrice(state, shipTypeId)
 // What the NEXT ship of this type costs for this player.
+// Ships still on the slipway count as owned here (Dan, 5 Nov):
+// otherwise you could queue three Prospectors at today's price
+// before the first one was even built.
 // -------------------------------------------------------------
 export function getShipPrice(state, shipTypeId) {
-  return getPriceWithOwned(shipTypeId, countOwned(state, shipTypeId));
+  const owned = countOwned(state, shipTypeId) + countOrdered(state, shipTypeId);
+  return getPriceWithOwned(shipTypeId, owned);
 }
 
 
@@ -67,6 +76,15 @@ export function canBuyShip(state, shipTypeId) {
   if (!isShipTypeUnlocked(state, shipTypeId)) {
     return { ok: false, reason: "Locked" };
   }
+  // Somewhere to build it: capital hulls need a shipyard station,
+  // large hulls the heavy slipway (slipway.js).
+  const berthId = getBerthFor(shipTypeId);
+  if (berthId === null) {
+    return { ok: false, reason: "Needs a shipyard station" };
+  }
+  if (!isBerthOpen(state, berthId)) {
+    return { ok: false, reason: `Needs the ${UPGRADES.heavy_slipway.name.toLowerCase()}` };
+  }
   if (getShipPoints(shipTypeId) > getCommandFree(state)) {
     return { ok: false, reason: "Not enough command points" };
   }
@@ -78,45 +96,42 @@ export function canBuyShip(state, shipTypeId) {
 
 
 // -------------------------------------------------------------
-// buyShip(state, shipTypeId)
-// Pays for a ship and adds it to the fleet.
-// Returns the new ship, or null if it couldn't be bought.
+// orderShip(state, shipTypeId, now)
+// Pays for a ship and puts it on the slipway. It joins the fleet
+// when the build finishes (slipway.js, finishBuild).
+// Returns the order, or null if it couldn't be ordered.
 // -------------------------------------------------------------
-export function buyShip(state, shipTypeId) {
-  // Check first - never take money for a ship we can't give.
+export function orderShip(state, shipTypeId, now) {
+  // Check first - never take money for a ship we can't build.
   if (!canBuyShip(state, shipTypeId).ok) {
     return null;
   }
 
-  // Pay the price BEFORE adding the ship, so the price is worked
-  // out from the fleet as it was when the player clicked Buy.
-  state.credits -= getShipPrice(state, shipTypeId);
+  // Work out the price BEFORE placing the order: the new order
+  // itself would otherwise count towards its own price.
+  const price = getShipPrice(state, shipTypeId);
+  state.credits -= price;
 
-  // Every ship gets a unique ID from a counter that only ever
-  // goes up, so IDs are never reused (even after a ship is sold).
-  const number = state.nextShipNumber;
-  state.nextShipNumber += 1;
+  // Record what was paid, so cancelling can give it all back.
+  // (No hull costs goods yet; the Hauler will be the first.)
+  const paid = { credits: price, goods: {} };
+  return placeOrder(state, shipTypeId, paid, now);
+}
 
-  const ship = {
-    id: "ship-" + number,
-    name: pickShipName(number),
-    type: shipTypeId,
-  };
 
-  // What the ship does until told otherwise, by its role:
-  if (SHIP_TYPES[shipTypeId].role === "freight") {
-    ship.haulMode = "full";              // wait for a full hold
-  } else if (SHIP_TYPES[shipTypeId].role === "mining") {
-    // A barge heads for the first open field its hull can work:
-    // the Inner Belt for most, the deep core for a Deep-core barge
-    // (it can't work the belts at all).
-    ship.destination = getFirstFieldFor(state, shipTypeId);
-  } else {
-    ship.destination = "inner_belt";     // scouts: replaced when they pick a target
+// -------------------------------------------------------------
+// buyShipInstantly(state, shipTypeId)
+// Pays for a ship and adds it to the fleet AT ONCE, skipping the
+// slipway. The game itself never does this: it's for the tests,
+// which check prices and command points without waiting for
+// builds. Returns the new ship, or null if it couldn't be bought.
+// -------------------------------------------------------------
+export function buyShipInstantly(state, shipTypeId) {
+  if (!canBuyShip(state, shipTypeId).ok) {
+    return null;
   }
-
-  state.ships.push(ship);
-  return ship;
+  state.credits -= getShipPrice(state, shipTypeId);
+  return launchShip(state, shipTypeId);
 }
 
 
@@ -235,18 +250,4 @@ export function renameShip(state, shipId, newName) {
 function tidyName(text) {
   // \s+ means "one or more spaces of any kind"; g means "everywhere"
   return (text || "").replace(/\s+/g, " ").trim();
-}
-
-
-// -------------------------------------------------------------
-// pickShipName(number)
-// Ship 2 gets the first name in SHIP_NAMES, ship 3 the second,
-// and so on. After the list runs out: "Barge 8", "Barge 9"...
-// -------------------------------------------------------------
-function pickShipName(number) {
-  const index = number - 2;   // ship-1 is the starting ship
-  if (index >= 0 && index < SHIP_NAMES.length) {
-    return SHIP_NAMES[index];
-  }
-  return "Barge " + number;
 }

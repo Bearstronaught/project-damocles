@@ -63,6 +63,7 @@ export const BALANCE = {
     bigger_orders_2: { building: 'workshop', skill: 'manufacturing', level: 32, requires: 'bigger_orders_1', costs: { cargo_pod: 240 }, credits: 250000, effect: 'orderSize', value: 20 },
     precision_tooling_3: { building: 'workshop', skill: 'manufacturing', level: 40, requires: 'precision_tooling_2', costs: { thruster_assembly: 300 }, credits: 400000, effect: 'workshopSpeed', value: 0.1 },
     control_centre: { building: 'workshop', skill: 'manufacturing', level: 30, requires: null, costs: { thruster_assembly: 120, cargo_pod: 120 }, credits: 300000, effect: 'standingOrders', value: 1 },
+    heavy_slipway: { building: 'shipyard', skill: 'mining', level: 30, requires: null, costs: { structural_frames: 300 }, credits: 1000000, effect: 'heavySlipway', value: 1 },
   },
   shipUpgrades: {
     prospector_drill_1: { hull: 'prospector', part: 'drill', grade: 1, skill: 'mining', level: 2, credits: 3000, costs: {}, bonus: 0.15 },
@@ -127,10 +128,10 @@ export const BALANCE = {
     { from: 1500, size: 4 },
   ],
   hullSizes: {
-    small: { commandPoints: 1, loadingRate: 20 },
-    medium: { commandPoints: 2, loadingRate: 40 },
-    large: { commandPoints: 4, loadingRate: 60 },
-    capital: { commandPoints: 8, loadingRate: 80 },
+    small: { commandPoints: 1, loadingRate: 20, buildSeconds: 120 },
+    medium: { commandPoints: 2, loadingRate: 40, buildSeconds: 1200 },
+    large: { commandPoints: 4, loadingRate: 60, buildSeconds: 10800 },
+    capital: { commandPoints: 8, loadingRate: 80, buildSeconds: 86400 },
   },
   command: { startPoints: 6, pointsPerUpgrade: 2, firstUpgradeCost: 80000, costMultiplier: 2.5, maxUpgrades: 10 },
   sellRate: 0.5,

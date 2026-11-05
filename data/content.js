@@ -203,7 +203,9 @@ export const SKILLS = {
 // work per point, which nudges players towards them.
 // (Large and capital hulls don't exist yet; their numbers are
 // placeholders.)
-// From the balance sheet (Settings tab): commandPoints.
+// From the balance sheet (Settings tab): commandPoints, loadingRate,
+// and buildSeconds (how long one hull of that size takes on a
+// slipway, Dan 4 Nov; see js/slipway.js).
 export const HULL_SIZES = {
   small:   { name: "Small",   ...BALANCE.hullSizes.small },
   medium:  { name: "Medium",  ...BALANCE.hullSizes.medium },
@@ -517,6 +519,8 @@ export const WORKSHOP = BALANCE.workshop;
 //     orderSize      this many more batches allowed in one order
 //     smartQueue     a blocked work order can be skipped
 //     standingOrders the Control centre: standing orders unlocked
+//     heavySlipway   the heavy slipway: large hulls can be built
+//                    (Dan, 5 Nov; see js/slipway.js)
 //   value     how much of the effect (see above)
 export const UPGRADES = {
   furnace_lining_1: {
@@ -592,6 +596,11 @@ export const UPGRADES = {
     name: "Control centre",
     description: "Unlocks standing orders: each workshop slot can keep a product topped up to a set amount whenever it has no work orders to run.",
     ...BALANCE.upgrades.control_centre,
+  },
+  heavy_slipway: {
+    name: "Heavy slipway",
+    description: "A second berth beside the slipway, big enough for large hulls. Large hulls build here, so they never hold up the small and medium ones.",
+    ...BALANCE.upgrades.heavy_slipway,
   },
 };
 

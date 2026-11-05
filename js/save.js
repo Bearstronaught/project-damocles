@@ -194,6 +194,7 @@ function looksLikeASave(state) {
     typeof state.inventory === "object" && state.inventory !== null &&
     Array.isArray(state.ships) && state.ships.length > 0 &&
     Array.isArray(state.jobs) &&
+    (state.version < 20 || Array.isArray(state.builds)) &&
     typeof state.skills === "object" && state.skills !== null &&
     typeof state.lastSavedAt === "number" &&
     typeof state.simulatedUpTo === "number" &&
@@ -479,7 +480,24 @@ function upgradeSave(state) {
     state.version = 19;
   }
 
-  // (Future: if (state.version === 19) { ...; state.version = 20; })
+  // --- Version 19 -> 20: ships are built on slipways ---
+  // Ships used to arrive the moment they were bought. Now each one
+  // is ordered and built over time (slipway.js), so start with an
+  // empty slipway. Large hulls need the heavy slipway, which didn't
+  // exist before: anyone who already owns one bought it before the
+  // rule, so they get the heavy slipway free rather than being
+  // locked out of building more.
+  if (state.version === 19) {
+    state.builds = [];
+    state.nextOrderNumber = 1;
+    const ownsLargeHull = state.ships.some((ship) => SHIP_TYPES[ship.type]?.size === "large");
+    if (ownsLargeHull) {
+      state.upgrades.heavy_slipway = true;
+    }
+    state.version = 20;
+  }
+
+  // (Future: if (state.version === 20) { ...; state.version = 21; })
 
   if (state.version > SAVE_VERSION) {
     // A save from a NEWER version of the game than this one.

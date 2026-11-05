@@ -35,7 +35,7 @@ import { createContracts } from "./contracts.js";
 //   Version 16: the contracts board, and running totals (stats)
 //   Version 17: reputation kept per faction, contracts name theirs
 //   Version 18: Diplomacy skill, ice, charters replace quotas
-export const SAVE_VERSION = 19;
+export const SAVE_VERSION = 20;
 
 
 // -------------------------------------------------------------
@@ -112,6 +112,14 @@ export function createNewGame() {
 
     // The number the NEXT ship bought will get ("ship-2").
     nextShipNumber: 2,
+
+    // SLIPWAY ORDERS (slipway.js): hulls paid for and being built,
+    // or waiting their turn, in the order they'll be built. Each
+    // berth builds the first of its own orders.
+    builds: [],
+
+    // The number the NEXT slipway order will get ("order-1").
+    nextOrderNumber: 1,
 
     // XP in each skill. Levels are worked out from XP (skills.js).
     skills: {

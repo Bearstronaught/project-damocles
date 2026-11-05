@@ -1502,9 +1502,18 @@ function buildWorkshop(actions) {
 }
 
 
+// The buildings with upgrades, in screen order, and their names.
+// The Shipyard frame holds the heavy slipway (Dan, 5 Nov).
+const UPGRADE_BUILDINGS = {
+  refinery: "Refinery",
+  workshop: "Workshop",
+  shipyard: "Shipyard",
+};
+
 // -------------------------------------------------------------
 // buildUpgrades(actions)
-// One collapsible frame for the refinery and one for the workshop.
+// One collapsible frame each for the refinery, the workshop and
+// the shipyard.
 // Inside each, a group per upgrade LINE (Furnace lining I to III,
 // Smart queue...; see getUpgradeLines in upgrades.js), with a row
 // for every tier: name, what it does, cost and a Buy button.
@@ -1513,7 +1522,7 @@ function buildUpgrades(actions) {
   const list = byId("upgrades-list");
   list.innerHTML = "";
 
-  for (const building of ["refinery", "workshop"]) {
+  for (const building of Object.keys(UPGRADE_BUILDINGS)) {
     // One collapsible frame per BUILDING (Dan, 30 Oct), with its
     // name and tally on top. Inside, the upgrade lines are plain
     // groups - no extra click once the building is open.
@@ -1523,7 +1532,7 @@ function buildUpgrades(actions) {
     group.innerHTML = `
       <summary class="component-summary">
         <div class="component-head">
-          <span class="card-name">${building === "refinery" ? "Refinery" : "Workshop"}</span>
+          <span class="card-name">${UPGRADE_BUILDINGS[building]}</span>
           <span class="component-tally" data-part="tally"></span>
         </div>
         <span class="expand-hint" aria-hidden="true"></span>
@@ -1591,12 +1600,18 @@ function renderUpgrades(state) {
   const panel = byId("upgrades-panel");
   panel.hidden = !isRefineryOpen(state);
   byId("upgrades-workshop").hidden = !isWorkshopOpen(state);
+  // The heavy slipway is paid in workshop products, so the
+  // Shipyard frame appears with the workshop.
+  byId("upgrades-shipyard").hidden = !isWorkshopOpen(state);
 
   let owned = 0;
   let ready = 0;   // can be bought right now (and its group is showing)
   const readyIds = [];   // ...and which ones, for the nav dot
   // Each building's own totals, for its frame's tally
-  const perBuilding = { refinery: { owned: 0, total: 0, ready: 0 }, workshop: { owned: 0, total: 0, ready: 0 } };
+  const perBuilding = {};
+  for (const building of Object.keys(UPGRADE_BUILDINGS)) {
+    perBuilding[building] = { owned: 0, total: 0, ready: 0 };
+  }
   for (const line of getUpgradeLines()) {
     const frame = byId("upline-" + line.id);
     const showing = !panel.hidden && !frame.closest(".upgrade-building").hidden;

@@ -35,7 +35,8 @@ import { getLevel, isFieldUnlocked, canHullWorkField } from "../js/skills.js";
 import { getTripPlan, getHaulPlan, getJobForShip, recallJob } from "../js/jobs.js";
 import { getPrice, sellAll } from "../js/trade.js";
 import { setBond } from "../js/bonded.js";
-import { buyShip, getShipPrice, canBuyShip, getSellValue, canSellShip, sellShip } from "../js/shipyard.js";
+import { orderShip, getShipPrice, canBuyShip, getSellValue, canSellShip, sellShip } from "../js/shipyard.js";
+import { getBerthFor, isBerthOpen, countOrdered } from "../js/slipway.js";
 import { canBuyShipUpgrade, buyShipUpgrade, getPartGrade, getShipStats } from "../js/ship-upgrades.js";
 import { canBuyIndustryUpgrade, buyIndustryUpgrade, isOwned } from "../js/upgrades.js";
 import { getCommandFree } from "../js/command.js";
@@ -69,9 +70,12 @@ const LOADS_LEFT_FOR_FREIGHTERS = 1.5;
 // Small helpers
 // -------------------------------------------------------------
 
-// How many ships of one type the player owns, e.g. count(state, "courier")
+// How many ships of one type the player owns or has on order,
+// e.g. count(state, "courier"). Ships on the slipway count, so the
+// player doesn't order a second one while the first is being
+// built (slipway.js, 5 Nov).
 function count(state, typeId) {
-  return state.ships.filter((ship) => ship.type === typeId).length;
+  return state.ships.filter((ship) => ship.type === typeId).length + countOrdered(state, typeId);
 }
 
 // The hull types the player owns at least one of, e.g. ["prospector", "pathfinder"]
@@ -637,7 +641,7 @@ export function extraShopping(state, now, swaps) {
       }
     }
     if (courierPerPoint >= minerPerPoint) {
-      options.push({ cost: getShipPrice(state, "courier"), buy: () => buyShip(state, "courier"), text: "Courier #" + (count(state, "courier") + 1) });
+      options.push({ cost: getShipPrice(state, "courier"), buy: () => orderShip(state, "courier", now), text: "Courier #" + (count(state, "courier") + 1) });
     }
   }
 
@@ -687,6 +691,10 @@ function swapOption(state, now, swaps, from, to, keepAtLeast) {
   // Worth it only if the one big hull out-earns all the ones it replaces
   const better = minerValuePerHour(state, to) > count * minerValuePerHour(state, from);
   const sellable = state.ships.filter((ship) => ship.type === from && !getCharter(state, ship.id));
+  // Somewhere to build it: a barge needs the heavy slipway (5 Nov).
+  // Without this the player would recall ships it can't replace.
+  const berth = getBerthFor(to);
+  if (berth === null || !isBerthOpen(state, berth)) return null;
   if (!unlocked || !outOfPoints || !better || sellable.length < count + keepAtLeast) return null;
 
   // Each sale makes the next one of that type cheaper: each sells for
@@ -718,7 +726,7 @@ function swapOption(state, now, swaps, from, to, keepAtLeast) {
 
 
 // -------------------------------------------------------------
-// finishSwaps(state, swaps)
+// finishSwaps(state, swaps, now)
 // Recalled Prospectors take a few minutes to fly home. Once both
 // in a swap are docked, sell them and buy the Excavator in their
 // place. (If the credits have been spent meanwhile, the sale
@@ -726,7 +734,7 @@ function swapOption(state, now, swaps, from, to, keepAtLeast) {
 // affordable, by the normal shopping list.)
 // Returns a list of log lines.
 // -------------------------------------------------------------
-export function finishSwaps(state, swaps) {
+export function finishSwaps(state, swaps, now) {
   const lines = [];
   for (let i = swaps.length - 1; i >= 0; i--) {
     const swap = swaps[i];
@@ -738,8 +746,8 @@ export function finishSwaps(state, swaps) {
     const fromName = SHIP_TYPES[swap.from].name, toName = SHIP_TYPES[swap.to].name;
     if (canBuyShip(state, swap.to).ok) {
       const price = getShipPrice(state, swap.to);
-      buyShip(state, swap.to);
-      lines.push(`swap: sold ${stillHere.length} x ${fromName} (${sold.toLocaleString("en-GB")} cr), bought a ${toName} (${price.toLocaleString("en-GB")} cr)`);
+      orderShip(state, swap.to, now);
+      lines.push(`swap: sold ${stillHere.length} x ${fromName} (${sold.toLocaleString("en-GB")} cr), ordered a ${toName} (${price.toLocaleString("en-GB")} cr)`);
     } else {
       lines.push(`swap: sold ${stillHere.length} x ${fromName} (${sold.toLocaleString("en-GB")} cr); ${toName} not affordable yet`);
     }
