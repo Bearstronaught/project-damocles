@@ -2867,6 +2867,149 @@ body.nav-collapsed .nav-version {
 }
 
 
+/* ----- The welcome-back pop-up (welcome-popup.js) -----
+   After 10 minutes or more away (agreed 5 Nov). Uses the survey
+   report's cover and box, made wider for two sides: the summary
+   on the left, level-ups and unlocks on the right. */
+.welcome-box {
+  width: min(760px, 100%);
+  overflow-y: auto;            /* on a phone the WHOLE pop-up scrolls */
+}
+
+/* The heading: title on one line, time away + Treasury under it */
+.welcome-head {
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.welcome-subtitle {
+  margin: 0;
+  font-size: 13px;
+  color: var(--steel);
+}
+
+/* The two sides. One column on a phone (summary first)... */
+.welcome-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 14px;
+  margin-bottom: 14px;
+}
+
+/* ...and side by side from 700 px, the summary a little wider.
+   Only there does the level-ups side scroll by itself, so a long
+   list of unlocks never pushes Continue off the screen.
+   (".single" = no level-ups, so the summary takes the full width.) */
+@media (min-width: 700px) {
+  .welcome-columns:not(.single) {
+    grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
+  }
+  .welcome-levels {
+    max-height: 340px;
+    overflow-y: auto;
+  }
+}
+
+/* Needs attention: amber, at the very top (Dan, 5 Nov) */
+.welcome-attention {
+  margin-bottom: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--amber-dim);
+  background: var(--amber-faint);
+}
+
+.welcome-attention-title,
+.welcome-levels-title {
+  margin: 0 0 4px;
+  font-family: var(--font-display);
+  font-size: 12px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.welcome-attention-title {
+  color: var(--amber);
+}
+
+.welcome-attention-title::before {
+  content: "▲ ";               /* the same marker as amber group headings */
+  font-size: 9px;
+  vertical-align: 1px;
+}
+
+.welcome-attention-list {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--amber);
+}
+
+/* One block per role, divided by thin lines */
+.welcome-role {
+  padding: 7px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.welcome-role:last-child {
+  border-bottom: none;
+}
+
+.welcome-role-name {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--teal);
+}
+
+.welcome-role-detail {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--steel);
+}
+
+/* The level-ups side: a slightly raised panel of its own */
+.welcome-levels {
+  padding: 8px 10px;
+  background: var(--panel-raised);
+  border: 1px solid var(--line);
+}
+
+.welcome-levels-title {
+  color: var(--steel);
+}
+
+.welcome-level + .welcome-level {
+  margin-top: 8px;
+}
+
+.welcome-level-heading {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--amber);
+}
+
+.welcome-level-line {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--steel);
+}
+
+.welcome-level-perk {
+  margin: 0;
+  font-size: 12px;
+  color: var(--steel-dim);
+}
+
+/* Continue sits on the right */
+.welcome-continue {
+  align-self: flex-end;
+}
+
+
 /* =============================================================
    CONTRACTS (the belt independents' board)
    ============================================================= */

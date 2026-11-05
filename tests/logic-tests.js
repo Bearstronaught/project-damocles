@@ -29,6 +29,7 @@ import { getMiningXpShare, startMiningJob, startHaulJob, getJobForShip, processJ
 import { sellAll, sellEverything, getCargoValue, sellAtHub, getTradeXp, getPrice } from "../js/trade.js";
 import { parseSave, applyOfflineProgress, exportSave, importSave } from "../js/save.js";
 import { advanceTo } from "../js/simulation.js";
+import { summariseTimeAway, hasActivity, largestFirst, WELCOME_BACK_SECONDS } from "../js/welcome-back.js";
 import { createClock, gameNow, setSpeed, jumpAhead, SPEEDS } from "../js/clock.js";
 import { devSetLevel, devAddCredits, devAddGoods, devSetSpeed, devJumpHour, HOUR_MS } from "../js/playtest.js";
 import { getShipStats, getPartGrade, getNextUpgrade, canBuyShipUpgrade, buyShipUpgrade, getHullParts, getUpgradeName, getShipUpgradeUnlocksAtLevel, getShipGrades, getPendingRefits } from "../js/ship-upgrades.js";
@@ -4722,6 +4723,104 @@ test("Heavy slipway: opens at Mining 30 and is paid in structural frames and cre
   state.skills.mining.xp = XP_TABLE[30];
   assert.ok(buyIndustryUpgrade(state, "heavy_slipway").ok);
   assert.equal(canBuyShip(state, "deep_core_barge").ok, true);
+});
+
+
+// =============================================================
+// THE WELCOME-BACK REPORT (agreed 5 Nov)
+// The pop-up itself is screen code (welcome-popup.js), checked
+// in the browser. These check the sums behind it, which is where
+// a mistake would quietly tell the player the wrong thing.
+// =============================================================
+
+test("Welcome back: the pop-up waits for 10 minutes away (Dan, 5 Nov; was 1 minute)", () => {
+  assert.equal(WELCOME_BACK_SECONDS, 600);
+});
+
+test("Welcome back: two hours of mining add up to exactly what landed in the hold", () => {
+  // Why: the pop-up's Mining line must match the cargo the player
+  // actually finds, or it's lying. Play 2 hours with the game
+  // closed, then compare the summary with the hold.
+  const state = newGame();
+  startMiningJob(state, "ship-1", "inner_belt", START);
+  state.simulatedUpTo = START;
+  const report = advanceTo(state, START + 2 * HOUR);
+  const summary = summariseTimeAway(report.results);
+
+  assert.equal(summary.mining.ore.iron_ore, state.inventory.iron_ore);   // every tonne counted
+  assert.equal(summary.mining.trips, Math.floor(2 * HOUR / TRIP));      // whole trips only
+  assert.equal(hasActivity("mining", summary), true);
+  assert.equal(hasActivity("freight", summary), false);                 // no freighter yet: left out
+});
+
+test("Welcome back: level-ups are grouped per skill, from the level before to the highest", () => {
+  // Why: the right-hand side shows "Mining 1 → 6" with every level
+  // in between, so each level's unlocks can be listed.
+  const state = newGame();
+  startMiningJob(state, "ship-1", "inner_belt", START);
+  state.simulatedUpTo = START;
+  const summary = summariseTimeAway(advanceTo(state, START + 2 * HOUR).results);
+  const mining = summary.levels.mining;
+  const levelNow = getLevel(state, "mining");
+
+  assert.equal(mining.from, 1);
+  assert.equal(mining.to, levelNow);
+  // Every level from 2 up to now, once each, lowest first
+  assert.deepEqual(mining.levels, Array.from({ length: levelNow - 1 }, (_, i) => i + 2));
+});
+
+test("Welcome back: the engine reports the Treasury before and after", () => {
+  // Why: the heading shows the CHANGE in the Treasury (Dan agreed,
+  // 5 Nov), not income, so it stays right once costs exist.
+  const state = newGame();
+  state.credits = 12_345;
+  state.simulatedUpTo = START;
+  const report = advanceTo(state, START + HOUR);
+  assert.equal(report.creditsBefore, 12_345);
+  assert.equal(report.creditsAfter, state.credits);
+
+  // ...and when the clock goes backwards (nothing is awarded)
+  const back = advanceTo(state, START);
+  assert.equal(back.creditsBefore, back.creditsAfter);
+});
+
+test("Welcome back: freight, industry, contracts and new ships are each added up", () => {
+  // Hand-made results, shaped like the engine's (jobs.js), so each
+  // role can be checked without setting up a whole late-game save.
+  const results = [
+    { kind: "haul", trips: 1, cargo: { iron_ore: 300, iron_bar: 100 }, credits: 9_000, skillId: "trade", newLevels: [] },
+    { kind: "haul", trips: 1, cargo: { iron_ore: 200 }, credits: 4_000, skillId: "trade", newLevels: [5] },
+    { kind: "refine", trips: 2, itemId: "iron_bar", amount: 60, skillId: "refining", newLevels: [] },
+    { kind: "workshop", slot: 1, slotIdle: true, itemId: "hull_plating", amount: 20, skillId: "manufacturing", newLevels: [] },
+    { kind: "workshop", slot: 1, slotIdle: true, itemId: "hull_plating", amount: 20, skillId: "manufacturing", newLevels: [] },
+    { kind: "contract", credits: 5_000, tierBefore: "Unknown", tierAfter: "Known",
+      contract: { faction: "belt_independents" }, skillId: "diplomacy", newLevels: [] },
+    { kind: "posted", trips: 1, newLevels: [] },
+    { kind: "built", typeId: "courier", trips: 1, newLevels: [] },
+    { kind: "docked", shipId: "ship-2", trips: 1, newLevels: [] },
+  ];
+  const summary = summariseTimeAway(results);
+
+  assert.deepEqual(summary.freight, { runs: 2, sold: { iron_ore: 500, iron_bar: 100 }, credits: 13_000 });
+  assert.deepEqual(summary.industry.refined, { iron_bar: 60 });
+  assert.deepEqual(summary.industry.made, { hull_plating: 40 });
+  assert.deepEqual(summary.industry.idleSlots, [2]);        // slot 2 for the player, listed once
+  assert.equal(summary.contracts.done, 1);
+  assert.equal(summary.contracts.paid, 5_000);
+  assert.equal(summary.contracts.posted, 1);
+  assert.deepEqual(summary.contracts.tiers, [{ faction: "belt_independents", tier: "Known" }]);
+  assert.deepEqual(summary.shipyard.built, ["courier"]);
+  assert.deepEqual(summary.levels.trade, { from: 4, to: 5, levels: [5] });
+  assert.equal(hasActivity("exploration", summary), false); // nothing scouted: left out
+});
+
+test("Welcome back: long lists show the biggest three, largest first, then a count", () => {
+  // Why: a busy late-game empire would otherwise turn the pop-up
+  // back into a wall of text.
+  const { shown, more } = largestFirst({ a: 5, b: 50, c: 1, d: 20, e: 2 });
+  assert.deepEqual(shown, [["b", 50], ["d", 20], ["a", 5]]);
+  assert.equal(more, 2);
+  assert.equal(largestFirst({ a: 1 }).more, 0);             // nothing left off
 });
 
 // -------------------------------------------------------------

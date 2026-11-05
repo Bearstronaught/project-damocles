@@ -39,6 +39,9 @@ import { startScoutJob, canScoutGo, chooseNextTarget, getTarget, getTargetUnlock
   getTargetStatus, launchSurvey, cancelLaunch, getReadySurveys } from "./exploration.js";
 import { describeFind } from "./exploration-screen.js";
 import { showSurveyReport } from "./report.js";
+import { summariseTimeAway, hasActivity, largestFirst, WELCOME_BACK_SECONDS } from "./welcome-back.js";
+import { showWelcomeBack } from "./welcome-popup.js";
+import { getRoleGroups } from "./fleet-groups.js";
 import { handInContract, discardContract, canHandIn, isReady, describeContract, charterShip, getCharter, lendSlot } from "./contracts.js";
 import { saveGame, loadGame, deleteSave, applyOfflineProgress, exportSave, importSave } from "./save.js";
 import { showLevelBanner } from "./banner.js";
@@ -609,8 +612,9 @@ for (const name of Object.keys(actions)) {
 }
 
 
-// A gap at least this long gets the "welcome back" summary.
-const WELCOME_BACK_SECONDS = 60;
+// A gap at least WELCOME_BACK_SECONDS long (10 minutes, in
+// welcome-back.js) gets the welcome-back pop-up. Shorter gaps
+// with the page open just log what happened, as if played.
 
 // The computer's time at the last tick. The welcome-back check
 // uses REAL time: at 60x game speed, one slow tick of 1 second
@@ -737,7 +741,7 @@ function logBuilt(result) {
 // (in the save, so a refresh doesn't announce it again). Several
 // at once share one banner.
 // -------------------------------------------------------------
-function announceReadyContracts() {
+function announceReadyContracts(showBanner = true) {
   const ready = [];
   state.contracts.slots.forEach((slot, index) => {
     const contract = slot.contract;
@@ -752,6 +756,7 @@ function announceReadyContracts() {
   for (const title of titles) {
     addLog(`Contract ready to hand in: ${title}. Find it on the Contracts tab.`, "contract");
   }
+  if (!showBanner) return;   // (the welcome-back pop-up lists them instead)
   showLevelBanner(ready.length === 1 ? "Contract ready" : `${ready.length} contracts ready`,
     [...titles, "Hand in on the Contracts tab"], "Contracts");
 }
@@ -766,7 +771,7 @@ function announceReadyContracts() {
 // rest: a wreck stage that opens when the stage before it is done.
 // Several at once share one banner.
 // -------------------------------------------------------------
-function announceReadySurveys() {
+function announceReadySurveys(showBanner = true) {
   const announced = state.exploration.announced;
   const fresh = getReadySurveys(state).filter((targetId) => !announced[targetId]);
   if (fresh.length === 0) return;
@@ -778,6 +783,7 @@ function announceReadySurveys() {
   for (const name of names) {
     addLog(`Survey ready to launch: ${name}. Launch it from the Exploration tab when you're ready to read what's there.`, "explore");
   }
+  if (!showBanner) return;   // (the welcome-back pop-up lists them instead)
   showLevelBanner(fresh.length === 1 ? "Survey ready" : `${fresh.length} surveys ready`,
     [...names, "Launch on the Exploration tab"], "Exploration");
 }
@@ -1099,160 +1105,266 @@ function logLevelUps(skillId, levels, showBanners = true) {
 
 
 // -------------------------------------------------------------
-// The "welcome back" message after time away.
+// reportOfflineProgress(report, opening)
+// What the player sees after time away (agreed 5 Nov).
+//
+//   - Under 10 minutes: one line in the log, and level-ups
+//     announced as usual (log lines and banners).
+//   - 10 minutes or more: the welcome-back pop-up
+//     (welcome-popup.js), with Needs attention first, one line
+//     per role, and the level-ups with every unlock on the right.
+//     The log keeps one line as a record.
+//
+// "opening" is for the dev panel's jump ("Playtest: jumped ahead
+// 1 hour."): it always gets the pop-up, whatever the length.
 // -------------------------------------------------------------
-// "opening" replaces the first sentence (the dev panel's jump
-// says "Playtest: jumped ahead 1 hour." instead).
 function reportOfflineProgress(report, opening = null) {
   // Ignore tiny gaps, like a quick page refresh.
   if (report.secondsAway < 10) {
     return;
   }
 
-  let message = opening || `Welcome back, commander. You were away ${formatDuration(report.secondsAway * 1000)}.`;
+  // Add everything up by role (welcome-back.js).
+  const summary = summariseTimeAway(report.results);
 
-  // Time away is GAME time, so at a playtest speed say so
-  // (an hour away at 10x reads as 10 hours).
+  // --- The heading: time away and the Treasury change ---
+  const away = formatDuration(report.secondsAway * 1000);
+  const treasury = `Treasury ${formatSignedCredits(report.creditsAfter - report.creditsBefore)}`;
+
+  // Small notes in brackets after the time away
+  const notes = [];
   if (!opening && state.clock.speed !== 1) {
-    message += ` (Game time, at ${state.clock.speed}× speed.)`;
+    // Time away is GAME time, so at a playtest speed say so.
+    notes.push(`game time, at ${state.clock.speed}× speed`);
   }
-
   if (report.secondsCounted < report.secondsAway) {
-    message += ` (Only ${RULES.offlineCapHours}h counted.)`;
+    notes.push(`only ${RULES.offlineCapHours}h counted`);
+  }
+  const noteText = notes.length > 0 ? ` (${notes.join("; ")})` : "";
+
+  // --- Things that happen whichever way it's shown ---
+
+  // Ships launched from a slipway while away: the ship cards
+  // need rebuilding, because the fleet is different now.
+  if (summary.shipyard.built.length > 0) {
+    buildFleetViews(state, actions);
   }
 
-  // Add up everything gained while away.
-  const mined = {};      // ore brought home, e.g. { iron_ore: 240 }
-  let miningXp = 0;
-  const hauled = {};     // ore sold at the hub
-  let hubCredits = 0;
-  let tradeXp = 0;
-  const refined = {};    // metal made, e.g. { iron_bar: 600 }
-  let refiningXp = 0;
-  const made = {};       // products made, e.g. { hull_plating: 900 }
-  let manufacturingXp = 0;
-  const idleSlots = [];  // workshop slots whose queue ran out
-  const surveys = [];    // survey targets finished while away
-  let deepScans = 0;
-  const finds = [];      // everything scouts brought home
-  let explorationXp = 0;
-  const contractsDone = [];  // contracts finished while away
-  const built = [];          // ships finished on the slipways while away
-  let contractsPosted = 0;
-
-  for (const result of report.results) {
-    if (result.kind === "mining") {
-      mined[result.itemId] = (mined[result.itemId] || 0) + result.amount;
-      miningXp += result.xpGained;
-    } else if (result.kind === "haul") {
-      for (const [itemId, amount] of Object.entries(result.cargo)) {
-        hauled[itemId] = (hauled[itemId] || 0) + amount;
-      }
-      hubCredits += result.credits;
-      tradeXp += result.xpGained;
-    } else if (result.kind === "refine") {
-      refined[result.itemId] = (refined[result.itemId] || 0) + result.amount;
-      refiningXp += result.xpGained;
-    } else if (result.kind === "workshop") {
-      made[result.itemId] = (made[result.itemId] || 0) + result.amount;
-      manufacturingXp += result.xpGained;
-      if (result.slotIdle) idleSlots.push(result.slot + 1);
-    } else if (result.kind === "contract") {
-      contractsDone.push(result);
-    } else if (result.kind === "posted") {
-      contractsPosted += 1;
-    } else if (result.kind === "built") {
-      built.push(result);
-      logBuilt(result);   // each new ship also gets its own log line
-    } else if (result.kind === "scout") {
-      surveys.push(...result.surveys);
-      deepScans += result.deepScans;
-      finds.push(...result.finds);
-      explorationXp += result.xpGained;
-    }
-  }
-
-  if (Object.keys(mined).length > 0) {
-    message += ` Your barges brought back ${describeCargo(mined)}, earning ${formatXp(miningXp)} Mining XP.`;
-  }
-  if (Object.keys(hauled).length > 0) {
-    message += ` Your freighters sold ${describeCargo(hauled)} at ${HUB.name} for ${formatNumber(hubCredits)} cr, earning ${formatXp(tradeXp)} Trade XP.`;
-  }
-  if (Object.keys(refined).length > 0) {
-    message += ` The refinery made ${describeCargo(refined)}, earning ${formatXp(refiningXp)} Refining XP.`;
-  }
-  if (Object.keys(made).length > 0) {
-    message += ` The workshop made ${describeCargo(made)}, earning ${formatXp(manufacturingXp)} Manufacturing XP.`;
-  }
-  if (surveys.length > 0 || deepScans > 0) {
-    const parts = [];
-    if (surveys.length > 0) parts.push(`surveyed ${surveys.map((id) => getTarget(id).name).join(", ")}`);
-    if (deepScans > 0) parts.push(`ran ${deepScans} deep scan${deepScans === 1 ? "" : "s"}`);
-    const found = finds.length > 0 ? `, bringing home ${finds.map(describeFind).join(", ")}` : "";
-    message += ` Your scouts ${parts.join(" and ")}${found}, earning ${formatXp(explorationXp)} Exploration XP.`;
-  }
-  if (built.length > 0) {
-    const names = built.map((r) => findShip(state, r.shipId)?.name).filter(Boolean);
-    message += ` The slipway launched ${names.join(", ")}, docked and awaiting orders.`;
-  }
-  if (contractsDone.length > 0) {
-    const paid = contractsDone.reduce((sum, r) => sum + r.credits, 0);
-    message += ` ${contractsDone.length === 1 ? "A contract was" : contractsDone.length + " contracts were"} finished, paying ${formatNumber(paid)} cr.`;
-  }
-  if (contractsPosted > 0) {
-    message += ` ${contractsPosted === 1 ? "A new contract is" : contractsPosted + " new contracts are"} on the board.`;
-  }
-  if (idleSlots.length > 0) {
-    message += ` Workshop ${idleSlots.length === 1 ? "slot " + idleSlots[0] + " ran out of orders and is" : "slots " + idleSlots.join(" and ") + " ran out of orders and are"} idle.`;
-  }
-  // The catch-up line for surveys (Dan, 31 Oct): scouts don't
-  // survey by themselves any more, so say which are waiting for
-  // the player, whether they opened while away or before.
-  const readySurveys = getReadySurveys(state).map((targetId) => getTarget(targetId).name);
-  if (readySurveys.length > 0) {
-    message += ` ${readySurveys.length === 1 ? "A survey is" : readySurveys.length + " surveys are"} ready to launch: ` +
-      `${readySurveys.join(", ")}. Launch ${readySurveys.length === 1 ? "it" : "them"} from the Exploration tab.`;
-  }
-  addLog(message, "system");
-
-  // Each survey finished while away gets its line of lore, and its
-  // own survey report (they show one after another, never merged).
-  for (const targetId of surveys) {
+  // Each survey finished while away keeps its line of lore in
+  // the log (its report pop-up comes after, see below).
+  for (const targetId of summary.exploration.surveys) {
     addLog(getTarget(targetId).lore, "lore");
   }
-  showSurveyReport(surveyEntries(surveys));
 
-  // A reputation tier reached while away gets its line and banner.
-  for (const result of contractsDone) {
-    if (result.tierAfter !== result.tierBefore) logContract(result);
+  // A new reputation tier reached while away: a log line (the
+  // pop-up's Contracts line says it too, so no banner).
+  for (const { faction, tier } of summary.contracts.tiers) {
+    addLog(`The ${CONTRACT_FACTIONS[faction].name.toLowerCase()} now count you as ${tier}. Their contracts get bigger, and pay more.`, "level");
   }
 
-  // Any level-ups while away get their own log lines after it.
-  // levelsGained collects them per skill, e.g. { mining: [4, 5, 6] }.
-  const levelsGained = {};
-  for (const result of report.results) {
-    logLevelUps(result.skillId, result.newLevels, false);
-    if (result.newLevels.length > 0) {
-      levelsGained[result.skillId] = (levelsGained[result.skillId] || []).concat(result.newLevels);
+  // The one-line record in the log, e.g.
+  // "Back after 9h 42m: Treasury +184,300 cr. Reached Mining 23, Refining 15."
+  const reached = Object.entries(summary.levels).map(([skillId, entry]) => `${SKILLS[skillId].name} ${entry.to}`);
+  const reachedText = reached.length > 0 ? `. Reached ${reached.join(", ")}` : "";
+  addLog(`${opening ? opening.replace(/\.$/, "") : "Back after " + away}${noteText}: ${treasury}${reachedText}.`, "system");
+
+  // The survey reports, one per survey (report.js)
+  const showSurveyReports = () => showSurveyReport(surveyEntries(summary.exploration.surveys));
+
+  // --- A short gap: no pop-up ---
+  if (!opening && report.secondsAway < WELCOME_BACK_SECONDS) {
+    for (const result of report.results) {
+      logLevelUps(result.skillId, result.newLevels);   // log lines + banners, as when playing
     }
+    showSurveyReports();
+    announceReadyContracts();
+    announceReadySurveys();
+    return;
   }
 
-  // Coming back to five level-ups would mean 15 seconds of
-  // banners in a row, so show ONE per skill instead: the level
-  // reached, with everything unlocked along the way.
-  for (const [skillId, levels] of Object.entries(levelsGained)) {
-    const highest = Math.max(...levels);
-    // .flatMap joins each level's unlock list into one list
-    // (Each level's perk line is left off, and the total perk at
-    // the highest level is added once at the end.)
-    const unlocks = levels.flatMap((level) => getUnlockLines(skillId, level, false));
-    unlocks.push(perkLine(skillId, highest));
-    showLevelBanner(`${SKILLS[skillId].name} level ${highest}`, unlocks);
+  // --- A long gap: the pop-up ---
+  // The level-ups are worked out first: getUnlockLines marks any
+  // survey that opened with a level as announced.
+  const levels = describeLevelUps(summary.levels);
+  const attention = getAttentionLines(summary);
+
+  // Ready contracts and surveys are in Needs attention, so they
+  // only get their log lines, not a banner hidden behind the pop-up.
+  announceReadyContracts(false);
+  announceReadySurveys(false);
+
+  showWelcomeBack({
+    title: opening ? "Playtest jump" : "Welcome back, commander",
+    subtitle: `Away ${away}${noteText} · ${treasury}`,
+    attention: attention,
+    roles: describeRoles(summary),
+    levels: levels,
+    onClose: showSurveyReports,   // survey reports wait their turn
+  });
+}
+
+
+// -------------------------------------------------------------
+// getAttentionLines(summary)
+// The "Needs attention" box: anything waiting on the player
+// right now. Each line says where to go, e.g.
+//   "Workshop slot 2 ran out of orders (Industry tab)"
+// -------------------------------------------------------------
+function getAttentionLines(summary) {
+  const lines = [];
+
+  // Ships sitting at the station with no orders (recalled ones,
+  // and new ships fresh off the slipway). Same count as the amber
+  // group headings on Command.
+  const docked = getRoleGroups(state, gameNow(state))
+    .reduce((total, group) => total + group.counts.docked, 0);
+  if (docked > 0) {
+    lines.push(`${docked === 1 ? "1 ship is" : docked + " ships are"} docked, awaiting orders (Command tab)`);
   }
 
-  // Any survey that opened while away and wasn't in a level-up
-  // banner (a wreck stage after the one before it) gets its banner.
-  announceReadySurveys();
+  // Workshop slots whose queue ran out while away
+  for (const slotNumber of summary.industry.idleSlots) {
+    lines.push(`Workshop slot ${slotNumber} ran out of orders (Industry tab)`);
+  }
+
+  // Contracts done and waiting to be handed in
+  const ready = state.contracts.slots.filter((slot, index) => slot.contract && isReady(state, index)).length;
+  if (ready > 0) {
+    lines.push(`${ready === 1 ? "1 contract" : ready + " contracts"} ready to hand in (Contracts tab)`);
+  }
+
+  // Surveys waiting to be launched (scouts don't launch them by
+  // themselves - Dan, 31 Oct)
+  const surveys = getReadySurveys(state).map((targetId) => getTarget(targetId).name);
+  if (surveys.length > 0) {
+    lines.push(`${surveys.length === 1 ? "Survey" : "Surveys"} ready to launch: ${surveys.join(", ")} (Exploration tab)`);
+  }
+
+  return lines;
+}
+
+
+// -------------------------------------------------------------
+// describeRoles(summary)
+// One short line per role that did something, e.g.
+//   { name: "Mining", detail: "41 trips · 3.8 kt iron ore, 1.1 kt nickel ore" }
+// Roles that did nothing are left out.
+// -------------------------------------------------------------
+function describeRoles(summary) {
+  const roles = [];
+
+  if (hasActivity("mining", summary)) {
+    const m = summary.mining;
+    roles.push({ name: "Mining", detail: `${plural(m.trips, "trip")} · ${describeGoods(m.ore)}` });
+  }
+
+  if (hasActivity("freight", summary)) {
+    const f = summary.freight;
+    roles.push({ name: "Freight", detail: `${plural(f.runs, "run")} to ${HUB.name} · ${describeGoods(f.sold)} sold for ${formatNumber(f.credits)} cr` });
+  }
+
+  if (hasActivity("industry", summary)) {
+    const parts = [];
+    if (Object.keys(summary.industry.refined).length > 0) parts.push("Refinery: " + describeGoods(summary.industry.refined));
+    if (Object.keys(summary.industry.made).length > 0) parts.push("Workshop: " + describeGoods(summary.industry.made));
+    roles.push({ name: "Station industry", detail: parts.join(" · ") });
+  }
+
+  if (hasActivity("exploration", summary)) {
+    const e = summary.exploration;
+    const parts = [];
+    if (e.deepScans > 0) parts.push(plural(e.deepScans, "deep scan"));
+    if (e.surveys.length > 0) parts.push("surveyed " + e.surveys.map((targetId) => getTarget(targetId).name).join(", "));
+    if (e.finds.length > 0) parts.push("found " + listWithMore(e.finds.map(describeFind)));
+    roles.push({ name: "Exploration", detail: parts.join(" · ") });
+  }
+
+  if (hasActivity("contracts", summary)) {
+    const c = summary.contracts;
+    const parts = [];
+    if (c.done > 0) parts.push(`${c.done} finished for ${formatNumber(c.paid)} cr`);
+    if (c.posted > 0) parts.push(`${c.posted} new on the board`);
+    for (const { faction, tier } of c.tiers) {
+      parts.push(`now ${tier} with the ${CONTRACT_FACTIONS[faction].name.toLowerCase()}`);
+    }
+    roles.push({ name: "Contracts", detail: parts.join(" · ") });
+  }
+
+  if (hasActivity("shipyard", summary)) {
+    // Count each hull type: ["courier", "courier", "excavator"] -> "2 × Courier, Excavator"
+    const counts = {};
+    for (const typeId of summary.shipyard.built) {
+      counts[typeId] = (counts[typeId] || 0) + 1;
+    }
+    const names = Object.entries(counts).map(([typeId, count]) =>
+      (count > 1 ? `${count} × ` : "") + SHIP_TYPES[typeId].name);
+    roles.push({ name: "Shipyard", detail: "Launched: " + names.join(", ") });
+  }
+
+  return roles;
+}
+
+
+// -------------------------------------------------------------
+// describeLevelUps(levels)
+// The right-hand side of the pop-up: per skill, the levels
+// gained, each level's unlocks, and the perk it's at now, e.g.
+//   { heading: "Mining 21 → 23",
+//     lines: ["22: New ship component (Shipyard): Excavator drill Mk II"],
+//     perk: "Perk now: +11.5% drill speed" }
+// Skills come in the same order as the Skills tab.
+// -------------------------------------------------------------
+function describeLevelUps(levels) {
+  return Object.keys(SKILLS)
+    .filter((skillId) => levels[skillId])
+    .map((skillId) => {
+      const entry = levels[skillId];
+
+      // Every unlock on the way, one line each, with its level
+      // (levels with no unlock just give their perk, so they
+      // add no line).
+      const lines = entry.levels.flatMap((level) =>
+        getUnlockLines(skillId, level, false).map((line) => `${level}: ${line}`));
+
+      // The perk at the level reached. Diplomacy has no perk,
+      // so it says how big the contracts board is instead.
+      const perk = SKILLS[skillId].perk
+        ? `Perk now: +${formatPercent(getLevelPerk(state, skillId, entry.to).total)} ${SKILLS[skillId].perk}`
+        : `Now: ${perkLine(skillId, entry.to)}`;
+
+      return { heading: `${SKILLS[skillId].name} ${entry.from} → ${entry.to}`, lines, perk };
+    });
+}
+
+
+// -------------------------------------------------------------
+// Small wording helpers for the report
+// -------------------------------------------------------------
+
+// { iron_ore: 3800, nickel_ore: 1100 } -> "3.8 kt iron ore, 1.1 kt nickel ore"
+// (the biggest three, largest first, then "and 2 more")
+function describeGoods(amounts) {
+  const { shown, more } = largestFirst(amounts);
+  const text = shown.map(([itemId, amount]) => `${formatTonnes(amount)} ${ITEMS[itemId].name.toLowerCase()}`).join(", ");
+  return more > 0 ? `${text} and ${more} more` : text;
+}
+
+// ["a", "b", "c", "d", "e"] -> "a, b, c and 2 more"
+function listWithMore(items) {
+  const shown = items.slice(0, 3).join(", ");
+  return items.length > 3 ? `${shown} and ${items.length - 3} more` : shown;
+}
+
+// plural(1, "trip") -> "1 trip";  plural(41, "trip") -> "41 trips"
+function plural(count, word) {
+  return `${formatNumber(count)} ${word}${count === 1 ? "" : "s"}`;
+}
+
+// 184300 -> "+184,300 cr";  -2500 -> "−2,500 cr";  0 -> "unchanged"
+// (a real minus sign, which lines up better than a hyphen)
+function formatSignedCredits(change) {
+  if (change === 0) return "unchanged";   // reads better than "+0 cr"
+  return change < 0 ? `−${formatNumber(-change)} cr` : `+${formatNumber(change)} cr`;
 }
 
 

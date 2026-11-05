@@ -56,6 +56,12 @@ import { processJobs } from "./jobs.js";
 export function advanceTo(state, now) {
   const gapMs = now - state.simulatedUpTo;
 
+  // The Treasury before anything is played, so the welcome-back
+  // report can show how much it changed (agreed 5 Nov: the
+  // change in the Treasury, not total income, so costs paid
+  // while away will count once there are any).
+  const creditsBefore = state.credits;
+
   // --- The clock went backwards (or hasn't moved) ---
   if (gapMs <= 0) {
     // Slide every job back by the same amount. Nothing finishes,
@@ -63,7 +69,7 @@ export function advanceTo(state, now) {
     // left as it did before - it just doesn't freeze.
     shiftJobs(state, gapMs);   // gapMs is negative (or 0): moves them earlier
     state.simulatedUpTo = now;
-    return { secondsAway: 0, secondsCounted: 0, results: [] };
+    return { secondsAway: 0, secondsCounted: 0, results: [], creditsBefore, creditsAfter: state.credits };
   }
 
   // --- Normal case: play forward, up to the offline cap ---
@@ -91,6 +97,8 @@ export function advanceTo(state, now) {
     secondsAway: Math.floor(gapMs / 1000),
     secondsCounted: Math.floor(countedMs / 1000),
     results: results,
+    creditsBefore: creditsBefore,     // the Treasury before...
+    creditsAfter: state.credits,      // ...and after
   };
 }
 
