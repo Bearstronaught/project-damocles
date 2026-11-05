@@ -310,6 +310,16 @@ export const SHIP_TYPES = {
     art: "hull_courier",
     ...BALANCE.ships.courier,
   },
+  // The first medium freighter (agreed 28 Oct, built 5 Nov) and the
+  // first hull paid partly in workshop products: from here on, hulls
+  // unlocked after the workshop opens need its goods (design doc,
+  // Manufacturing). Four cargo rows to the Courier's two.
+  hauler: {
+    name: "Hauler-class freighter",
+    description: "A long spine with four rows of cargo pods. Slower than a Courier, but carries five times the load, so it needs a well-stocked hold to fill it.",
+    art: "hull_hauler",
+    ...BALANCE.ships.hauler,
+  },
   pathfinder: {
     name: "Pathfinder-class scout",
     description: "Light, fast and nosy. Flies out to survey targets in the home system and brings back whatever it finds. Carries no cargo of its own.",

@@ -8,7 +8,7 @@
 // to a few hours (slipway.js has the berths and the queue).
 // =============================================================
 
-import { SHIP_TYPES, SELL_RATE, SHIP_PRICE_GROWTH, UPGRADES } from "../data/content.js";
+import { SHIP_TYPES, SELL_RATE, SHIP_PRICE_GROWTH, UPGRADES, ITEMS } from "../data/content.js";
 import { isShipTypeUnlocked } from "./skills.js";
 import { getBerthFor, isBerthOpen, countOrdered, placeOrder, launchShip } from "./slipway.js";
 import { getShipPoints, getCommandFree } from "./command.js";
@@ -91,7 +91,50 @@ export function canBuyShip(state, shipTypeId) {
   if (state.credits < getShipPrice(state, shipTypeId)) {
     return { ok: false, reason: "Not enough credits" };
   }
+  // Workshop goods, for hulls that need them (the Hauler first),
+  // e.g. "Need 20 t more hull plating"
+  for (const [itemId, tonnes] of Object.entries(getShipGoods(shipTypeId))) {
+    const have = state.inventory[itemId] || 0;
+    if (have < tonnes) {
+      return { ok: false, reason: `Need ${tonnes - have} t more ${ITEMS[itemId].name.toLowerCase()}` };
+    }
+  }
   return { ok: true };
+}
+
+
+// -------------------------------------------------------------
+// getShipGoods(shipTypeId)
+// The workshop goods a hull costs on top of its credits, e.g.
+//   getShipGoods("hauler") -> { hull_plating: 60, wiring_coils: 30 }
+//   getShipGoods("courier") -> {}
+// Design doc, Manufacturing: hulls unlocked after the workshop
+// opens also need its products, starting with the Hauler, while
+// the Excavator and every small hull stay credits-only. Goods
+// don't grow with ships owned: only the credits do (60% a ship).
+// Bonded stock can be spent here, as on station upgrades: the
+// bond only keeps goods away from freighters and the Sell buttons.
+// -------------------------------------------------------------
+export function getShipGoods(shipTypeId) {
+  return SHIP_TYPES[shipTypeId].costs || {};
+}
+
+
+// -------------------------------------------------------------
+// payForShip(state, shipTypeId)
+// Takes a ship's price out of the Treasury and its goods out of
+// the hold, and returns what was paid, e.g.
+//   { credits: 150000, goods: { hull_plating: 60, wiring_coils: 30 } }
+// (The caller has already checked canBuyShip.)
+// -------------------------------------------------------------
+function payForShip(state, shipTypeId) {
+  const price = getShipPrice(state, shipTypeId);
+  state.credits -= price;
+  const goods = { ...getShipGoods(shipTypeId) };   // a copy, so the record can't change the data
+  for (const [itemId, tonnes] of Object.entries(goods)) {
+    state.inventory[itemId] -= tonnes;
+  }
+  return { credits: price, goods: goods };
 }
 
 
@@ -107,14 +150,10 @@ export function orderShip(state, shipTypeId, now) {
     return null;
   }
 
-  // Work out the price BEFORE placing the order: the new order
-  // itself would otherwise count towards its own price.
-  const price = getShipPrice(state, shipTypeId);
-  state.credits -= price;
-
-  // Record what was paid, so cancelling can give it all back.
-  // (No hull costs goods yet; the Hauler will be the first.)
-  const paid = { credits: price, goods: {} };
+  // Pay BEFORE placing the order: the new order itself would
+  // otherwise count towards its own price. What was paid is
+  // recorded, so cancelling gives it all back, goods included.
+  const paid = payForShip(state, shipTypeId);
   return placeOrder(state, shipTypeId, paid, now);
 }
 
@@ -130,7 +169,7 @@ export function buyShipInstantly(state, shipTypeId) {
   if (!canBuyShip(state, shipTypeId).ok) {
     return null;
   }
-  state.credits -= getShipPrice(state, shipTypeId);
+  payForShip(state, shipTypeId);
   return launchShip(state, shipTypeId);
 }
 

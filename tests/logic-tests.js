@@ -52,7 +52,7 @@ import { getHubPrice, getGlut, getAbsorb, quoteSale, sellIntoMarket, getPriceSha
 import { createLogistics, hasLogisticsOffice, getLeaveTime, getStaggerGapMs, setLogisticsRule } from "../js/logistics.js";
 import { LOGISTICS } from "../data/content.js";
 import { BERTHS, getBerthFor, getBuilding, getOrders, cancelBuild, getTimeUntilReady, getBuildMs } from "../js/slipway.js";
-import { getCommandCapacity, getCommandUsed, getNextUpgradeCost, buyUpgrade } from "../js/command.js";
+import { getCommandCapacity, getCommandUsed, getNextUpgradeCost, buyUpgrade, getShipPoints } from "../js/command.js";
 import { isFieldUnlocked, canHullWorkField, getFirstFieldFor, getHullRuleText } from "../js/skills.js";
 import { getRoleGroups, describeGroup, getShipActivity } from "../js/fleet-groups.js";
 import { setRecipe, getRefineJob, isRefineryOpen, getSlotCount, getBatchMs, isRecipeUnlocked, getRecipeUnlocksAtLevel, getSlotUnlocksAtLevel } from "../js/refinery.js";
@@ -5154,6 +5154,119 @@ test("Save: a version 21 save gets the Logistics office's default rules", () => 
   const state = parseSave(JSON.stringify(old));
   assert.equal(state.version, SAVE_VERSION);
   assert.deepEqual(state.logistics, createLogistics());
+});
+
+// -------------------------------------------------------------
+// THE HAULER (medium freighter, Trade 13; built 5 Nov)
+// -------------------------------------------------------------
+
+// Tonnes delivered per minute per command point on hub runs, with
+// whatever parts the game has fitted.
+function freightPerPoint(state, typeId) {
+  const plan = getHaulPlan(state, typeId);
+  return plan.capacity / (plan.durationMs / MINUTE) / getShipPoints(typeId);
+}
+
+test("Hauler: unlocks at Trade 13, a medium hull (2 points) with a 3,000 t hold", () => {
+  // Why: the roster's medium freighter, at the level on the Unlock ladder.
+  const hauler = SHIP_TYPES.hauler;
+  assert.equal(hauler.role, "freight");
+  assert.equal(hauler.size, "medium");
+  assert.equal(hauler.unlockLevel, 13);
+  assert.equal(hauler.cargoCapacity, 3000);
+  assert.equal(getShipPoints("hauler"), 2);
+  const state = newGame();
+  devSetLevel(state, "trade", 12);
+  assert.equal(isShipTypeUnlocked(state, "hauler"), false);
+  devSetLevel(state, "trade", 13);
+  assert.equal(isShipTypeUnlocked(state, "hauler"), true);
+});
+
+test("Hauler: costs workshop goods as well as credits, the first hull that does", () => {
+  // Why: design doc, Manufacturing: hulls after the workshop opens need its products.
+  const state = newGame();
+  devSetLevel(state, "trade", 13);
+  state.credits = 1_000_000;
+  state.inventory.hull_plating = 59;
+  state.inventory.wiring_coils = 30;
+  assert.deepEqual(canBuyShip(state, "hauler"), { ok: false, reason: "Need 1 t more hull plating" });
+  state.inventory.hull_plating = 60;
+  assert.equal(canBuyShip(state, "hauler").ok, true);
+  const order = orderShip(state, "hauler", START);
+  assert.deepEqual(order.paid, { credits: 150000, goods: { hull_plating: 60, wiring_coils: 30 } });
+  assert.equal(state.inventory.hull_plating, 0);
+  assert.equal(state.inventory.wiring_coils, 0);
+  assert.equal(state.credits, 850000);
+});
+
+test("Hauler: cancelling the order gives the goods back too", () => {
+  // Why: the slipway promises a full refund, queued or mid-build.
+  const state = newGame();
+  devSetLevel(state, "trade", 13);
+  state.credits = 150000;
+  state.inventory.hull_plating = 60;
+  state.inventory.wiring_coils = 30;
+  const order = orderShip(state, "hauler", START);
+  cancelBuild(state, order.id, START + MINUTE);
+  assert.equal(state.credits, 150000);
+  assert.equal(state.inventory.hull_plating, 60);
+  assert.equal(state.inventory.wiring_coils, 30);
+});
+
+test("Hauler: the goods don't grow with ships owned, only the credits (60% a ship)", () => {
+  // Why: the price rule is about credits; goods stay a fixed recipe.
+  const state = newGame();
+  devSetLevel(state, "trade", 13);
+  state.credits = 10_000_000;
+  state.inventory.hull_plating = 1000;
+  state.inventory.wiring_coils = 1000;
+  buyShipInstantly(state, "hauler");
+  assert.equal(getShipPrice(state, "hauler"), 240000);           // 150,000 x 1.6
+  const second = orderShip(state, "hauler", START);
+  assert.deepEqual(second.paid.goods, { hull_plating: 60, wiring_coils: 30 });
+});
+
+test("New-hull rule: a stock Hauler earns about 20% more per point than a Courier with its Mk II parts", () => {
+  // Why: Dan's rule (4 Nov): moving up a size is always worth it on the
+  // day, against the parts the smaller hull already has (Courier Mk II
+  // hold and drive come at Trade 8 and 11, before the Hauler at 13).
+  const state = newGame();
+  state.shipUpgrades = { courier: { hold: 2, drive: 2 } };
+  const lead = freightPerPoint(state, "hauler") / freightPerPoint(state, "courier");
+  assert.ok(lead > 1.18 && lead < 1.25, `lead ${lead.toFixed(3)}`);
+});
+
+test("Hauler parts stay two grades behind the Courier's, keeping its lead 1.1 to 1.3 times", () => {
+  // Why: the barge rule (Dan, 5 Nov): a bigger hull's parts stay two
+  // grades behind the hull below, so neither hull makes the other
+  // pointless. Checked at every Trade level from 13 to 32, with every
+  // part each hull can have by then.
+  for (let level = 13; level <= 32; level++) {
+    const state = newGame();
+    devSetLevel(state, "trade", level);
+    for (const [id, upgrade] of Object.entries(SHIP_UPGRADES)) {
+      if ((upgrade.hull === "courier" || upgrade.hull === "hauler") && upgrade.level <= level) {
+        state.shipUpgrades[upgrade.hull] = state.shipUpgrades[upgrade.hull] || {};
+        state.shipUpgrades[upgrade.hull][upgrade.part] = Math.max(state.shipUpgrades[upgrade.hull][upgrade.part] || 0, upgrade.grade);
+      }
+    }
+    const lead = freightPerPoint(state, "hauler") / freightPerPoint(state, "courier");
+    assert.ok(lead >= 1.1 && lead <= 1.3, `Trade ${level}: lead ${lead.toFixed(3)}`);
+  }
+});
+
+test("Hauler: Mk I hold at Trade 21 and drive at 26, just after the Courier's Mk III", () => {
+  // Why: two grades behind (Courier hold Mk III at 20, drive Mk III at 25).
+  assert.equal(SHIP_UPGRADES.hauler_hold_1.level, SHIP_UPGRADES.courier_hold_3.level + 1);
+  assert.equal(SHIP_UPGRADES.hauler_drive_1.level, SHIP_UPGRADES.courier_drive_3.level + 1);
+  assert.deepEqual(SHIP_UPGRADES.hauler_hold_1.costs, {});    // Mk I: credits only
+});
+
+test("Hauler: has a drawing with hold and drive hardpoints", () => {
+  // Why: every ship screen draws the hull by its art name.
+  const art = getShipArt(SHIP_TYPES.hauler.art, { hold: 1, drive: 0 });
+  assert.ok(art.includes("<svg"));
+  assert.ok((art.match(/class="accent"/g) || []).length >= 8);   // four rows of pods, both sides
 });
 
 // -------------------------------------------------------------

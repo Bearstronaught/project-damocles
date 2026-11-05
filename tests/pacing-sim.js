@@ -171,6 +171,7 @@ export function simulate(hours, untilMiningLevel, hourly = null, explore = true,
           excavator: state.ships.filter((s) => s.type === "excavator").length,
           deepCore: state.ships.filter((s) => s.type === "deep_core_barge").length,
           courier: state.ships.filter((s) => s.type === "courier").length,
+          hauler: state.ships.filter((s) => s.type === "hauler").length,
         },
       });
       earnedThisHour = 0;
@@ -533,12 +534,12 @@ function printWeeks(weeks, explore, surveyDelay, realistic, casual) {
   // Fleet: Prospectors / Excavators / Deep-core barges / Couriers.
   // cr per hour is the last hour of that day: sales at Anvil,
   // Courier sales at Last Post, and contracts.
-  console.log("day | Min Ref Mfg Trd Exp | cr per hour | fleet P/E/D/C | cmd upg | credits banked");
+  console.log("day | Min Ref Mfg Trd Exp | cr per hour | fleet P/E/D/C/H | cmd upg | credits banked");
   for (const d of days) {
     const lv = (n) => String(n).padStart(3);
     console.log(`${String(d.hour / 24).padStart(3)} | ${lv(levelFor(d.miningXp))} ${lv(d.levels.refining)} ` +
       `${lv(d.levels.manufacturing)} ${lv(d.levels.trade)} ${lv(d.levels.exploration)} | ` +
-      `${cr(d.earned).padStart(11)} | ${`${d.fleet.prospector}/${d.fleet.excavator}/${d.fleet.deepCore}/${d.fleet.courier}`.padStart(13)} | ` +
+      `${cr(d.earned).padStart(11)} | ${`${d.fleet.prospector}/${d.fleet.excavator}/${d.fleet.deepCore}/${d.fleet.courier}/${d.fleet.hauler}`.padStart(15)} | ` +
       `${String(d.commandUpgrades).padStart(7)} | ${cr(d.credits).padStart(14)}`);
   }
 

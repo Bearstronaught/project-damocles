@@ -84,7 +84,7 @@ const HULL_Y = 30;
 // What the next ship of this type needs, as a list of
 //   { label, have, need, unit }
 // Always the credits; then any products listed in the hull's
-// "costs" (none yet: the Hauler will be the first, design doc
+// "costs" (the Hauler is the first, 5 Nov; design doc
 // Manufacturing).
 // -------------------------------------------------------------
 export function getBuildNeeds(state, typeId) {
@@ -369,7 +369,10 @@ export function setupShipyardView(getState, actions) {
     const onOrder = countOrdered(state, picked);
     setText(els.tag, `${SKILLS[type.skill].name} · ${countOwned(state, picked)} owned` + (onOrder > 0 ? ` · ${onOrder} on order` : ""));
     setText(els.desc, type.description);
-    setText(els.build, price === null ? "Not sold" : `Build · ${formatNumber(price)} cr`);
+    // e.g. "Build · 150,000 cr + 60 t hull plating + 30 t wiring coils"
+    const goods = Object.entries(type.costs || {})
+      .map(([itemId, tonnes]) => ` + ${formatTonnes(tonnes)} ${ITEMS[itemId].name.toLowerCase()}`).join("");
+    setText(els.build, price === null ? "Not sold" : `Build · ${formatNumber(price)} cr${goods}`);
     els.build.disabled = !check.ok;
     let note;
     if (check.ok) {

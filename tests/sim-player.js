@@ -253,38 +253,67 @@ function oreFlowPerHour(state) {
 
 
 // -------------------------------------------------------------
-// courierValuePerHour(state)
-// What ONE MORE Courier would add in credits an hour: what Last
-// Post pays over Anvil, on the ore it could carry that the
-// Couriers already flying can't.
-// Couriers load the best-paying goods first, so the carrying is
+// FREIGHT_TYPES: the freighter hulls the player can buy, smallest
+// first. (The Hauler joined on 5 Nov.)
+// -------------------------------------------------------------
+const FREIGHT_TYPES = ["courier", "hauler"];
+
+// How many tonnes an hour one freighter of this type carries to
+// Last Post and back, e.g. a stock Courier: 600 t every 7 minutes
+// -> about 5,140 t an hour.
+function carryPerHour(state, typeId) {
+  const plan = getHaulPlan(state, typeId);
+  return plan.capacity / (plan.durationMs / HOUR);
+}
+
+
+// -------------------------------------------------------------
+// freighterValuePerHour(state, typeId)
+// What ONE MORE freighter of this type would add in credits an
+// hour: what Last Post pays over Anvil, on the goods it could carry
+// that the freighters already flying (of every type) can't. Those
+// are the goods sellAtHome is selling at Anvil (the home sales log
+// below): ore early on, bars and products later. (Until 5 Nov this
+// counted ore only, which made a big hold look worthless once most
+// goods were bars, so the player never bought a Hauler.)
+// Freighters load the best-paying goods first, so the carrying is
 // shared out from the biggest gain per tonne down:
 //   e.g. nickel ore gains 7 cr/t at Last Post (12 -> 19),
-//        iron ore 3 cr/t (5 -> 8). The Couriers flying already
+//        iron ore 3 cr/t (5 -> 8). The freighters flying already
 //        take the nickel; the new one gets what's left.
-// (Bars the refinery makes go to freighters too and gain more,
-// but the refinery takes ore first, so ore is a fair guide.)
+// Was courierValuePerHour until the Hauler arrived (5 Nov).
 // -------------------------------------------------------------
-export function courierValuePerHour(state) {
-  const plan = getHaulPlan(state, "courier");
-  const carryPerHour = plan.capacity / (plan.durationMs / HOUR);
-  let alreadyCarried = count(state, "courier") * carryPerHour;   // tonnes the fleet's Couriers take
-  let room = carryPerHour;                                       // the new Courier's tonnes
+export function freighterValuePerHour(state, typeId) {
+  let room = carryPerHour(state, typeId);   // the new freighter's tonnes an hour
   let value = 0;
 
-  // Biggest gain per tonne first
-  const flow = oreFlowPerHour(state);
-  // Today's Last Post price, glut and all (market.js), as a player
-  // reading the cargo table would see it
-  const gain = (oreId) => getHubPrice(state, oreId, state.simulatedUpTo) - getPrice(oreId, "home");
-  for (const oreId of Object.keys(flow).sort((a, b) => gain(b) - gain(a))) {
-    let tonnes = flow[oreId];
-    const takenAlready = Math.min(tonnes, alreadyCarried);   // the other Couriers' share
-    alreadyCarried -= takenAlready;
-    tonnes -= takenAlready;
-    const mine = Math.min(tonnes, room);                     // the new Courier's share
+  // Today's Last Post price, glut and all (market.js), over Anvil's
+  const gain = (itemId) => getHubPrice(state, itemId, state.simulatedUpTo) - getPrice(itemId, "home");
+
+  // What it could carry: goods being sold at Anvil because the
+  // freighters flying already had no room. Before anything has
+  // been sold at home, fall back on the mining fleet's ore, minus
+  // what the freighters flying already take.
+  let spare = homeSalesPerHour(state);
+  if (Object.keys(spare).length === 0) {
+    spare = oreFlowPerHour(state);
+    let alreadyCarried = 0;
+    for (const freightId of FREIGHT_TYPES) {
+      alreadyCarried += count(state, freightId) * carryPerHour(state, freightId);
+    }
+    for (const itemId of Object.keys(spare).sort((a, b) => gain(b) - gain(a))) {
+      const taken = Math.min(spare[itemId], alreadyCarried);
+      spare[itemId] -= taken;
+      alreadyCarried -= taken;
+    }
+  }
+
+  // Biggest gain per tonne first, until the new hold is full
+  for (const itemId of Object.keys(spare).sort((a, b) => gain(b) - gain(a))) {
+    if (gain(itemId) <= 0) continue;
+    const mine = Math.min(spare[itemId], room);
     room -= mine;
-    value += mine * gain(oreId);
+    value += mine * gain(itemId);
   }
   return value;
 }
@@ -340,6 +369,16 @@ export function stockToKeep(state) {
     add(feed);
   }
 
+  // Workshop goods for the next freighter hull that costs them
+  // (the Hauler: hull plating and wiring coils), once its level is
+  // close, so they aren't sold the hour before it unlocks.
+  for (const freightId of FREIGHT_TYPES) {
+    const hull = SHIP_TYPES[freightId];
+    if (!hull.costs) continue;
+    if (getLevel(state, hull.skill) < hull.unlockLevel - SAVE_LEVELS_EARLY) continue;
+    add(hull.costs);
+  }
+
   // Ore for the refinery: two batches of whatever it's smelting,
   // so ore isn't sold the minute before a batch wants it
   add(refineryOreNeeds(state));
@@ -375,8 +414,10 @@ export function sellAtHome(state, keep, wanted) {
   }
 
   // 2. How many tonnes to leave for freighters (none without any)
-  const courierHold = getShipStats(state, "courier").cargoCapacity;
-  let leaveForFreight = count(state, "courier") * courierHold * LOADS_LEFT_FOR_FREIGHTERS;
+  let leaveForFreight = 0;
+  for (const freightId of FREIGHT_TYPES) {
+    leaveForFreight += count(state, freightId) * getShipStats(state, freightId).cargoCapacity * LOADS_LEFT_FOR_FREIGHTERS;
+  }
 
   // 3. Sell, most valuable at Last Post first, so the freighters'
   //    allowance goes on the goods that gain most from the trip
@@ -394,10 +435,45 @@ export function sellAtHome(state, keep, wanted) {
     // sell the rest, then put the bond back. (A bond also stops
     // freighters, so it mustn't stay raised.)
     setBond(state, itemId, bond + forFreight);
+    const before = state.inventory[itemId] || 0;
     earned += sellAll(state, itemId).credits;
+    recordHomeSale(state, itemId, before - (state.inventory[itemId] || 0));
     setBond(state, itemId, bond);
   }
   return earned;
+}
+
+
+// -------------------------------------------------------------
+// HOME SALES LOG (added 5 Nov, with the Hauler)
+// What sellAtHome has sold at Anvil's flat price lately, item by
+// item. Those are exactly the goods the freighters already flying
+// had no room for, so they're what ONE MORE freighter could take
+// to Last Post instead (see freighterValuePerHour).
+// Kept per game (a WeakMap keyed by the state), so two simulated
+// players in one run never share a log.
+// -------------------------------------------------------------
+const HOME_SALES_WINDOW = 2 * HOUR;   // look back this far
+const homeSales = new WeakMap();      // state -> [{ at, itemId, tonnes }]
+
+function recordHomeSale(state, itemId, tonnes) {
+  if (tonnes <= 0) return;
+  if (!homeSales.has(state)) homeSales.set(state, []);
+  const log = homeSales.get(state);
+  log.push({ at: state.simulatedUpTo, itemId, tonnes });
+  // Forget sales older than the window
+  while (log.length > 0 && log[0].at < state.simulatedUpTo - HOME_SALES_WINDOW) log.shift();
+}
+
+// Tonnes an hour of each item sold at home over the window,
+// e.g. { iridium_bar: 900, iron_ore: 300 }
+function homeSalesPerHour(state) {
+  const perHour = {};
+  for (const sale of homeSales.get(state) || []) {
+    if (sale.at < state.simulatedUpTo - HOME_SALES_WINDOW) continue;
+    perHour[sale.itemId] = (perHour[sale.itemId] || 0) + sale.tonnes / (HOME_SALES_WINDOW / HOUR);
+  }
+  return perHour;
 }
 
 
@@ -628,7 +704,8 @@ export function wantsFirstCourier(state) {
 //   - parts for every other hull type owned (Excavator, Courier)
 //   - refinery and workshop upgrades
 //   - a Courier, when it would earn more per command point than
-//     the next mining ship (see courierValuePerHour)
+//     the next mining ship (see freighterValuePerHour); a Hauler
+//     when one is worth more per point than a Courier
 //   - an Excavator SWAP: when the fleet is out of command points,
 //     recall two Prospectors, sell them and buy an Excavator in
 //     their 2 points. Only if an Excavator out-earns two
@@ -655,21 +732,36 @@ export function extraShopping(state, now, swaps) {
     }
   }
 
-  // A Courier, if it beats the best mining ship per command point
-  // (a Prospector, or an Excavator once those are unlocked)
-  if (canBuyShip(state, "courier").ok) {
-    const courierPerPoint = courierValuePerHour(state) / pointsFor("courier");
-    let minerPerPoint = minerValuePerHour(state, "prospector") / pointsFor("prospector");
-    for (const big of ["excavator", "deep_core_barge"]) {
-      if (getLevel(state, "mining") >= SHIP_TYPES[big].unlockLevel) {
-        minerPerPoint = Math.max(minerPerPoint, minerValuePerHour(state, big) / pointsFor(big));
-      }
+  // A freighter, if it beats the best mining ship per command point
+  // (a Prospector, or an Excavator once those are unlocked). Of the
+  // freighters that can be bought now, the one worth most per point
+  // (a Courier, or a Hauler from Trade 13) is the one considered.
+  let minerPerPoint = minerValuePerHour(state, "prospector") / pointsFor("prospector");
+  for (const big of ["excavator", "deep_core_barge"]) {
+    if (getLevel(state, "mining") >= SHIP_TYPES[big].unlockLevel) {
+      minerPerPoint = Math.max(minerPerPoint, minerValuePerHour(state, big) / pointsFor(big));
     }
-    // The FIRST Courier is bought for its own sake (see
-    // wantsFirstCourier), so it skips the value test.
-    if (wantsFirstCourier(state) || courierPerPoint >= minerPerPoint) {
-      options.push({ cost: getShipPrice(state, "courier"), buy: () => orderShip(state, "courier", now), text: "Courier #" + (count(state, "courier") + 1) });
+  }
+  let bestFreight = null;
+  let bestPerPoint = -1;
+  for (const freightId of FREIGHT_TYPES) {
+    if (!canBuyShip(state, freightId).ok) continue;
+    const perPoint = freighterValuePerHour(state, freightId) / pointsFor(freightId);
+    if (perPoint > bestPerPoint) {
+      bestFreight = freightId;
+      bestPerPoint = perPoint;
     }
+  }
+  // The FIRST Courier is bought for its own sake (see
+  // wantsFirstCourier), so it skips the value test.
+  if (wantsFirstCourier(state) && canBuyShip(state, "courier").ok) {
+    bestFreight = "courier";
+    bestPerPoint = Infinity;
+  }
+  if (bestFreight && bestPerPoint >= minerPerPoint) {
+    const name = SHIP_TYPES[bestFreight].shortName || bestFreight[0].toUpperCase() + bestFreight.slice(1);
+    const freightId = bestFreight;   // (fixed for the buy() below)
+    options.push({ cost: getShipPrice(state, freightId), buy: () => orderShip(state, freightId, now), text: name + " #" + (count(state, freightId) + 1) });
   }
 
   // Swaps (never two at once): when the fleet is out of command

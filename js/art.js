@@ -132,6 +132,45 @@ const SCHEMATICS = {
       <rect class="detail" x="112" y="37" width="8" height="6" />
     </svg>`,
 
+  // --- Hauler: the Courier's layout stretched out. A longer spine
+  //     with FOUR rows of cargo pods (two per side of each row),
+  //     twin engines at the back for the extra mass, and the same
+  //     cockpit at the nose. (Four rows to the Courier's two, as
+  //     the roster says: the freighter builder will draw these
+  //     row by row once the sprites go in.) ---
+  hull_hauler: `
+    <svg viewBox="0 0 140 80" class="schematic" aria-hidden="true">
+      <!-- twin drive flames -->
+      <polygon class="engine" points="12,28 0,32 12,36" />
+      <polygon class="engine" points="12,44 0,48 12,52" />
+      <!-- twin engine blocks -->
+      <rect class="hull" x="12" y="25" width="12" height="14" />
+      <rect class="hull" x="12" y="41" width="12" height="14" />
+      <!-- the long spine -->
+      <rect class="hull" x="24" y="36" width="88" height="8" />
+      <!-- cargo pods: four rows, one pod either side of the spine -->
+      <rect class="accent" x="28" y="18" width="18" height="16" />
+      <rect class="accent" x="28" y="46" width="18" height="16" />
+      <rect class="accent" x="49" y="18" width="18" height="16" />
+      <rect class="accent" x="49" y="46" width="18" height="16" />
+      <rect class="accent" x="70" y="18" width="18" height="16" />
+      <rect class="accent" x="70" y="46" width="18" height="16" />
+      <rect class="accent" x="91" y="18" width="18" height="16" />
+      <rect class="accent" x="91" y="46" width="18" height="16" />
+      <!-- clamp arms holding each row of pods to the spine -->
+      <line class="detail" x1="37" y1="34" x2="37" y2="36" />
+      <line class="detail" x1="37" y1="44" x2="37" y2="46" />
+      <line class="detail" x1="58" y1="34" x2="58" y2="36" />
+      <line class="detail" x1="58" y1="44" x2="58" y2="46" />
+      <line class="detail" x1="79" y1="34" x2="79" y2="36" />
+      <line class="detail" x1="79" y1="44" x2="79" y2="46" />
+      <line class="detail" x1="100" y1="34" x2="100" y2="36" />
+      <line class="detail" x1="100" y1="44" x2="100" y2="46" />
+      <!-- cockpit at the nose -->
+      <polygon class="hull" points="112,32 126,34 134,40 126,46 112,48" />
+      <rect class="detail" x="117" y="37" width="8" height="6" />
+    </svg>`,
+
   // --- Pathfinder: a slim scout. A long narrow hull, two sensor
   //     pods on short booms, and a sensor dome (the "accent": it
   //     pulses while scanning, like a drill while mining). ---
@@ -187,6 +226,10 @@ const HARDPOINTS = {
   hull_courier: {
     drive: [23, 40],      // the engine block
     hold:  [67, 40],      // the spine, between the pods
+  },
+  hull_hauler: {
+    drive: [18, 40],      // between the twin engines
+    hold:  [68, 40],      // the spine, between the middle pods
   },
   hull_pathfinder: {
     drive:   [25, 40],    // the engine block
