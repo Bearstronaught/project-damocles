@@ -76,6 +76,7 @@ import { getHubPrice } from "./market.js";
 import { hasLogisticsOffice, getLeaveTime } from "./logistics.js";
 import { startWaitingBatches, finishBatch } from "./refinery.js";
 import { startWaitingOrders, finishWorkshopBatch } from "./workshop.js";
+import { checkFuelGrant, startPlantBatch, finishPlantBatch } from "./fuel.js";
 import { getSellable } from "./bonded.js";
 import { getShipStats, getHullGrades } from "./ship-upgrades.js";
 import { finishScoutTrip } from "./exploration.js";
@@ -939,14 +940,18 @@ export function processJobs(state, now) {
 // startWaitingAll(state, time)
 // Everything that waits for goods in the home hold gets a
 // chance to start, in a fixed order of who gets first pick:
-//   1. the refinery (takes ore)
-//   2. the workshop (takes metal and components)
+//   0. the fuel grant (once, when the refinery opens) and the
+//      Isotope plant (takes ice, makes the refinery's fuel)
+//   1. the refinery (takes ore and deuterium)
+//   2. the workshop (takes metal and components, if there's power)
 //   3. freighters   (take whatever is left, most valuable first)
 // The order matters when they want the same goods: freighters
 // come last, so they never empty the hold of metal the workshop
 // was about to use.
 // -------------------------------------------------------------
 function startWaitingAll(state, time) {
+  checkFuelGrant(state, time);
+  startPlantBatch(state, time);
   startWaitingBatches(state, time);
   startWaitingOrders(state, time);
   departWaitingFreighters(state, time);
@@ -979,6 +984,8 @@ function findNextEvent(state, now) {
       time = job.startedAt + job.durationMs;              // batch done
     } else if (job.type === "workshop" && job.status === "working") {
       time = job.startedAt + job.durationMs;              // workshop batch done
+    } else if (job.type === "isotope" && job.status === "working") {
+      time = job.startedAt + job.durationMs;              // deuterium made
     } else if (job.type === "haul" && job.status === "travelling") {
       time = (job.sold || job.noSale)
         ? job.startedAt + job.durationMs                  // docks back home
@@ -1034,6 +1041,11 @@ function runEvent(state, job, time) {
   // --- A workshop batch finishes: a product into the hold ---
   if (job.type === "workshop") {
     return finishWorkshopBatch(state, job);
+  }
+
+  // --- The Isotope plant finishes a batch: deuterium (fuel) ---
+  if (job.type === "isotope") {
+    return finishPlantBatch(state, job);
   }
 
   // --- A scout docks: its find and Exploration XP ---

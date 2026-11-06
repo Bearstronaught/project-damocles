@@ -13,6 +13,7 @@ import { createClock } from "./clock.js";
 import { createContracts } from "./contracts.js";
 import { createMarket } from "./market.js";
 import { createLogistics } from "./logistics.js";
+import { createFuel } from "./fuel.js";
 
 
 // The version number of the save format.
@@ -41,7 +42,8 @@ import { createLogistics } from "./logistics.js";
 //   Version 20: ships are built on slipways
 //   Version 21: Last Post's living market
 //   Version 22: the Logistics office's settings (logistics.js)
-export const SAVE_VERSION = 22;
+//   Version 23: refinery fuel (deuterium, Isotope plant, fuel.js)
+export const SAVE_VERSION = 23;
 
 
 // -------------------------------------------------------------
@@ -74,6 +76,7 @@ export function createNewGame() {
       thruster_assembly: 0,
       wreck_alloy: 0,
       ice: 0,
+      deuterium: 0,     // fuel (js/fuel.js); 200 t arrives when the refinery opens
     },
 
     // The player's fleet. Each ship has its own unique ID
@@ -136,6 +139,10 @@ export function createNewGame() {
     // whether part loads are staggered. Only used once the office
     // is built (Trade 15).
     logistics: createLogistics(),
+
+    // Fuel settings: the Drive reserve, and whether the starter
+    // deuterium has been given yet (js/fuel.js).
+    fuel: createFuel(),
 
     // XP in each skill. Levels are worked out from XP (skills.js).
     skills: {

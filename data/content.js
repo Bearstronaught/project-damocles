@@ -49,6 +49,7 @@ export const ITEM_GROUPS = {
   ore: { name: "Ores" },
   bar: { name: "Bars" },
   part: { name: "Parts" },
+  fuel: { name: "Fuel" },
   salvage: { name: "Salvage" },
 };
 
@@ -130,6 +131,19 @@ export const ITEMS = {
     name: "Ice",
     group: "ore",
     ...BALANCE.items.ice,
+  },
+  // Deuterium: fuel, made from ice at the Isotope plant (Dan,
+  // 6 Nov). Every refinery recipe burns it, and torch drives will
+  // too. It's a STATION good, never cargo for sale: freighters and
+  // the Sell buttons leave it alone (forSale: false, see
+  // bonded.js getSellable), otherwise freighters would haul the
+  // refinery's fuel away. buyPrice is what the Ledger charges when
+  // you buy it as a safety net.
+  deuterium: {
+    name: "Deuterium",
+    group: "fuel",
+    forSale: false,
+    ...BALANCE.items.deuterium,
   },
   wreck_alloy: {
     name: "Wreck alloy",
@@ -421,6 +435,9 @@ export const FIELDS = {
 //   outputAmount  how many tonnes of it
 //   seconds       how long one batch takes at Refining level 1
 //   xp            Refining XP for each finished batch
+//   fuel          tonnes of deuterium burned per batch (Dan,
+//                 6 Nov: no smelting is fuel free). Scaled to XP,
+//                 so XP per tonne of fuel rises each tier
 export const RECIPES = {
   iron_bar: {
     name: "Iron bars",
@@ -453,6 +470,26 @@ export const RECIPES = {
 export const REFINERY = BALANCE.refinery;
 
 
+// THE ISOTOPE PLANT: makes deuterium (fuel) from ice (Dan, 6 Nov).
+// A building of its own at Anvil Station, opening WITH the
+// refinery. It runs on electricity, so it burns no fuel itself.
+// It has ONE slot running on repeat, at a FIXED speed: Refining
+// levels and furnace linings speed up the furnaces, not the plant,
+// so plant upgrades (later) are Refining's main pace lever.
+// From the balance sheet (Settings tab):
+//   inputs        what one batch takes, e.g. { ice: 60 }
+//   output        the item it makes (deuterium)
+//   outputAmount  tonnes per batch
+//   seconds       how long one batch takes (never speeds up)
+//   xp            a little Refining XP per batch
+//   starterGrant  tonnes of deuterium given when the refinery
+//                 opens, so the refinery is never blocked
+export const ISOTOPE_PLANT = {
+  name: "Isotope plant",
+  ...BALANCE.isotopePlant,
+};
+
+
 // -------------------------------------------------------------
 // WORKSHOP RECIPES: what the workshop can make (Manufacturing).
 // -------------------------------------------------------------
@@ -466,6 +503,8 @@ export const REFINERY = BALANCE.refinery;
 // From the balance sheet (Workshop tab): unlockLevel (a
 // Manufacturing level), inputs, output, outputAmount, seconds
 // (at Manufacturing level 1) and xp (Manufacturing XP per batch).
+// power: megawatts the recipe draws from Anvil's grid while a
+// batch runs (see WORKSHOP.gridMw and js/workshop.js).
 export const WORKSHOP_RECIPES = {
   hull_plating: {
     name: "Hull plating",
@@ -504,6 +543,8 @@ export const WORKSHOP_RECIPES = {
 //                        faster (0.005 = 0.5% per level)
 //   standingPerSlot      with the Control centre, how many standing
 //                        orders each slot can hold
+//   gridMw               Anvil's power grid for the workshop, in
+//                        megawatts (12 for now; upgrades later)
 export const WORKSHOP = BALANCE.workshop;
 
 

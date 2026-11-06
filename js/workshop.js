@@ -63,6 +63,14 @@
 // and a slot with standing orders keeps its job even when its
 // queue is empty. While a standing batch runs, the job says which:
 //     standingIndex: 0    (null when a work order's batch runs)
+//
+// POWER (Dan, 6 Nov): Anvil's grid gives WORKSHOP.gridMw (12 MW).
+// Each recipe draws WORKSHOP_RECIPES[id].power MW while a batch
+// runs. A batch only STARTS if its draw fits in the spare power;
+// otherwise the slot waits ("waiting for power"). Nothing ever
+// slows down halfway through a batch: simpler and clearer.
+// Power is freed the moment a batch finishes, and jobs.js then
+// gives every waiting slot another chance to start.
 // =============================================================
 
 import { WORKSHOP_RECIPES, WORKSHOP, ITEMS } from "../data/content.js";
@@ -444,12 +452,84 @@ export function hasWorkshopInputs(state, recipeId) {
   );
 }
 
+// =============================================================
+// POWER
+// =============================================================
+
+// Megawatts one recipe draws while a batch runs.
+export function getRecipePower(recipeId) {
+  return WORKSHOP_RECIPES[recipeId].power || 0;
+}
+
+// Anvil's whole grid, in megawatts (upgrades will add to it later).
+export function getGridMw(state) {
+  return WORKSHOP.gridMw;
+}
+
+// -------------------------------------------------------------
+// getPowerInUse(state)
+// Megawatts drawn right now: every WORKING workshop batch adds
+// its recipe's draw. (A waiting slot draws nothing.)
+// -------------------------------------------------------------
+export function getPowerInUse(state) {
+  let total = 0;
+  for (const job of state.jobs) {
+    if (job.type === "workshop" && job.status === "working") {
+      // The draw is noted on the job when its batch starts. A batch
+      // from before power existed (an old save) looks it up instead.
+      total += job.powerMw ?? getRecipePower(getJobRecipeId(state, job));
+    }
+  }
+  return total;
+}
+
+// Megawatts free for another batch to start.
+export function getSparePower(state) {
+  return getGridMw(state) - getPowerInUse(state);
+}
+
+// -------------------------------------------------------------
+// getJobRecipeId(state, job)
+// Which recipe a WORKING job's batch is making: a standing
+// order's, or the work order it's running.
+// -------------------------------------------------------------
+export function getJobRecipeId(state, job) {
+  const standingIndex = job.standingIndex ?? null;
+  if (standingIndex !== null) {
+    return getStandingOrders(state, job.slot)[standingIndex].recipeId;
+  }
+  return job.orders[getRunningIndex(job)].recipeId;
+}
+
+// -------------------------------------------------------------
+// canStart(state, recipeId)
+// True if a batch of this recipe could start right now: the
+// metal is in the hold AND its power fits in what's spare.
+// -------------------------------------------------------------
+function canStart(state, recipeId) {
+  return hasWorkshopInputs(state, recipeId) && getRecipePower(recipeId) <= getSparePower(state);
+}
+
+// -------------------------------------------------------------
+// getWorkshopWaitReason(state, recipeId)
+// Why a batch of this recipe can't start, for the screen:
+//   "metal"  not enough metal or components in the hold
+//   "power"  the metal is there, but the grid is too busy
+//   null     nothing missing
+// -------------------------------------------------------------
+export function getWorkshopWaitReason(state, recipeId) {
+  if (!hasWorkshopInputs(state, recipeId)) return "metal";
+  if (getRecipePower(recipeId) > getSparePower(state)) return "power";
+  return null;
+}
+
 // -------------------------------------------------------------
 // startWaitingOrders(state, time)
 // Every waiting slot checks whether the hold has the metal for
-// its current order's next batch. Those that do take it and
-// start at "time". Slots are checked in order, so slot 1 gets
-// first pick when two want the same metal.
+// its current order's next batch, and the grid has the power.
+// Those that do take the metal and start at "time". Slots are
+// checked in order, so slot 1 gets first pick when two want the
+// same metal - or the last few megawatts.
 // -------------------------------------------------------------
 export function startWaitingOrders(state, time) {
   const waiting = state.jobs
@@ -482,6 +562,7 @@ export function startWaitingOrders(state, time) {
     job.startedAt = time;
     job.durationMs = getWorkshopBatchMs(state, recipeId);
     job.inputs = inputs;
+    job.powerMw = getRecipePower(recipeId);   // drawn until the batch ends
   }
 }
 
@@ -496,15 +577,16 @@ function pickOrderToRun(state, job) {
   if (job.orders.length === 0) {
     return -1;                     // only standing orders on this slot
   }
-  if (hasWorkshopInputs(state, job.orders[0].recipeId)) {
+  if (canStart(state, job.orders[0].recipeId)) {
     return 0;
   }
   if (!hasSmartQueue(state)) {
     return -1;
   }
   // .findIndex gives the position of the first order that passes
-  // the check, or -1 if none do.
-  return job.orders.findIndex((order) => hasWorkshopInputs(state, order.recipeId));
+  // the check, or -1 if none do. (So the smart queue can also run
+  // a cheaper-to-power order while the grid is busy.)
+  return job.orders.findIndex((order) => canStart(state, order.recipeId));
 }
 
 // -------------------------------------------------------------
@@ -518,7 +600,7 @@ function pickStandingToRun(state, slot) {
     return -1;
   }
   return getStandingOrders(state, slot).findIndex(
-    (order) => standingNeedsWork(state, order) && hasWorkshopInputs(state, order.recipeId)
+    (order) => standingNeedsWork(state, order) && canStart(state, order.recipeId)
   );
 }
 

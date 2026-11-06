@@ -9,9 +9,14 @@
 // order:
 //
 //   WAITING   the slot has a recipe but the hold doesn't have
-//             enough ore for a batch yet
-//   WORKING   a batch is in the furnace; the ore was taken out
-//             of the hold when it started
+//             enough ore - or deuterium - for a batch yet
+//   WORKING   a batch is in the furnace; the ore AND its fuel
+//             were taken out of the hold when it started
+//
+// FUEL (Dan, 6 Nov): every recipe burns deuterium, RECIPES[id].fuel
+// tonnes a batch, and only fuel above the Drive reserve can be
+// burned (see js/fuel.js). The fuel goes into job.inputs with the
+// ore, so stopping a slot hands both back.
 //   ...when the batch finishes, the metal goes into the hold,
 //   Refining XP is earned, and the slot goes back to WAITING
 //   (and straight into the next batch if there's ore).
@@ -48,6 +53,7 @@ import { RECIPES, REFINERY, ITEMS } from "../data/content.js";
 import { addItem, addItemWithCarry } from "./state.js";
 import { getEffect, getEffectMax } from "./upgrades.js";
 import { getLevel, addXp } from "./skills.js";
+import { getFuelForRefinery } from "./fuel.js";
 
 
 // =============================================================
@@ -234,15 +240,50 @@ function stopSlot(state, job) {
 // =============================================================
 
 // -------------------------------------------------------------
-// hasInputs(state, recipeId)
-// True if the hold has enough of every input for one batch.
+// hasOre(state, recipeId)
+// True if the hold has enough of every ore for one batch.
 // -------------------------------------------------------------
-export function hasInputs(state, recipeId) {
+export function hasOre(state, recipeId) {
   const inputs = RECIPES[recipeId].inputs;
   // .every is true only if the check passes for EVERY input
   return Object.entries(inputs).every(
     ([itemId, amount]) => (state.inventory[itemId] || 0) >= amount
   );
+}
+
+// -------------------------------------------------------------
+// hasFuel(state, recipeId)
+// True if there's enough deuterium above the Drive reserve to
+// burn one batch of this recipe.
+// -------------------------------------------------------------
+export function hasFuel(state, recipeId) {
+  return getFuelForRefinery(state) >= getFuelPerBatch(recipeId);
+}
+
+// Tonnes of deuterium one batch of this recipe burns.
+export function getFuelPerBatch(recipeId) {
+  return RECIPES[recipeId].fuel || 0;
+}
+
+// -------------------------------------------------------------
+// hasInputs(state, recipeId)
+// True if a batch could start right now: the ore AND the fuel.
+// -------------------------------------------------------------
+export function hasInputs(state, recipeId) {
+  return hasOre(state, recipeId) && hasFuel(state, recipeId);
+}
+
+// -------------------------------------------------------------
+// getWaitReason(state, recipeId)
+// Why a waiting slot isn't running, for the screen:
+//   "ore"   not enough ore in the hold (checked first)
+//   "fuel"  ore is there, but not enough deuterium
+//   null    nothing missing: it's about to start
+// -------------------------------------------------------------
+export function getWaitReason(state, recipeId) {
+  if (!hasOre(state, recipeId)) return "ore";
+  if (!hasFuel(state, recipeId)) return "fuel";
+  return null;
 }
 
 // -------------------------------------------------------------
@@ -264,21 +305,32 @@ export function startWaitingBatches(state, time) {
     .sort((a, b) => a.slot - b.slot);
 
   for (const job of waiting) {
-    // A lent slot smelts the client's ore: nothing from the hold.
+    const fuel = getFuelPerBatch(job.recipeId);
+
+    // A lent slot smelts the client's ore: no ore from the hold.
+    // It still burns OUR fuel, though: it's our furnace.
     if (job.toll !== undefined) {
+      if (!hasFuel(state, job.recipeId)) {
+        continue;   // no fuel: the client waits too
+      }
+      state.inventory.deuterium -= fuel;
       job.status = "working";
       job.startedAt = time;
       job.durationMs = getBatchMs(state, job.recipeId);
-      job.inputs = null;
+      job.inputs = fuel > 0 ? { deuterium: fuel } : null;
       continue;
     }
 
     if (!hasInputs(state, job.recipeId)) {
-      continue;   // not enough ore yet: keep waiting
+      continue;   // not enough ore or fuel yet: keep waiting
     }
 
-    // Take the ore out of the hold for this batch.
+    // Take the ore AND the fuel out of the hold for this batch.
+    // (Both are kept in job.inputs, so stopping hands both back.)
     const inputs = { ...RECIPES[job.recipeId].inputs };   // a copy
+    if (fuel > 0) {
+      inputs.deuterium = fuel;
+    }
     for (const [itemId, amount] of Object.entries(inputs)) {
       state.inventory[itemId] -= amount;
     }

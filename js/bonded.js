@@ -43,6 +43,11 @@ export function getBond(state, itemId) {
 //    40 t in the hold, bond 100 t  ->    0 t sellable
 // -------------------------------------------------------------
 export function getSellable(state, itemId) {
+  // Some goods are never sold or hauled away at all: deuterium is
+  // the refinery's fuel, a station good (ITEMS.deuterium.forSale).
+  if (ITEMS[itemId] && ITEMS[itemId].forSale === false) {
+    return 0;
+  }
   const inHold = state.inventory[itemId] || 0;
   return Math.max(0, inHold - getBond(state, itemId));
 }

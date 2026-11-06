@@ -59,6 +59,10 @@ import { setRecipe, getRefineJob, isRefineryOpen, getSlotCount, getBatchMs, isRe
 import { RECIPES, REFINERY, WORKSHOP_RECIPES, WORKSHOP } from "../data/content.js";
 import { isWorkshopOpen, getWorkshopSlotCount, getQueueLimit, isWorkshopRecipeUnlocked, getWorkshopBatchMs, getWorkshopJob, addOrder, cancelOrder } from "../js/workshop.js";
 import { BALANCE as BALANCE_FILE } from "../data/balance.js";
+import { checkFuelGrant, getPlantJob, setPlantRunning, getFuelForRefinery, setDriveReserve, buyFuel, getFuelCost } from "../js/fuel.js";
+import { getWaitReason, hasFuel, getFuelPerBatch } from "../js/refinery.js";
+import { getPowerInUse, getSparePower, getWorkshopWaitReason, getRecipePower } from "../js/workshop.js";
+import { ISOTOPE_PLANT } from "../data/content.js";
 
 const SECOND = 1000;                 // milliseconds in a second
 const MINUTE = 60 * SECOND;
@@ -1317,7 +1321,7 @@ test("A version 5 save moves to tonnes: credits and ore x10, XP unchanged", () =
   const state = parseSave(JSON.stringify(oldSave));
   assert.equal(state.version, SAVE_VERSION);
   assert.equal(state.credits, 26000);
-  assert.deepEqual(state.inventory, { iron_ore: 300, nickel_ore: 40, ice: 0 });
+  assert.deepEqual(state.inventory, { iron_ore: 300, nickel_ore: 40, ice: 0, deuterium: 0 });
   assert.deepEqual(state.jobs[0].cargo, { nickel_ore: 200, iron_ore: 400 });
   assert.deepEqual(state.skills, { mining: { xp: 900 }, trade: { xp: 180 }, refining: { xp: 0 }, manufacturing: { xp: 0 }, exploration: { xp: 0 }, diplomacy: { xp: 0 } });
 });
@@ -1768,6 +1772,12 @@ const IRON_BATCH_MS = IRON_BATCH.seconds * SECOND;   // at Refining level 1
 function gameWithRefinery() {
   const state = newGame();
   state.skills.mining.xp = XP_TABLE[REFINERY.openAtMiningLevel];
+  // In the real game the refinery never opens without its starter
+  // deuterium (fuel.js), so give it here: plenty, so these older
+  // tests are about ore, not fuel. The Isotope plant stays off, so
+  // it doesn't eat any ice the tests count.
+  state.fuel.granted = true;
+  state.inventory.deuterium = 1000;
   return state;
 }
 
@@ -1972,6 +1982,10 @@ function busyEmpire() {
   state.skills.exploration.xp = XP_TABLE[12];
   state.credits = 10_000_000;
   state.commandUpgrades = 5;
+  // Ice in the hold from the start, for the Isotope plant (below).
+  // It goes in BEFORE anything is started, so freighters and the
+  // plant see it at START in every run, as they would in the game.
+  state.inventory.ice = 2000;
   buyShipInstantly(state, "prospector");                  // ship-2
   buyShipInstantly(state, "excavator");                   // ship-3
   buyShipInstantly(state, "courier").haulMode = "constant";   // ship-4
@@ -1981,6 +1995,11 @@ function busyEmpire() {
   startMiningJob(state, "ship-3", "inner_belt", START);
   startHaulJob(state, "ship-4", START);
   startHaulJob(state, "ship-5", START);
+  // Fuel: the starter grant (which also switches the Isotope plant
+  // on), plus a well-stocked tank and some ice so the plant runs
+  // too, and "ticked or jumped" checks it as well.
+  checkFuelGrant(state, START);
+  state.inventory.deuterium += 5000;
   setRecipe(state, 0, "iron_bar", START);
   setRecipe(state, 1, "nickel_bar", START);
   // Two scouts: they share out the survey targets, then run deep
@@ -2114,6 +2133,10 @@ function gameWithWorkshop(manufacturingLevel = 1) {
   state.skills.refining.xp = XP_TABLE[WORKSHOP.openAtRefiningLevel];
   state.skills.manufacturing.xp = XP_TABLE[manufacturingLevel];
   state.simulatedUpTo = START;
+  // Starter fuel, as the real game gives when the refinery opens
+  // (plant off, so these tests stay about metal and power).
+  state.fuel.granted = true;
+  state.inventory.deuterium = 1000;
   return state;
 }
 
@@ -4431,12 +4454,13 @@ test("Hardness: the deep core's 0.5 doubles the drilling time, and only the dril
   for (const fieldId of ["inner_belt", "outer_belt", "ice_moon"]) assert.equal(FIELDS[fieldId].hardness, 1);
 });
 
-test("Iridium bars give 18 Refining XP a batch, so Refining 99 lands after Mining 99", () => {
-  // Why: at 80 XP the simulator put Refining 99 around week 8, far
-  // ahead of Mining (about week 22-24), the reverse of the agreed
-  // skill order. Dan chose 18 on 6 Nov (20 put them level, 15 about
-  // 4 weeks apart), aiming for Refining about 2 weeks after Mining.
-  assert.equal(RECIPES.iridium_bar.xp, 18);
+test("Iridium bars give 60 Refining XP a batch: fuel, not XP, now holds Refining back (6 Nov)", () => {
+  // Why: 18 XP only held Refining back while the simulated refinery
+  // was short of ore. With fuel, XP per tonne of deuterium rises each
+  // tier (iron 4, nickel 5, steel 6, iridium 7.5), so the Isotope
+  // plant's output sets Refining's pace and iridium can pay 60.
+  assert.equal(RECIPES.iridium_bar.xp, 60);
+  assert.equal(RECIPES.iridium_bar.xp / RECIPES.iridium_bar.fuel, 7.5);
 });
 
 test("A Deep-core barge brings home osmiridium, and iridium bars are smelted from it", () => {
@@ -4476,6 +4500,7 @@ test("Old saves: an Excavator mining the Ice moon finishes its trip, then docks 
   // trip and then docking costs nothing.
   const [state, excavatorId] = gameWithShip(20, "excavator");
   state.exploration.surveyed.ice_moon = true;
+  state.fuel.granted = true;   // (no Isotope plant switching on and eating the ice)
   // Fake the old save: start it on the Inner Belt, then switch it to the moon
   const job = startMiningJob(state, excavatorId, "inner_belt", START);
   job.fieldId = "ice_moon";
@@ -5275,6 +5300,265 @@ test("Hauler: has a drawing with hold and drive hardpoints", () => {
   const art = getShipArt(SHIP_TYPES.hauler.art, { hold: 1, drive: 0 });
   assert.ok(art.includes("<svg"));
   assert.ok((art.match(/class="accent"/g) || []).length >= 8);   // four rows of pods, both sides
+});
+
+// =============================================================
+// REFINERY FUEL AND WORKSHOP POWER (fuel.js, refinery.js,
+// workshop.js; design doc, Dan 6 Nov)
+// Each test says WHY it matters, so a failure points at the rule
+// that broke rather than just a number.
+// =============================================================
+
+// A game where the refinery has JUST opened: nothing granted yet.
+function gameAtMining8() {
+  const state = newGame();
+  state.skills.mining.xp = XP_TABLE[REFINERY.openAtMiningLevel];
+  return state;
+}
+
+test("Fuel: no deuterium before the refinery opens, then 200 t once and the Isotope plant switches on", () => {
+  // Why: the refinery must never open already blocked for fuel.
+  const early = newGame();
+  assert.equal(checkFuelGrant(early, START), 0);           // Mining 1: nothing yet
+  assert.equal(early.inventory.deuterium, 0);
+  const state = gameAtMining8();
+  assert.equal(checkFuelGrant(state, START), 200);
+  assert.equal(state.inventory.deuterium, 200);
+  assert.ok(getPlantJob(state), "the plant is on");
+  assert.equal(checkFuelGrant(state, START), 0);           // only ever once
+  assert.equal(state.inventory.deuterium, 200);
+});
+
+test("Fuel: the grant arrives on its own the moment Mining reaches 8", () => {
+  // Why: players don't press anything to get it; the engine gives it.
+  const state = newGame();
+  state.skills.mining.xp = XP_TABLE[REFINERY.openAtMiningLevel] - 1;   // one XP short
+  startMiningJob(state, "ship-1", "inner_belt", START);
+  processJobs(state, START + 10 * MINUTE);
+  assert.ok(isRefineryOpen(state));
+  assert.equal(state.inventory.deuterium, 200);
+});
+
+test("Isotope plant: 60 t ice makes 20 t deuterium in 120 s, with 4 Refining XP", () => {
+  const state = gameAtMining8();
+  state.inventory.ice = 60;
+  checkFuelGrant(state, START);                            // switches the plant on
+  assert.equal(getPlantJob(state).status, "working");
+  assert.equal(state.inventory.ice, 0);                    // taken at the start
+  processJobs(state, START + 120 * SECOND - 1);
+  assert.equal(state.inventory.deuterium, 200);            // not yet
+  processJobs(state, START + 120 * SECOND);
+  assert.equal(state.inventory.deuterium, 220);
+  assert.equal(state.skills.refining.xp, ISOTOPE_PLANT.xp);
+  assert.equal(getPlantJob(state).status, "waiting");      // out of ice
+});
+
+test("Isotope plant: runs at a fixed speed, whatever the Refining level or furnace linings", () => {
+  // Why: plant upgrades are meant to be Refining's pace lever, so
+  // the furnace speed-ups must not leak into it.
+  const state = gameAtRefining(60);
+  state.upgrades.furnace_lining_1 = true;
+  state.upgrades.furnace_lining_2 = true;
+  state.inventory.ice = 60;
+  setPlantRunning(state, true, START);
+  assert.equal(getPlantJob(state).durationMs, 120_000);
+});
+
+test("Isotope plant: switching it off hands back the ice of a half-done batch", () => {
+  const state = gameAtMining8();
+  state.inventory.ice = 100;
+  checkFuelGrant(state, START);
+  assert.equal(state.inventory.ice, 40);
+  assert.equal(setPlantRunning(state, false, START + MINUTE), true);
+  assert.equal(state.inventory.ice, 100);
+  assert.equal(getPlantJob(state), undefined);
+});
+
+test("Fuel: every recipe burns deuterium (2, 4, 5, 8 t), so XP per tonne of fuel rises each tier", () => {
+  // Why: Dan, 6 Nov: no smelting is fuel free, and the burns are
+  // scaled to XP so better recipes get more out of each tonne.
+  assert.deepEqual(Object.keys(RECIPES).map((id) => getFuelPerBatch(id)), [2, 4, 5, 8]);
+  const perTonne = Object.values(RECIPES).map((recipe) => recipe.xp / recipe.fuel);
+  for (let i = 1; i < perTonne.length; i++) {
+    assert.ok(perTonne[i] > perTonne[i - 1], `tier ${i + 1} should get more XP per tonne than tier ${i}`);
+  }
+});
+
+test("Fuel: a batch takes its deuterium when it starts, with the ore", () => {
+  const state = gameWithRefinery();                        // 1000 t of fuel
+  state.inventory.iron_ore = 60;
+  setRecipe(state, 0, "iron_bar", START);
+  assert.equal(state.inventory.deuterium, 998);
+  assert.deepEqual(getRefineJob(state, 0).inputs, { iron_ore: 60, deuterium: 2 });
+});
+
+test("Fuel: with ore but no fuel, the slot waits for fuel and leaves the ore in the hold", () => {
+  // Why: the screen and Needs attention have to say WHAT is missing.
+  const state = gameWithRefinery();
+  state.inventory.deuterium = 1;                           // less than one batch's 2 t
+  state.inventory.iron_ore = 60;
+  setRecipe(state, 0, "iron_bar", START);
+  assert.equal(getRefineJob(state, 0).status, "waiting");
+  assert.equal(state.inventory.iron_ore, 60);
+  assert.equal(getWaitReason(state, "iron_bar"), "fuel");
+  state.inventory.iron_ore = 0;
+  assert.equal(getWaitReason(state, "iron_bar"), "ore");   // ore is reported first
+});
+
+test("Fuel: a slot waiting for fuel starts the moment the plant makes some", () => {
+  // Why: refinery and plant play out together in time order, offline too.
+  const state = gameAtMining8();
+  state.inventory.iron_ore = 60;
+  state.inventory.ice = 60;
+  checkFuelGrant(state, START);                            // plant starts on the ice
+  state.inventory.deuterium = 0;                           // ...but the tank is empty
+  setRecipe(state, 0, "iron_bar", START);
+  assert.equal(getRefineJob(state, 0).status, "waiting");
+  processJobs(state, START + 120 * SECOND);                // 20 t of fuel arrives
+  assert.equal(getRefineJob(state, 0).status, "working");
+  assert.equal(getRefineJob(state, 0).startedAt, START + 120 * SECOND);
+  assert.equal(state.inventory.deuterium, 18);
+});
+
+test("Fuel: stopping a slot mid-batch hands back the ore AND the fuel", () => {
+  const state = gameWithRefinery();
+  state.inventory.iron_ore = 60;
+  setRecipe(state, 0, "iron_bar", START);
+  setRecipe(state, 0, null, START + 10 * SECOND);
+  assert.equal(state.inventory.iron_ore, 60);
+  assert.equal(state.inventory.deuterium, 1000);
+});
+
+test("Drive reserve: the refinery only burns deuterium above it", () => {
+  // Why: fuel kept for torch drives must not go up a furnace chimney.
+  const state = gameWithRefinery();
+  state.inventory.deuterium = 10;
+  assert.equal(setDriveReserve(state, 9).ok, true);
+  assert.equal(getFuelForRefinery(state), 1);
+  state.inventory.iron_ore = 60;
+  setRecipe(state, 0, "iron_bar", START);
+  assert.equal(getRefineJob(state, 0).status, "waiting");  // only 1 t usable, 2 t needed
+  assert.equal(state.inventory.deuterium, 10);             // reserve untouched
+  setDriveReserve(state, 8);
+  processJobs(state, START + SECOND);
+  assert.equal(getRefineJob(state, 0).status, "working");
+  assert.equal(state.inventory.deuterium, 8);
+});
+
+test("Drive reserve: whole tonnes, 0 or more; it's its own setting, not a bond", () => {
+  const state = newGame();
+  for (const bad of [-1, 2.5, "ten"]) {
+    assert.equal(setDriveReserve(state, bad).ok, false);
+  }
+  assert.equal(setDriveReserve(state, 50).ok, true);
+  assert.equal(state.fuel.driveReserve, 50);
+  assert.deepEqual(state.bonded, {});                      // Dan: one name, one meaning
+});
+
+test("Deuterium is never sold or hauled away", () => {
+  // Why: freighters take the most valuable goods first; without
+  // this they'd carry off the refinery's fuel.
+  const state = newGame();
+  state.inventory.deuterium = 500;
+  state.inventory.iron_ore = 100;
+  assert.equal(getSellable(state, "deuterium"), 0);
+  const cargo = loadCargo(state, 1000, "constant");
+  assert.deepEqual(cargo, { iron_ore: 100 });
+  assert.equal(state.inventory.deuterium, 500);
+  sellEverything(state);
+  assert.equal(state.inventory.deuterium, 500);
+});
+
+test("The Ledger sells deuterium at a premium, as the safety net", () => {
+  const state = gameAtMining8();
+  state.credits = 5000;
+  assert.equal(getFuelCost(10), 10 * ITEMS.deuterium.buyPrice);
+  assert.ok(ITEMS.deuterium.buyPrice > 3 * ITEMS.ice.sellPrice, "dearer than making it from 3 t of ice");
+  const result = buyFuel(state, 10);
+  assert.equal(result.ok, true);
+  assert.equal(state.credits, 5000 - getFuelCost(10));
+  assert.equal(state.inventory.deuterium, 10);
+  assert.equal(buyFuel(state, 1000).ok, false);            // can't afford it
+  assert.equal(buyFuel(state, 0).ok, false);
+  assert.equal(buyFuel(newGame(), 1).ok, false);           // refinery not open yet
+});
+
+test("Save: a version 22 save gets fuel settings, then the starter deuterium on its first tick", () => {
+  const old = gameWithRefinery();
+  old.version = 22;
+  delete old.fuel;
+  delete old.inventory.deuterium;
+  const state = parseSave(JSON.stringify(old));
+  assert.equal(state.version, SAVE_VERSION);
+  assert.deepEqual(state.fuel, { driveReserve: 0, granted: false });
+  processJobs(state, START);
+  assert.equal(state.inventory.deuterium, 200);
+  assert.ok(getPlantJob(state));
+});
+
+test("Power: the grid is 12 MW and each workshop recipe draws 1 to 5 MW", () => {
+  assert.equal(WORKSHOP.gridMw, 12);
+  assert.deepEqual(Object.keys(WORKSHOP_RECIPES).map((id) => getRecipePower(id)), [1, 2, 3, 4, 5]);
+});
+
+test("Power: a batch only starts if its draw fits; the third thruster slot waits, then starts when power frees", () => {
+  // Why: 5 + 5 + 5 MW is more than 12, so with three slots the
+  // player has to mix in cheaper jobs (design doc).
+  const state = gameWithWorkshop(35);                      // 3 slots, thrusters unlocked
+  state.inventory.structural_frames = 1000;
+  state.inventory.wiring_coils = 1000;
+  addOrder(state, 0, "thruster_assembly", 1, START);
+  addOrder(state, 1, "thruster_assembly", 1, START);
+  addOrder(state, 2, "thruster_assembly", 1, START);
+  assert.equal(getPowerInUse(state), 10);
+  assert.equal(getSparePower(state), 2);
+  assert.equal(getWorkshopJob(state, 2).status, "waiting");
+  assert.equal(getWorkshopWaitReason(state, "thruster_assembly"), "power");
+  assert.equal(getWorkshopWaitReason(state, "wiring_coils"), "metal");   // no nickel bars
+  const batchMs = getWorkshopJob(state, 0).durationMs;
+  processJobs(state, START + batchMs);
+  assert.equal(getWorkshopJob(state, 2).status, "working");
+  assert.equal(getWorkshopJob(state, 2).startedAt, START + batchMs);
+});
+
+test("Power: a cheaper job fits in the spare megawatts", () => {
+  const state = gameWithWorkshop(35);
+  state.inventory.structural_frames = 1000;
+  state.inventory.wiring_coils = 1000;
+  state.inventory.iron_bar = 1000;
+  addOrder(state, 0, "thruster_assembly", 1, START);
+  addOrder(state, 1, "thruster_assembly", 1, START);
+  addOrder(state, 2, "hull_plating", 1, START);            // 1 MW: fits in the 2 spare
+  assert.equal(getWorkshopJob(state, 2).status, "working");
+  assert.equal(getPowerInUse(state), 11);
+});
+
+test("Engine: a refinery held back by the Isotope plant plays out the same ticked or jumped", () => {
+  // Why: fuel adds a new chain (ice -> plant -> deuterium -> furnace)
+  // and offline time must give exactly what playing would.
+  function fuelLimited() {
+    const state = gameAtRefining(15);
+    state.simulatedUpTo = START;
+    state.clock = createClock(START);
+    state.lastSavedAt = 0;
+    state.inventory.ice = 600;                             // 10 plant batches
+    state.inventory.iron_ore = 6000;
+    state.inventory.nickel_ore = 3000;
+    setPlantRunning(state, true, START);                   // (the helper already gave the grant)
+    state.inventory.deuterium = 0;                         // an empty tank: the plant sets the pace
+    setRecipe(state, 0, "steel", START);
+    setRecipe(state, 1, "iron_bar", START);
+    return state;
+  }
+  const jumped = fuelLimited();
+  advanceTo(jumped, START + 2 * HOUR);
+  const ticked = fuelLimited();
+  for (let t = 250; t <= 2 * HOUR; t += 250) advanceTo(ticked, START + t);
+  assert.equal(jumped.stats.refined.deuterium, 200);       // all 10 batches of ice
+  // 200 t of fuel: far fewer batches than 2 hours of two slots allow
+  const batches = (jumped.stats.refined.steel || 0) / 45 + (jumped.stats.refined.iron_bar || 0) / 30;
+  assert.ok(batches <= 100, `fuel should cap it at 100 small batches, got ${batches}`);
+  assert.deepEqual(ticked, jumped);
 });
 
 // -------------------------------------------------------------

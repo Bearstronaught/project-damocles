@@ -14,6 +14,7 @@ import { SAVE_VERSION, createExploration } from "./state.js";
 import { createContracts } from "./contracts.js";
 import { createMarket } from "./market.js";
 import { createLogistics } from "./logistics.js";
+import { createFuel } from "./fuel.js";
 import { getTripPlan } from "./jobs.js";
 import { advanceTo } from "./simulation.js";
 import { createClock } from "./clock.js";
@@ -516,7 +517,24 @@ function upgradeSave(state) {
     state.version = 22;
   }
 
-  // (Future: if (state.version === 22) { ...; state.version = 23; })
+  // --- Version 22 -> 23: refinery fuel and workshop power ---
+  // Every refinery recipe now burns deuterium, made from ice at the
+  // new Isotope plant (fuel.js). Older saves start with the default
+  // fuel settings and "not granted yet", so on the first tick they
+  // get the same 200 t of starter deuterium as a new game, and the
+  // plant switches on - as long as the refinery is open. A batch
+  // already in a furnace finishes as normal (its fuel was never
+  // taken, but that's one batch). Workshop power needs nothing
+  // saved: it's worked out from the running batches.
+  if (state.version === 22) {
+    state.fuel = createFuel();
+    if (state.inventory.deuterium === undefined) {
+      state.inventory.deuterium = 0;
+    }
+    state.version = 23;
+  }
+
+  // (Future: if (state.version === 23) { ...; state.version = 24; })
 
   if (state.version > SAVE_VERSION) {
     // A save from a NEWER version of the game than this one.
