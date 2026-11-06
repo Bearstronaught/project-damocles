@@ -157,6 +157,13 @@ export function simulate(hours, untilMiningLevel, hourly = null, explore = true,
         freePoints: getCommandFree(state),
         commandUpgrades: state.commandUpgrades,   // how many of the 10 are bought
         miningXp: state.skills.mining.xp,         // for the long-run report (--weeks)
+        // Every skill's XP (added 6 Nov), so the long run can project
+        // when each one reaches 99, not just Mining
+        xp: {
+          refining: state.skills.refining.xp,
+          manufacturing: state.skills.manufacturing.xp,
+          trade: state.skills.trade.xp,
+        },
         credits: state.credits,
         blockedBy: check.ok ? "nothing" : check.reason,
         // Added 4 Nov, so the long run shows every skill and the fleet mix
@@ -553,4 +560,17 @@ function printWeeks(weeks, explore, surveyDelay, realistic, casual) {
   const daysTo99 = days.length + Math.max(0, XP_TABLE[99] - last.miningXp) / perDay;
   console.log(`\nMining XP per day over the second half: ${cr(perDay)}`);
   console.log(`Mining 99 would land on about day ${Math.round(daysTo99)} (week ${(daysTo99 / 7).toFixed(1)})`);
+
+  // The same straight-line projection for the skills that follow
+  // Mining in the agreed order (added 6 Nov for the precision parts
+  // check): Refining about 2 weeks after Mining, Manufacturing about
+  // 4, Trade about 6.
+  //   e.g. 20M XP still to go at 1M XP a day -> 20 more days
+  const halfDays = days.length - Math.floor(days.length / 2);
+  for (const skillId of ["refining", "manufacturing", "trade"]) {
+    const skillPerDay = (last.xp[skillId] - middle.xp[skillId]) / halfDays;
+    const skillDays = days.length + Math.max(0, XP_TABLE[99] - last.xp[skillId]) / skillPerDay;
+    const name = skillId[0].toUpperCase() + skillId.slice(1);
+    console.log(`${name} 99 would land on about day ${Math.round(skillDays)} (week ${(skillDays / 7).toFixed(1)})`);
+  }
 }
