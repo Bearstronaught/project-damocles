@@ -145,6 +145,17 @@ export function bestXpField(state, typeId) {
 // -------------------------------------------------------------
 export function refineryOreNeeds(state) {
   const needs = {};
+  // The Isotope plant's ice comes FIRST (fixed 6 Nov): with no fuel
+  // the refinery can't smelt anything, so ice is the most urgent ore.
+  // Callers walk this list in order, so putting ice first means a
+  // short-handed fleet feeds the plant before the furnaces.
+  // (Before this, ice came last: a ship recalled for ice was sent to
+  // iron instead, recalled again for ice, and so on every minute.)
+  if (getPlantJob(state)) {
+    for (const [oreId, tonnes] of Object.entries(ISOTOPE_PLANT.inputs)) {
+      needs[oreId] = (needs[oreId] || 0) + 2 * tonnes;   // two batches' worth
+    }
+  }
   for (let slot = 0; slot < getSlotCount(state); slot++) {
     const job = getRefineJob(state, slot);
     if (!job || job.toll !== undefined || !RECIPES[job.recipeId]) continue;
@@ -152,14 +163,8 @@ export function refineryOreNeeds(state) {
       needs[oreId] = (needs[oreId] || 0) + 2 * tonnes;
     }
   }
-  // The Isotope plant's ice counts too (fuel, 6 Nov): two batches,
-  // kept like ore. So barges go to the Ice moon when it runs short,
-  // and the plant's ice is never sold out from under it.
-  if (getPlantJob(state)) {
-    for (const [oreId, tonnes] of Object.entries(ISOTOPE_PLANT.inputs)) {
-      needs[oreId] = (needs[oreId] || 0) + 2 * tonnes;
-    }
-  }
+  // (The plant's ice is added at the top, so the hold keeps it and
+  // it is never sold out from under the plant.)
   return needs;
 }
 
@@ -219,7 +224,8 @@ export function rebalanceMiners(state, now) {
   const miningJobs = state.jobs.filter((job) => job.type === "mining");
   if (miningJobs.some((job) => job.recall)) return lines;   // one already heading home
 
-  for (const [oreId, tonnes] of Object.entries(refineryOreNeeds(state))) {
+  const needs = refineryOreNeeds(state);   // ore wanted in the hold, ice first
+  for (const [oreId, tonnes] of Object.entries(needs)) {
     if ((state.inventory[oreId] || 0) >= tonnes) continue;
     const fieldId = Object.keys(FIELDS).find((id) => FIELDS[id].yields === oreId && isFieldUnlocked(state, id));
     if (!fieldId) continue;
@@ -229,11 +235,20 @@ export function rebalanceMiners(state, now) {
     // a Deep-core barge for iron ore it can't mine)
     // (and never a large or capital hull: they stay on their own field,
     // see chooseMiningField; Dan, 5 Nov)
+    // Is this ship's own ore short too? Then leave it where it is
+    // (fixed 6 Nov): pulling it off one short ore to fix another
+    // just moves the problem, and the two fields took turns
+    // recalling the same Prospector every minute, so it never
+    // mined anything. Once the refinery stalls the belt ore piles
+    // up, stops being short, and that ship can be spared.
+    const isShort = (oreId) => (state.inventory[oreId] || 0) < (needs[oreId] || 0);
     const job = miningJobs.find((j) => {
       const typeId = state.ships.find((s) => s.id === j.shipId).type;
       const size = SHIP_TYPES[typeId].size;
+      const itsOre = FIELDS[j.fieldId] ? FIELDS[j.fieldId].yields : null;
       return j.fieldId !== fieldId && !getCharter(state, j.shipId) &&
-        canHullWorkField(typeId, fieldId) && size !== "large" && size !== "capital";
+        canHullWorkField(typeId, fieldId) && size !== "large" && size !== "capital" &&
+        !isShort(itsOre);
     });
     if (!job) continue;
     recallJob(state, job.id, now);
