@@ -14,7 +14,7 @@
 //   5. Start autosaving.
 // =============================================================
 
-import { RULES, ITEMS, FIELDS, SHIP_TYPES, SKILLS, HUB, HOME, HAUL_MODES, RECIPES, REFINERY, WORKSHOP_RECIPES, WORKSHOP, UPGRADES, SHIP_UPGRADES, SHIP_PARTS, CONTRACT_KINDS, CONTRACT_FACTIONS, CONTRACTS } from "../data/content.js";
+import { RULES, ITEMS, FIELDS, SHIP_TYPES, SKILLS, HUB, HOME, HAUL_MODES, RECIPES, REFINERY, ISOTOPE_PLANT, WORKSHOP_RECIPES, WORKSHOP, UPGRADES, SHIP_UPGRADES, SHIP_PARTS, CONTRACT_KINDS, CONTRACT_FACTIONS, CONTRACTS } from "../data/content.js";
 import { createNewGame, findShip } from "./state.js";
 import { startMiningJob, startHaulJob, recallJob, resumeJob, getJobForShip } from "./jobs.js";
 import { advanceTo } from "./simulation.js";
@@ -30,7 +30,9 @@ import { orderShip, sellShip, renameShip } from "./shipyard.js";
 import { cancelBuild, getTimeUntilReady, BERTHS } from "./slipway.js";
 import { buyUpgrade, getCommandCapacity } from "./command.js";
 import { getUnlocksAtLevel, getFieldUnlocksAtLevel, isFieldUnlocked, canHullWorkField } from "./skills.js";
-import { setRecipe, getRefineJob, getRecipeUnlocksAtLevel, getSlotUnlocksAtLevel } from "./refinery.js";
+import { setRecipe, getRefineJob, getRecipeUnlocksAtLevel, getSlotUnlocksAtLevel, getSlotCount, getWaitReason } from "./refinery.js";
+import { setPlantRunning, setDriveReserve, buyFuel, getPlantJob, isIsotopePlantOpen } from "./fuel.js";
+import { getWorkshopWaitReason } from "./workshop.js";
 import { addOrder, cancelOrder, getWorkshopJob, getWorkshopRecipeUnlocksAtLevel, getWorkshopSlotUnlocksAtLevel, isQueueUnlockLevel, getQueueLimit, addStandingOrder, removeStandingOrder, getStandingOrders } from "./workshop.js";
 import { buyIndustryUpgrade, getUpgradeUnlocksAtLevel } from "./upgrades.js";
 import { setLogisticsRule } from "./logistics.js";
@@ -286,6 +288,37 @@ const actions = {
       addLog(`The unfinished batch's ${describeCargo(returning)} went back into the hold.`, "refine");
     }
     refresh();
+  },
+
+  // Switches the Isotope plant on or off (fuel.js).
+  setPlantRunning(on) {
+    if (setPlantRunning(state, on, gameNow(state))) {
+      addLog(on ? "The Isotope plant is back on, making deuterium from ice."
+                : "The Isotope plant is switched off. Any ice in it went back into the hold.", "refine");
+    }
+    refresh();
+  },
+
+  // Sets the Drive reserve: deuterium the refinery leaves alone.
+  // Returns { ok, reason } so the screen can say why it was refused.
+  setDriveReserve(tonnes) {
+    const result = setDriveReserve(state, tonnes);
+    if (result.ok) {
+      addLog(`Drive reserve set to ${formatTonnes(tonnes)}: the refinery leaves that much deuterium for torch drives.`, "refine");
+    }
+    refresh();
+    return result;
+  },
+
+  // Buys deuterium from the Ledger (the safety net).
+  // Returns { ok, reason } for the screen.
+  buyFuel(tonnes) {
+    const result = buyFuel(state, tonnes);
+    if (result.ok) {
+      addLog(`Bought ${formatTonnes(tonnes)} of deuterium from the Ledger for ${formatNumber(result.cost)} cr.`, "refine");
+    }
+    refresh();
+    return result;
   },
 
   // Puts a work order at the back of a workshop slot's queue.
@@ -672,7 +705,9 @@ function tick() {
       const batches = result.trips === 1 ? "" : ` in ${result.trips} batches`;
       // Toll smelting: say how much was the client's.
       const forClient = result.tolled > 0 ? `, ${formatTonnes(result.tolled)} of it for a client` : "";
-      addLog(`Refinery slot ${result.slot + 1} made ${formatTonnes(result.amount)} of ${ITEMS[result.itemId].name.toLowerCase()}${batches}${forClient} (+${formatXp(result.xpGained)} Refining XP).`, "refine");
+      // (The Isotope plant reports like a refinery slot, as "plant".)
+      const maker = result.slot === "plant" ? ISOTOPE_PLANT.name : `Refinery slot ${result.slot + 1}`;
+      addLog(`${maker} made ${formatTonnes(result.amount)} of ${ITEMS[result.itemId].name.toLowerCase()}${batches}${forClient} (+${formatXp(result.xpGained)} Refining XP).`, "refine");
       logLevelUps(result.skillId, result.newLevels);
       continue;   // on to the next result
     }
@@ -977,6 +1012,7 @@ function getUnlockLines(skillId, level, withPerk = true, preview = false) {
     }
     if (level === REFINERY.openAtMiningLevel) {
       lines.push("New: the refinery (Industry tab)");
+      lines.push(`New: the ${ISOTOPE_PLANT.name}, and ${ISOTOPE_PLANT.starterGrant} t of deuterium to start`);
     }
     if (level === CONTRACTS.openAtMiningLevel) {
       lines.push("New: contracts from the belt independents (Contracts tab)");
@@ -1061,6 +1097,7 @@ function logLevelUps(skillId, levels, showBanners = true) {
       }
       if (level === REFINERY.openAtMiningLevel) {
         addLog(`The ${HOME.name} refinery is open. Find it on the Industry tab.`, "level");
+        addLog(`Every batch burns deuterium. ${ISOTOPE_PLANT.starterGrant} t has arrived to get you started, and the ${ISOTOPE_PLANT.name} makes more from ice: mine the Ice moon to keep it running.`, "level");
       }
       if (level === CONTRACTS.openAtMiningLevel) {
         const first = Object.values(CONTRACT_FACTIONS)[0];   // the faction that posts first
@@ -1215,6 +1252,53 @@ function reportOfflineProgress(report, opening = null) {
 
 
 // -------------------------------------------------------------
+// getFuelAndPowerLines()
+// Needs-attention lines for anything stalled by fuel or power
+// right now, e.g.
+//   "Refinery slots 1 and 2 are waiting for deuterium (Industry tab)"
+// -------------------------------------------------------------
+function getFuelAndPowerLines() {
+  const lines = [];
+  if (!isIsotopePlantOpen(state)) {
+    return lines;
+  }
+
+  // Refinery slots with ore but no fuel
+  const noFuel = [];
+  for (let slot = 0; slot < getSlotCount(state); slot++) {
+    const job = getRefineJob(state, slot);
+    if (job && job.status === "waiting" && getWaitReason(state, job.recipeId) === "fuel") {
+      noFuel.push(slot + 1);
+    }
+  }
+  if (noFuel.length > 0) {
+    const which = noFuel.length === 1 ? `Refinery slot ${noFuel[0]} is` : `Refinery slots ${noFuel.join(" and ")} are`;
+    lines.push(`${which} waiting for deuterium (Industry tab)`);
+  }
+
+  // The plant switched on but out of ice
+  const plant = getPlantJob(state);
+  // (Before the Ice moon is surveyed, the next step is the survey.)
+  if (plant && plant.status === "waiting") {
+    lines.push(state.exploration.surveyed.ice_moon
+      ? `The ${ISOTOPE_PLANT.name} is out of ice: send a small ship to the Ice moon (Command tab)`
+      : `The ${ISOTOPE_PLANT.name} needs ice: survey the Ice moon to mine it (Exploration tab)`);
+  }
+
+  // Workshop slots held up by the power grid
+  const noPower = state.jobs
+    .filter((job) => job.type === "workshop" && job.status === "waiting" && job.orders.length > 0
+      && getWorkshopWaitReason(state, job.orders[0].recipeId) === "power")
+    .map((job) => job.slot + 1);
+  if (noPower.length > 0) {
+    const which = noPower.length === 1 ? `Workshop slot ${noPower[0]} is` : `Workshop slots ${noPower.join(" and ")} are`;
+    lines.push(`${which} waiting for power (Industry tab)`);
+  }
+  return lines;
+}
+
+
+// -------------------------------------------------------------
 // getAttentionLines(summary)
 // The "Needs attention" box: anything waiting on the player
 // right now. Each line says where to go, e.g.
@@ -1236,6 +1320,9 @@ function getAttentionLines(summary) {
   for (const slotNumber of summary.industry.idleSlots) {
     lines.push(`Workshop slot ${slotNumber} ran out of orders (Industry tab)`);
   }
+
+  // Fuel and power: anything stalled right now (fuel.js, workshop.js)
+  lines.push(...getFuelAndPowerLines());
 
   // Contracts done and waiting to be handed in
   const ready = state.contracts.slots.filter((slot, index) => slot.contract && isReady(state, index)).length;

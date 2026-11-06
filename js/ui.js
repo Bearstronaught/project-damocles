@@ -17,7 +17,7 @@
 // flicker and sometimes swallow clicks.)
 // =============================================================
 
-import { ITEMS, ITEM_GROUPS, SHIP_TYPES, FIELDS, SKILLS, HULL_SIZES, COMMAND, HUB, HOME, MARKET, HAUL_MODES, RECIPES, REFINERY, WORKSHOP_RECIPES, WORKSHOP, UPGRADES, SHIP_UPGRADES, SHIP_PARTS, SURVEY_TARGETS, CONTRACTS, KM_PER_SECOND_AT_SPEED_1, LOGISTICS } from "../data/content.js";
+import { ITEMS, ITEM_GROUPS, SHIP_TYPES, FIELDS, SKILLS, HULL_SIZES, COMMAND, HUB, HOME, MARKET, HAUL_MODES, RECIPES, REFINERY, ISOTOPE_PLANT, WORKSHOP_RECIPES, WORKSHOP, UPGRADES, SHIP_UPGRADES, SHIP_PARTS, SURVEY_TARGETS, CONTRACTS, KM_PER_SECOND_AT_SPEED_1, LOGISTICS } from "../data/content.js";
 import { isOwned, canBuyIndustryUpgrade, getUpgradeLines } from "./upgrades.js";
 import { gameNow, SPEEDS } from "./clock.js";
 import { getShipStats, getHullParts, getPartGrade, getPartBonus, getNextUpgrade, canBuyShipUpgrade, getUpgradeName, getHullShortName, findUpgrade, getBonusUpTo, getShipGrades, getPendingRefits } from "./ship-upgrades.js";
@@ -37,8 +37,9 @@ import { buildExplorationScreen, renderExploration } from "./exploration-screen.
 import { buildContractsScreen, renderContracts } from "./contracts-screen.js";
 import { isBoardOpen, getSlotCount as getBoardSlotCount, getCharter } from "./contracts.js";   // ("as": the refinery has a getSlotCount too)
 import { getRoleGroups, describeGroup } from "./fleet-groups.js";
-import { isRefineryOpen, getRefineJob, getSlotCount, getSlotUnlockLevel, isRecipeUnlocked, getBatchMs, getBatchOutput, hasInputs, describeInputs, getMaxSlots } from "./refinery.js";
-import { isWorkshopOpen, getWorkshopSlotCount, getWorkshopSlotUnlockLevel, getQueueLimit, isWorkshopRecipeUnlocked, getWorkshopBatchMs, getWorkshopJob, hasWorkshopInputs, describeWorkshopInputs, getMaxOrderBatches, getRunningIndex, hasSmartQueue, hasControlCentre, getStandingOrders, standingNeedsWork } from "./workshop.js";
+import { isRefineryOpen, getRefineJob, getSlotCount, getSlotUnlockLevel, isRecipeUnlocked, getBatchMs, getBatchOutput, hasInputs, describeInputs, getMaxSlots, getWaitReason, getFuelPerBatch } from "./refinery.js";
+import { isIsotopePlantOpen, getPlantJob, getDriveReserve, getFuelForRefinery, getFuelCost } from "./fuel.js";
+import { isWorkshopOpen, getWorkshopSlotCount, getWorkshopSlotUnlockLevel, getQueueLimit, isWorkshopRecipeUnlocked, getWorkshopBatchMs, getWorkshopJob, hasWorkshopInputs, describeWorkshopInputs, getMaxOrderBatches, getRunningIndex, hasSmartQueue, hasControlCentre, getStandingOrders, standingNeedsWork, getWorkshopWaitReason, getRecipePower, getPowerInUse, getGridMw } from "./workshop.js";
 
 // Words shown for each phase of a trip.
 const PHASE_LABELS = {
@@ -106,6 +107,7 @@ export function setupUI(state, actions) {
   buildFleetViews(state, actions);
   buildSkillCards();
   buildRefinery(actions);
+  buildFuel(actions);
   buildWorkshop(actions);
   buildUpgrades(actions);
   buildStationHold(actions);
@@ -1067,6 +1069,15 @@ function buildCargoTable(actions) {
         <td><button class="btn btn-small" data-part="sell">Sell</button></td>
       `;
       part(row, "sell").addEventListener("click", () => actions.sellItem(itemId));
+      // A station good that's never sold (deuterium, the refinery's
+      // fuel): no prices, no value and no Sell button, just a note.
+      if (item.forSale === false) {
+        row.classList.add("not-for-sale");
+        for (const cell of row.querySelectorAll(".cargo-price")) cell.textContent = "—";
+        part(row, "value").textContent = "—";
+        part(row, "sell").replaceWith(Object.assign(document.createElement("span"),
+          { className: "bonded-note", textContent: "Station fuel" }));
+      }
       body.appendChild(row);
     }
   }
@@ -1398,6 +1409,120 @@ function buildRefinery(actions) {
     });
 
     area.appendChild(box);
+  }
+}
+
+
+// -------------------------------------------------------------
+// buildFuel(actions)
+// Wires up the Isotope plant box at the top of the Refinery panel
+// (the HTML is in index.html): the on/off button, the Drive
+// reserve and buying fuel from the Ledger. Built once;
+// renderFuel() keeps the words and bar current.
+// -------------------------------------------------------------
+function buildFuel(actions) {
+  const message = byId("fuel-message");
+
+  // On/off: the button's own label says which way it will go.
+  byId("plant-toggle").addEventListener("click", () => {
+    actions.setPlantRunning(byId("plant-toggle").dataset.turnOn === "yes");
+    message.textContent = "";
+  });
+
+  // Drive reserve: whole tonnes. A refusal shows under the box.
+  byId("reserve-button").addEventListener("click", () => {
+    const result = actions.setDriveReserve(Number(byId("reserve-input").value));
+    message.textContent = result.ok ? "" : result.reason;
+  });
+
+  // Buying fuel: the cost is shown on the button as you type.
+  byId("buy-fuel-button").addEventListener("click", () => {
+    const result = actions.buyFuel(Number(byId("buy-fuel-input").value));
+    message.textContent = result.ok ? "" : result.reason;
+  });
+  byId("buy-fuel-input").addEventListener("input", () => { message.textContent = ""; });
+  byId("reserve-input").addEventListener("input", () => { message.textContent = ""; });
+}
+
+
+// -------------------------------------------------------------
+// renderFuel(state, now)
+// The Isotope plant box, e.g.
+//   Isotope plant                                   Working
+//   [=====-----]
+//   Making deuterium — 1m 10s left
+//   60 t ice → 20 t deuterium · 2m 0s · 4 XP (fixed speed)
+//   Deuterium 340 t · refinery may use 340 t (reserve 0 t)
+// Hidden until the refinery opens.
+// -------------------------------------------------------------
+function renderFuel(state, now) {
+  const box = byId("fuel-box");
+  const open = isIsotopePlantOpen(state);
+  box.hidden = !open;
+  if (!open) {
+    return;
+  }
+
+  const job = getPlantJob(state);
+  const bar = byId("plant-bar");
+  const status = byId("plant-status");
+  const tag = byId("plant-tag");
+  const toggle = byId("plant-toggle");
+
+  // The batch line never changes: the plant runs at a fixed speed.
+  const iceText = Object.entries(ISOTOPE_PLANT.inputs)
+    .map(([itemId, amount]) => `${formatTonnes(amount)} ${ITEMS[itemId].name.toLowerCase()}`).join(" + ");
+  byId("plant-specs").textContent =
+    `${iceText} → ${formatTonnes(ISOTOPE_PLANT.outputAmount)} deuterium · ` +
+    `${formatDuration(ISOTOPE_PLANT.seconds * 1000)} · ${formatXp(ISOTOPE_PLANT.xp)} XP (fixed speed)`;
+
+  // How much fuel there is, and how much the refinery may burn.
+  const stock = state.inventory.deuterium || 0;
+  byId("fuel-stock").textContent =
+    `Deuterium ${formatTonnes(stock)} · refinery may use ${formatTonnes(getFuelForRefinery(state))} ` +
+    `(Drive reserve ${formatTonnes(getDriveReserve(state))})`;
+
+  // The reserve box shows the saved value, unless the player is
+  // typing in it right now (so the redraw doesn't fight them).
+  const reserveInput = byId("reserve-input");
+  if (document.activeElement !== reserveInput && reserveInput.value !== String(getDriveReserve(state))) {
+    reserveInput.value = String(getDriveReserve(state));
+  }
+
+  // The buy button shows what the typed amount would cost.
+  const tonnes = Number(byId("buy-fuel-input").value);
+  const buyLabel = Number.isInteger(tonnes) && tonnes > 0
+    ? `Buy from the Ledger · ${formatNumber(getFuelCost(tonnes))} cr`
+    : "Buy from the Ledger";
+  if (byId("buy-fuel-button").textContent !== buyLabel) byId("buy-fuel-button").textContent = buyLabel;
+
+  // --- Off ---
+  if (!job) {
+    tag.textContent = "Off";
+    status.textContent = "Switched off. Ice in the hold is left alone.";
+    bar.style.width = "0%";
+    toggle.textContent = "Switch on";
+    toggle.dataset.turnOn = "yes";
+    box.classList.remove("busy", "waiting");
+    return;
+  }
+  toggle.textContent = "Switch off";
+  toggle.dataset.turnOn = "no";
+
+  // --- Working, or waiting for ice ---
+  if (job.status === "working") {
+    const elapsed = Math.min(Math.max(now - job.startedAt, 0), job.durationMs);
+    bar.style.width = (elapsed / job.durationMs * 100) + "%";
+    tag.textContent = "Working";
+    status.textContent = `Making deuterium — ${formatDuration(job.durationMs - elapsed)} left`;
+    box.classList.add("busy");
+    box.classList.remove("waiting");
+  } else {
+    bar.style.width = "0%";
+    tag.textContent = "Waiting";
+    status.textContent = `Waiting for ${iceText}. Mine the Ice moon with small ships.`;
+    box.classList.add("waiting");
+    box.classList.remove("busy");
   }
 }
 
@@ -1798,6 +1923,14 @@ function buildStationHold(actions) {
           </div>
         </td>
       `;
+      // A station good that's never sold doesn't need a bond: the
+      // Drive reserve on the Isotope plant does that job for fuel.
+      if (item.forSale === false) {
+        row.querySelector(".bond-controls").replaceChildren(Object.assign(document.createElement("span"),
+          { className: "bonded-note", textContent: "Never sold · see Drive reserve" }));
+        body.appendChild(row);
+        continue;   // no bond box, so none of the bond buttons below
+      }
       const input = part(row, "bond");
 
       // Bond: set the bond to the number in the box. A refused
@@ -1967,6 +2100,7 @@ export function render(state, now) {
   renderCommand(state);
   renderShipyard(state);
   renderSkills(state);
+  renderFuel(state, now);
   renderRefinery(state, now);
   renderWorkshop(state, now);
   const upgradesReady = renderUpgrades(state);
@@ -2099,6 +2233,17 @@ function renderCargo(state, now) {
     // made the column too wide and pushed the Value and Sell
     // columns out of the panel.)
     showStock(row, amount, bond);
+
+    // Station goods (deuterium) only show their stock, on both
+    // screens: they have no prices, Sell button or bond.
+    if (item.forSale === false) {
+      row.classList.toggle("empty", amount === 0);
+      const stationRow = byId("hold-" + itemId);
+      showStock(stationRow, amount, 0);
+      stationRow.classList.toggle("empty", amount === 0);
+      continue;
+    }
+
     // Only the part that can be sold is worth anything here.
     // Short form ("2.4M cr") so big values fit the narrow panel.
     part(row, "value").textContent = formatCreditsShort(sellable * item.sellPrice);
@@ -2858,7 +3003,8 @@ function renderRefinery(state, now) {
     const output = Math.round(getBatchOutput(state, job.recipeId) * 10) / 10;
     specs.textContent =
       `${describeInputs(job.recipeId, formatTonnes)} → ${output} t ` +
-      `${ITEMS[recipe.output].name.toLowerCase()} · ${formatDuration(getBatchMs(state, job.recipeId))} · ${formatXp(recipe.xp)} XP`;
+      `${ITEMS[recipe.output].name.toLowerCase()} · burns ${formatTonnes(getFuelPerBatch(job.recipeId))} deuterium · ` +
+      `${formatDuration(getBatchMs(state, job.recipeId))} · ${formatXp(recipe.xp)} XP`;
 
     if (job.status === "working") {
       const elapsed = Math.min(Math.max(now - job.startedAt, 0), job.durationMs);
@@ -2871,10 +3017,16 @@ function renderRefinery(state, now) {
       box.classList.remove("waiting");
     } else {
       bar.style.width = "0%";
-      tag.textContent = "Waiting";
-      status.textContent = hasInputs(state, job.recipeId)
-        ? "Starting the next batch"
-        : `Waiting for ${describeInputs(job.recipeId, formatTonnes)}`;
+      // Say WHAT is missing: ore first, then fuel (refinery.js).
+      const reason = getWaitReason(state, job.recipeId);
+      tag.textContent = reason === "fuel" ? "No fuel" : "Waiting";
+      if (reason === "ore") {
+        status.textContent = `Waiting for ${describeInputs(job.recipeId, formatTonnes)}`;
+      } else if (reason === "fuel") {
+        status.textContent = `Waiting for fuel: needs ${formatTonnes(getFuelPerBatch(job.recipeId))} deuterium above the Drive reserve`;
+      } else {
+        status.textContent = "Starting the next batch";
+      }
       box.classList.add("waiting");
       box.classList.remove("busy");
     }
@@ -2895,7 +3047,7 @@ function renderWorkshop(state, now) {
   const queueLimit = getQueueLimit(state);
 
   byId("workshop-tag").textContent = open
-    ? `${unlockedSlots} of ${WORKSHOP.slotLevels.length} slots · ${queueLimit} orders each`
+    ? `${unlockedSlots} of ${WORKSHOP.slotLevels.length} slots · ${queueLimit} orders each · power ${getPowerInUse(state)} of ${getGridMw(state)} MW`
     : "Closed";
   byId("workshop-note").textContent = open
     ? ""
@@ -2947,7 +3099,7 @@ function renderWorkshop(state, now) {
       specs.textContent =
         `${describeWorkshopInputs(select.value, formatTonnes)} → ${formatTonnes(chosen.outputAmount)} ` +
         `${ITEMS[chosen.output].name.toLowerCase()} · ${formatDuration(getWorkshopBatchMs(state, select.value))} · ` +
-        `${formatXp(chosen.xp)} XP per batch`;
+        `${getRecipePower(select.value)} MW · ${formatXp(chosen.xp)} XP per batch`;
     }
 
     const job = getWorkshopJob(state, slot);
@@ -3019,11 +3171,18 @@ function renderWorkshop(state, now) {
       box.classList.remove("waiting");
     } else {
       bar.style.width = "0%";
-      tag.textContent = `Waiting · ${job.orders.length}/${queueLimit}`;
-      status.textContent = hasWorkshopInputs(state, order.recipeId)
-        ? "Starting the next batch"
-        : `Waiting for ${describeWorkshopInputs(order.recipeId, formatTonnes)}` +
+      // Say WHAT is missing: metal first, then power (workshop.js).
+      const reason = getWorkshopWaitReason(state, order.recipeId);
+      tag.textContent = `${reason === "power" ? "No power" : "Waiting"} · ${job.orders.length}/${queueLimit}`;
+      if (reason === "metal") {
+        status.textContent = `Waiting for ${describeWorkshopInputs(order.recipeId, formatTonnes)}` +
           (hasSmartQueue(state) && job.orders.length > 1 ? " (later orders also short of metal)" : "");
+      } else if (reason === "power") {
+        status.textContent = `Waiting for power: needs ${getRecipePower(order.recipeId)} MW, ` +
+          `${getGridMw(state) - getPowerInUse(state)} MW free until a batch finishes`;
+      } else {
+        status.textContent = "Starting the next batch";
+      }
       box.classList.add("waiting");
       box.classList.remove("busy");
     }

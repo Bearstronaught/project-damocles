@@ -620,9 +620,41 @@
             <h2 class="panel-title"><span class="flow-step">1</span>Refinery</h2>
             <span class="panel-tag" id="refinery-tag"></span>
           </div>
-          <p class="flow-note">Ore from the hold → metal</p>
+          <p class="flow-note">Ore from the hold → metal, burning deuterium</p>
           <!-- While the refinery is closed, this says when it opens -->
           <p class="price-note" id="refinery-note"></p>
+          <!-- The Isotope plant: makes the refinery's fuel (deuterium)
+               from ice. Hidden until the refinery opens (fuel.js).
+               Filled in by ui.js (buildFuel / renderFuel). -->
+          <div class="refine-slot fuel-box" id="fuel-box" hidden>
+            <div class="card-header">
+              <span class="card-name">Isotope plant</span>
+              <span class="card-sub" id="plant-tag"></span>
+            </div>
+            <div class="progress"><div class="progress-fill refine-fill" id="plant-bar"></div></div>
+            <div class="ship-status" id="plant-status"></div>
+            <div class="ship-specs" id="plant-specs"></div>
+            <div class="ship-specs" id="fuel-stock"></div>
+            <div class="order-form">
+              <button class="btn" id="plant-toggle">Switch off</button>
+            </div>
+            <div class="order-form">
+              <label class="dest-select-row">
+                <span class="dest-label">Drive reserve</span>
+                <input class="batch-input" type="number" min="0" step="1" value="0" id="reserve-input"
+                       title="Deuterium the refinery leaves alone, kept for torch drives">
+              </label>
+              <button class="btn" id="reserve-button">Set</button>
+            </div>
+            <div class="order-form">
+              <label class="dest-select-row">
+                <span class="dest-label">Buy fuel</span>
+                <input class="batch-input" type="number" min="1" step="1" value="100" id="buy-fuel-input">
+              </label>
+              <button class="btn" id="buy-fuel-button">Buy from the Ledger</button>
+            </div>
+            <div class="order-message" id="fuel-message" role="status"></div>
+          </div>
           <div id="refinery-slots" class="slot-grid"></div>
         </div>
 
