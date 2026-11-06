@@ -43,6 +43,8 @@ import { canBuyIndustryUpgrade, buyIndustryUpgrade, isOwned } from "../js/upgrad
 import { getCommandFree } from "../js/command.js";
 import { getCharter } from "../js/contracts.js";
 import { setRecipe, getRefineJob, getSlotCount, isRecipeUnlocked } from "../js/refinery.js";
+import { getPlantJob } from "../js/fuel.js";
+import { ISOTOPE_PLANT } from "../data/content.js";
 import {
   isWorkshopOpen, getWorkshopSlotCount, getWorkshopJob, getQueueLimit,
   isWorkshopRecipeUnlocked, hasWorkshopInputs, addOrder, getMaxOrderBatches,
@@ -150,6 +152,14 @@ export function refineryOreNeeds(state) {
       needs[oreId] = (needs[oreId] || 0) + 2 * tonnes;
     }
   }
+  // The Isotope plant's ice counts too (fuel, 6 Nov): two batches,
+  // kept like ore. So barges go to the Ice moon when it runs short,
+  // and the plant's ice is never sold out from under it.
+  if (getPlantJob(state)) {
+    for (const [oreId, tonnes] of Object.entries(ISOTOPE_PLANT.inputs)) {
+      needs[oreId] = (needs[oreId] || 0) + 2 * tonnes;
+    }
+  }
   return needs;
 }
 
@@ -176,7 +186,10 @@ export function chooseMiningField(state, ship) {
       const job = getJobForShip(state, other.id);
       return job && job.type === "mining" && FIELDS[job.fieldId] && FIELDS[job.fieldId].yields === oreId;
     }).length;
-    if (incoming >= 2) continue;                               // two barges on it is plenty
+    // Two barges on an ore is plenty; the Isotope plant's ice gets up
+    // to four small ships (the 6 Nov fuel trial found ice needs 3 to 4
+    // Prospectors to keep the plant fed).
+    if (incoming >= (oreId === "ice" ? 4 : 2)) continue;
     // Large hulls stay on the field kept for their size (Dan, 5 Nov).
     // A Deep-core barge on a belt earns a quarter of the Mining XP and
     // far less money; before this fix the active player parked 2 of its
@@ -513,10 +526,14 @@ export function runRefinery(state, keep, now) {
   const fullness = (metal) => (state.inventory[metal] || 0) / Math.max(1, keep[metal] || 0);
   const otherMetals = Object.keys(RECIPES).filter((metal) => metal !== "iron_bar" && canMake(metal) && (keep[metal] || 0) > 0);
 
+  // First decide WHAT the free slots should make (one recipe per
+  // slot), then hand them out in fuel order (below).
+  const wanted = [];
   for (let slot = 0; slot < getSlotCount(state); slot++) {
     const current = getRefineJob(state, slot);
-    let recipe = firstSlot;
-    if (slot > 0) {
+    if (current && current.toll !== undefined) continue;     // lent to a client
+    let recipe = wanted.length === 0 ? firstSlot : null;
+    if (wanted.length > 0) {
       // Keep the current recipe unless another metal is clearly
       // emptier, so slots don't flip back and forth every minute
       // (Only a metal that's actually SHORT counts: below what's
@@ -535,7 +552,27 @@ export function runRefinery(state, keep, now) {
       // useful meanwhile.
       if (!hasOreFor(state, recipe)) recipe = bestXpRecipe(state, canMake) || recipe;
     }
-    if (current && (current.recipeId === recipe || current.toll !== undefined)) continue;
+    wanted.push(recipe);
+  }
+
+  // FUEL FIRST CALL (6 Nov): the game gives deuterium to the lowest
+  // slot first, so the player lines the slots up by Refining XP per
+  // tonne of fuel, best first (iridium 7.5, steel 6, nickel 5, iron
+  // 4). When the plant can't keep up, iridium keeps running and the
+  // cheap metals wait. (Found in the 6 Nov fuel trial: without this
+  // the player burned all its fuel on workshop metals and never
+  // smelted iridium.)
+  const perFuelTonne = (recipeId) => RECIPES[recipeId].xp / Math.max(1, RECIPES[recipeId].fuel || 0);
+  wanted.sort((a, b) => perFuelTonne(b) - perFuelTonne(a));
+
+  // Hand the sorted recipes out to the slots that aren't lent to a
+  // client, in order.
+  let next = 0;
+  for (let slot = 0; slot < getSlotCount(state); slot++) {
+    const current = getRefineJob(state, slot);
+    if (current && current.toll !== undefined) continue;     // lent out: leave it
+    const recipe = wanted[next++];
+    if (!recipe || (current && current.recipeId === recipe)) continue;
     if (setRecipe(state, slot, recipe, now)) {
       lines.push(`refinery slot ${slot + 1} set to ${RECIPES[recipe].name.toLowerCase()}`);
     }

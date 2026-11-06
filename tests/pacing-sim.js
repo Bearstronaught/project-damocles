@@ -157,6 +157,18 @@ export function simulate(hours, untilMiningLevel, hourly = null, explore = true,
         freePoints: getCommandFree(state),
         commandUpgrades: state.commandUpgrades,   // how many of the 10 are bought
         miningXp: state.skills.mining.xp,         // for the long-run report (--weeks)
+        // Added 6 Nov (fuel): every industry skill's XP, for the 99
+        // projections, and the fuel picture
+        xp: {
+          mining: state.skills.mining.xp,
+          refining: state.skills.refining.xp,
+          manufacturing: state.skills.manufacturing.xp,
+        },
+        fuel: {
+          stock: state.inventory.deuterium || 0,              // deuterium in the hold
+          made: state.stats.refined.deuterium || 0,           // made by the plant so far
+          iridium: state.stats.refined.iridium_bar || 0,      // iridium bars smelted so far
+        },
         credits: state.credits,
         blockedBy: check.ok ? "nothing" : check.reason,
         // Added 4 Nov, so the long run shows every skill and the fleet mix
@@ -534,13 +546,16 @@ function printWeeks(weeks, explore, surveyDelay, realistic, casual) {
   // Fleet: Prospectors / Excavators / Deep-core barges / Couriers.
   // cr per hour is the last hour of that day: sales at Anvil,
   // Courier sales at Last Post, and contracts.
-  console.log("day | Min Ref Mfg Trd Exp | cr per hour | fleet P/E/D/C/H | cmd upg | credits banked");
+  console.log("day | Min Ref Mfg Trd Exp | cr per hour | fleet P/E/D/C/H | cmd upg | credits banked | fuel t | made/day | Ir bars");
+  let lastMade = 0;   // the plant's running total at the previous day
   for (const d of days) {
     const lv = (n) => String(n).padStart(3);
     console.log(`${String(d.hour / 24).padStart(3)} | ${lv(levelFor(d.miningXp))} ${lv(d.levels.refining)} ` +
       `${lv(d.levels.manufacturing)} ${lv(d.levels.trade)} ${lv(d.levels.exploration)} | ` +
       `${cr(d.earned).padStart(11)} | ${`${d.fleet.prospector}/${d.fleet.excavator}/${d.fleet.deepCore}/${d.fleet.courier}/${d.fleet.hauler}`.padStart(15)} | ` +
-      `${String(d.commandUpgrades).padStart(7)} | ${cr(d.credits).padStart(14)}`);
+      `${String(d.commandUpgrades).padStart(7)} | ${cr(d.credits).padStart(14)} | ` +
+      `${cr(d.fuel.stock).padStart(6)} | ${cr(d.fuel.made - lastMade).padStart(8)} | ${cr(d.fuel.iridium).padStart(7)}`);
+    lastMade = d.fuel.made;
   }
 
   // When would Mining 99 land? Take the Mining XP earned per day over
@@ -553,4 +568,15 @@ function printWeeks(weeks, explore, surveyDelay, realistic, casual) {
   const daysTo99 = days.length + Math.max(0, XP_TABLE[99] - last.miningXp) / perDay;
   console.log(`\nMining XP per day over the second half: ${cr(perDay)}`);
   console.log(`Mining 99 would land on about day ${Math.round(daysTo99)} (week ${(daysTo99 / 7).toFixed(1)})`);
+
+  // The same straight-line projection for Refining and
+  // Manufacturing (added 6 Nov, for the fuel trial): the agreed
+  // order is Mining first, then Refining about 2 weeks later, then
+  // Manufacturing.
+  for (const skillId of ["refining", "manufacturing"]) {
+    const skillPerDay = (last.xp[skillId] - middle.xp[skillId]) / (days.length - Math.floor(days.length / 2));
+    const skillDays = days.length + Math.max(0, XP_TABLE[99] - last.xp[skillId]) / Math.max(1, skillPerDay);
+    const name = skillId[0].toUpperCase() + skillId.slice(1);
+    console.log(`${name} 99 would land on about day ${Math.round(skillDays)} (week ${(skillDays / 7).toFixed(1)}), ${cr(skillPerDay)} XP a day`);
+  }
 }
