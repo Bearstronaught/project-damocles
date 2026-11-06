@@ -39,7 +39,7 @@ export const BALANCE = {
     iron_bar: { unlockLevel: 1, inputs: { iron_ore: 60 }, output: 'iron_bar', outputAmount: 30, seconds: 60, xp: 8 },
     nickel_bar: { unlockLevel: 5, inputs: { nickel_ore: 60 }, output: 'nickel_bar', outputAmount: 30, seconds: 90, xp: 20 },
     steel: { unlockLevel: 15, inputs: { iron_ore: 60, nickel_ore: 30 }, output: 'steel', outputAmount: 45, seconds: 120, xp: 30 },
-    iridium_bar: { unlockLevel: 32, inputs: { osmiridium: 60 }, output: 'iridium_bar', outputAmount: 30, seconds: 180, xp: 80 },
+    iridium_bar: { unlockLevel: 32, inputs: { osmiridium: 60 }, output: 'iridium_bar', outputAmount: 30, seconds: 180, xp: 18 },
   },
   workshopRecipes: {
     hull_plating: { unlockLevel: 1, inputs: { iron_bar: 30 }, output: 'hull_plating', outputAmount: 30, seconds: 90, xp: 12 },

@@ -4431,6 +4431,14 @@ test("Hardness: the deep core's 0.5 doubles the drilling time, and only the dril
   for (const fieldId of ["inner_belt", "outer_belt", "ice_moon"]) assert.equal(FIELDS[fieldId].hardness, 1);
 });
 
+test("Iridium bars give 18 Refining XP a batch, so Refining 99 lands after Mining 99", () => {
+  // Why: at 80 XP the simulator put Refining 99 around week 8, far
+  // ahead of Mining (about week 22-24), the reverse of the agreed
+  // skill order. Dan chose 18 on 6 Nov (20 put them level, 15 about
+  // 4 weeks apart), aiming for Refining about 2 weeks after Mining.
+  assert.equal(RECIPES.iridium_bar.xp, 18);
+});
+
 test("A Deep-core barge brings home osmiridium, and iridium bars are smelted from it", () => {
   // Why: the new ore and its recipe have to join up, or the barge's
   // haul has nowhere to go but the market.
