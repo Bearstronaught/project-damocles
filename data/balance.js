@@ -20,6 +20,8 @@ export const BALANCE = {
     ice: { sellPrice: 15, hubPrice: 24 },
     osmiridium: { sellPrice: 59, hubPrice: 94 },
     iridium_bar: { sellPrice: 165, hubPrice: 264 },
+    servo_actuator: { sellPrice: 145, hubPrice: 232 },
+    pressure_housing: { sellPrice: 161, hubPrice: 257 },
   },
   ships: {
     prospector: { role: 'mining', size: 'small', skill: 'mining', unlockLevel: 1, cost: 5000, cargoCapacity: 120, miningRate: 120, speed: 1 },
@@ -45,8 +47,10 @@ export const BALANCE = {
     hull_plating: { unlockLevel: 1, inputs: { iron_bar: 30 }, output: 'hull_plating', outputAmount: 30, seconds: 90, xp: 12 },
     wiring_coils: { unlockLevel: 5, inputs: { nickel_bar: 30 }, output: 'wiring_coils', outputAmount: 30, seconds: 120, xp: 20 },
     structural_frames: { unlockLevel: 10, inputs: { steel: 30 }, output: 'structural_frames', outputAmount: 30, seconds: 150, xp: 30 },
-    cargo_pod: { unlockLevel: 15, inputs: { hull_plating: 40, structural_frames: 20 }, output: 'cargo_pod', outputAmount: 60, seconds: 240, xp: 55 },
-    thruster_assembly: { unlockLevel: 20, inputs: { structural_frames: 30, wiring_coils: 30 }, output: 'thruster_assembly', outputAmount: 60, seconds: 300, xp: 80 },
+    cargo_pod: { unlockLevel: 15, inputs: { hull_plating: 40, structural_frames: 20 }, output: 'cargo_pod', outputAmount: 60, seconds: 240, xp: 48 },
+    thruster_assembly: { unlockLevel: 20, inputs: { structural_frames: 30, wiring_coils: 30 }, output: 'thruster_assembly', outputAmount: 60, seconds: 300, xp: 60 },
+    servo_actuator: { unlockLevel: 38, inputs: { thruster_assembly: 20, wiring_coils: 10, iridium_bar: 30 }, output: 'servo_actuator', outputAmount: 60, seconds: 600, xp: 132 },
+    pressure_housing: { unlockLevel: 45, inputs: { structural_frames: 15, hull_plating: 5, iridium_bar: 40 }, output: 'pressure_housing', outputAmount: 60, seconds: 660, xp: 150 },
   },
   upgrades: {
     furnace_lining_1: { building: 'refinery', skill: 'refining', level: 8, requires: null, costs: { hull_plating: 20 }, credits: 15000, effect: 'refineSpeed', value: 0.1 },

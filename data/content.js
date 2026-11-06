@@ -120,6 +120,20 @@ export const ITEMS = {
     group: "part",
     ...BALANCE.items.thruster_assembly,
   },
+  // Precision parts (Dan, 6 Nov): the workshop's top tier, made
+  // from assemblies plus iridium bars, so Manufacturing's best XP
+  // waits on what Refining makes. They will pay for Mk IV ship
+  // parts once those are built; for now they sell.
+  servo_actuator: {
+    name: "Servo actuators",
+    group: "part",
+    ...BALANCE.items.servo_actuator,
+  },
+  pressure_housing: {
+    name: "Pressure housings",
+    group: "part",
+    ...BALANCE.items.pressure_housing,
+  },
   // Found, not made: your Pathfinder brings it back from the
   // alien wreck and deep scans (see SURVEY_TARGETS below). Worth
   // a lot per tonne; later it will feed Research.
@@ -486,6 +500,20 @@ export const WORKSHOP_RECIPES = {
   thruster_assembly: {
     name: "Thruster assemblies",
     ...BALANCE.workshopRecipes.thruster_assembly,
+  },
+  // Precision parts: three inputs each, one of them iridium bars.
+  //   Servo actuators    Manufacturing 38: thrusters + coils + iridium
+  //   Pressure housings  Manufacturing 45: frames + plating + more iridium
+  // Each earns only a little more XP per second than the assemblies
+  // (about 0.22 and 0.23 against 0.20 at level 1), so they lead
+  // without speeding Manufacturing up (Dan chose option A, 6 Nov).
+  servo_actuator: {
+    name: "Servo actuators",
+    ...BALANCE.workshopRecipes.servo_actuator,
+  },
+  pressure_housing: {
+    name: "Pressure housings",
+    ...BALANCE.workshopRecipes.pressure_housing,
   },
 };
 

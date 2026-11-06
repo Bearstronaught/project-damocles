@@ -331,7 +331,7 @@ export function freighterValuePerHour(state, typeId) {
 // -------------------------------------------------------------
 const SAVE_LEVELS_EARLY = 3;
 
-export function stockToKeep(state) {
+export function stockToKeep(state, purchasesOnly = false) {
   const keep = {};
   const add = (costs) => {
     for (const [itemId, tonnes] of Object.entries(costs)) {
@@ -356,7 +356,7 @@ export function stockToKeep(state) {
   //   e.g. hull plating takes 30 t of iron bars a batch -> keep 60 t
   // (Worked out separately, then added on top of the bars saved
   // for ship parts, so the two don't eat into each other.)
-  if (isWorkshopOpen(state)) {
+  if (isWorkshopOpen(state) && !purchasesOnly) {
     const feed = {};
     for (const [recipeId, recipe] of Object.entries(WORKSHOP_RECIPES)) {
       if (!isWorkshopRecipeUnlocked(state, recipeId)) continue;
@@ -381,7 +381,7 @@ export function stockToKeep(state) {
 
   // Ore for the refinery: two batches of whatever it's smelting,
   // so ore isn't sold the minute before a batch wants it
-  add(refineryOreNeeds(state));
+  if (!purchasesOnly) add(refineryOreNeeds(state));
 
   // Station upgrades (refinery and workshop) not owned yet whose
   // level is close, and whose earlier tier is owned
@@ -604,7 +604,7 @@ export function runWorkshop(state, keep, now, away = false) {
   // the hold and not promised to another slot's queue)?
   // ("available" is worked out further down, before this is used.)
   const canStart = (recipeId) => Object.entries(WORKSHOP_RECIPES[recipeId].inputs)
-    .every(([inputId, tonnes]) => available(inputId) >= tonnes);
+    .every(([inputId, tonnes]) => spare(recipeId, inputId) >= tonnes);
 
   // A recipe that's makeable now, or (one step down) the input
   // it's missing, or null
@@ -655,6 +655,20 @@ export function runWorkshop(state, keep, now, away = false) {
   }
   const available = (itemId) => (state.inventory[itemId] || 0) - (promised[itemId] || 0);
 
+  // Goods set aside for the next purchases (ship parts, hulls,
+  // station upgrades), not the workshop's own feed.
+  //   e.g. 300 t of thruster assemblies saved for Furnace lining III
+  const reserved = stockToKeep(state, true);
+
+  // Precision parts (servo actuators, pressure housings, 6 Nov) are
+  // made from goods the player also saves for purchases: assemblies
+  // for station upgrades, iridium bars for barge parts. A real player
+  // doesn't melt down what it's saving to make a product it only wants
+  // for XP, so these recipes only use stock above what's reserved.
+  // (Kept to the iridium recipes so the early game plays as before.)
+  const usesIridium = (recipeId) => (WORKSHOP_RECIPES[recipeId].inputs.iridium_bar || 0) > 0;
+  const spare = (recipeId, itemId) => available(itemId) - (usesIridium(recipeId) ? (reserved[itemId] || 0) : 0);
+
   for (let slot = 0; slot < getWorkshopSlotCount(state); slot++) {
     const job = getWorkshopJob(state, slot);
     const queued = job ? job.orders.length : 0;
@@ -678,7 +692,7 @@ export function runWorkshop(state, keep, now, away = false) {
     //   e.g. 70 t of steel available, frames take 30 t a batch -> 2 batches
     let affordable = Infinity;
     for (const [inputId, tonnes] of Object.entries(WORKSHOP_RECIPES[choice].inputs)) {
-      affordable = Math.min(affordable, Math.floor(available(inputId) / tonnes));
+      affordable = Math.min(affordable, Math.floor(spare(choice, inputId) / tonnes));
     }
     const batches = Math.min(away ? getMaxOrderBatches(state) : BATCHES_PER_ORDER, getMaxOrderBatches(state), affordable);
     if (batches < 1) continue;

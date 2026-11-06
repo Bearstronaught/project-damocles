@@ -5277,6 +5277,69 @@ test("Hauler: has a drawing with hold and drive hardpoints", () => {
   assert.ok((art.match(/class="accent"/g) || []).length >= 8);   // four rows of pods, both sides
 });
 
+// =============================================================
+// PRECISION PARTS (Dan, 6 Nov, option A)
+// =============================================================
+
+// XP per second at Manufacturing level 1, e.g. thrusters 60 XP / 300 s = 0.2
+const xpPerSecond = (recipeId) => WORKSHOP_RECIPES[recipeId].xp / WORKSHOP_RECIPES[recipeId].seconds;
+
+test("Precision parts: servo actuators at Manufacturing 38, pressure housings at 45", () => {
+  // Why: the levels proposed on the Unlock ladder on 4 Nov.
+  assert.equal(isWorkshopRecipeUnlocked(gameWithWorkshop(37), "servo_actuator"), false);
+  assert.equal(isWorkshopRecipeUnlocked(gameWithWorkshop(38), "servo_actuator"), true);
+  assert.equal(isWorkshopRecipeUnlocked(gameWithWorkshop(44), "pressure_housing"), false);
+  assert.equal(isWorkshopRecipeUnlocked(gameWithWorkshop(45), "pressure_housing"), true);
+});
+
+test("Precision parts: both take iridium bars, so their XP waits on Refining", () => {
+  // Why: the whole point of option B/A. If someone drops the iridium,
+  // Manufacturing's best recipe no longer depends on the skill before it.
+  assert.ok(WORKSHOP_RECIPES.servo_actuator.inputs.iridium_bar > 0);
+  assert.ok(WORKSHOP_RECIPES.pressure_housing.inputs.iridium_bar > 0);
+  // Housings use more iridium than servos (40 t against 30 t)
+  assert.ok(WORKSHOP_RECIPES.pressure_housing.inputs.iridium_bar > WORKSHOP_RECIPES.servo_actuator.inputs.iridium_bar);
+});
+
+test("Precision parts: a servo batch takes all three inputs and keeps the tonnage", () => {
+  const state = gameWithWorkshop(38);
+  state.inventory.thruster_assembly = 20;
+  state.inventory.wiring_coils = 10;
+  state.inventory.iridium_bar = 30;
+  assert.equal(addOrder(state, 0, "servo_actuator", 1, START).ok, true);
+  // All three inputs leave the hold the moment the batch starts
+  assert.equal(state.inventory.thruster_assembly, 0);
+  assert.equal(state.inventory.wiring_coils, 0);
+  assert.equal(state.inventory.iridium_bar, 0);
+  advanceTo(state, START + getWorkshopBatchMs(state, "servo_actuator"));
+  assert.equal(state.inventory.servo_actuator, 60);         // 20 + 10 + 30 t in, 60 t out
+  assert.equal(state.skills.manufacturing.xp, XP_TABLE[38] + 132);
+});
+
+test("Precision parts: assemblies earn no more XP a second than frames, precision parts just above", () => {
+  // Why: Manufacturing reached 99 about week 17, 6 weeks before Mining,
+  // because thruster assemblies (0.27 XP/s) carried it. Option A: the
+  // top of the ladder goes flat at frames' rate, and precision parts
+  // lead by a little, never by a lot, or Manufacturing speeds up again.
+  const frames = xpPerSecond("structural_frames");                       // 0.20
+  assert.ok(xpPerSecond("cargo_pod") <= frames + 1e-9);
+  assert.ok(xpPerSecond("thruster_assembly") <= frames + 1e-9);
+  assert.ok(xpPerSecond("servo_actuator") > xpPerSecond("thruster_assembly"));
+  assert.ok(xpPerSecond("pressure_housing") > xpPerSecond("servo_actuator"));
+  assert.ok(xpPerSecond("pressure_housing") < frames * 1.2);              // a small lead only
+});
+
+test("Precision parts: each sells for about 35% more than what goes in", () => {
+  // Why: the agreed rule for every workshop product (29 Oct).
+  for (const recipeId of ["servo_actuator", "pressure_housing"]) {
+    const recipe = WORKSHOP_RECIPES[recipeId];
+    let inputValue = 0;
+    for (const [itemId, tonnes] of Object.entries(recipe.inputs)) inputValue += tonnes * ITEMS[itemId].sellPrice;
+    const gain = recipe.outputAmount * ITEMS[recipe.output].sellPrice / inputValue - 1;
+    assert.ok(gain > 0.33 && gain < 0.37, `${recipeId} adds ${(gain * 100).toFixed(1)}%`);
+  }
+});
+
 // -------------------------------------------------------------
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) {
